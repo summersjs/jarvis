@@ -5,7 +5,7 @@ from backend.logic.five_three_one_logic import PowerliftingEngine
 from backend.logic.fbi_logic import FBIPFTScorer
 from backend.db.supabase_client import supabase
 from pydantic import BaseModel
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from backend.integrations.google_calendar import get_next_event_by_tag, get_next_event, get_calendar_service
 from zoneinfo import ZoneInfo
 
@@ -17,6 +17,7 @@ app.add_middleware(
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "https://jarvis.schoolyardshowdown.com",
+        "https://jarvis-git-master-johnfsummers-9948s-projects.vercel.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -24,6 +25,16 @@ app.add_middleware(
 )
 
 LOCAL_TZ = ZoneInfo("America/New_York")
+
+WEEKLY_TEMPLATE = {
+    0: "deadlift", # Monday
+    1: None, # Tuesday
+    2: None,    # Wednesday - rest or optional work
+    3: "bench", # Thursday
+    4: "squat", # Friday
+    5: None,    # Saturday - rest or optional work
+    6: "overhead_press"     # Sunday - rest or optional work
+}
 
 
 def parse_google_datetime(value: str | None) -> datetime | None:
@@ -251,6 +262,146 @@ def build_work_sets(training_max: float, week: int) -> dict:
 def estimate_one_rep_max(weight: float, reps: int) -> float:
     return weight * (1 + reps / 30)
 
+def minimum_required_reps_for_week(week: int) -> int:
+    if week == 1:
+        return 5
+    if week == 2:
+        return 3
+    if week == 3:
+        return 1
+    if week == 4:
+        return 5
+    return 1
+
+def get_unique_completed_workouts(user_id: str, days_back: int = 30) -> list[dict]:
+    response = (
+        supabase
+        .table("workouts")
+        .select("*")
+        .eq("user_id", user_id)
+        .order("created_at", desc=False)
+        .execute()
+    )
+
+    rows = response.data or []
+    seen = set()
+    unique = []
+
+    for row in rows:
+        lift = row.get("lift")
+        created_at = row.get("created_at")
+        notes = (row.get("notes") or "").lower()
+
+        if not lift or not created_at:
+            continue
+
+        dt = datetime.fromisoformat(created_at.replace("Z", "+00:00")).astimezone(LOCAL_TZ)
+        local_date = dt.date().isoformat()
+
+        key = (lift, local_date)
+
+        if key not in seen and (
+            "set 3" in notes or
+            "cycle" in notes or
+            "top set" in notes or
+            "voice log" in notes
+        ):
+            seen.add(key)
+            unique.append({
+                "lift": lift,
+                "date": local_date,
+                "created_at": created_at,
+                "notes": notes,
+            })
+
+    return unique
+
+def check_for_pr(user_id: str, lift: str, weight: float, reps: int) -> dict:
+    response = (
+        supabase
+        .table("workouts")
+        .select("weight,reps,notes,lift")
+        .eq("user_id", user_id)
+        .eq("lift", lift)
+        .execute()
+    )
+
+    history = response.data or []
+    current_est_1rm = estimate_one_rep_max(weight, reps)
+
+    best_weight = 0
+    best_est_1rm = 0
+
+    for row in history:
+        row_weight = float(row.get("weight", 0))
+        row_reps = int(row.get("reps", 0))
+        notes = (row.get("notes") or "").lower()
+
+        # Ignore deload rows for PR purposes
+        if "week 4" in notes:
+            continue
+
+        if row_weight > best_weight:
+            best_weight = row_weight
+
+        row_est_1rm = estimate_one_rep_max(row_weight, row_reps)
+        if row_est_1rm > best_est_1rm:
+            best_est_1rm = row_est_1rm
+
+    return {
+        "is_weight_pr": weight > best_weight,
+        "is_est_1rm_pr": current_est_1rm > best_est_1rm,
+        "current_est_1rm": round(current_est_1rm),
+        "best_weight": best_weight,
+        "best_est_1rm": round(best_est_1rm),
+    }
+
+def get_scheduled_lift_for_date(date_obj) -> str | None:
+    return WEEKLY_TEMPLATE.get(date_obj.weekday())
+
+def get_next_scheduled_lift_after(date_obj):
+    for offset in range(1, 8):
+        check_date = date_obj + timedelta(days=offset)
+        lift = get_scheduled_lift_for_date(check_date)
+        if lift:
+            return {
+                "date": check_date.isoformat(),
+                "lift": lift,
+                "weekday": check_date.strftime("%A")
+            }
+    return None
+
+def get_due_lifts(user_id: str, lookback_days: int = 14) -> list[dict]:
+    today = datetime.now(LOCAL_TZ).date()
+    start_date = today - timedelta(days=lookback_days)
+
+    completed = get_unique_completed_workouts(user_id, days_back=lookback_days)
+    due_queue = []
+
+    current = start_date
+    while current <= today:
+        scheduled_lift = get_scheduled_lift_for_date(current)
+
+        if scheduled_lift:
+            due_queue.append({
+                "date": current.isoformat(),
+                "lift": scheduled_lift,
+            })
+
+        current += timedelta(days=1)
+
+    # Reconcile completions against due queue in order
+    for completed_item in completed:
+        completed_lift = completed_item["lift"]
+
+        for i, due in enumerate(due_queue):
+            if due["lift"] == completed_lift:
+                due_queue.pop(i)
+                break
+
+    return due_queue
+
+
 def get_shift_brief() -> str:
     # Placeholder until we connect actual shift data
     now = datetime.now()
@@ -274,6 +425,186 @@ def get_pr_prediction(lift: str, set_3_weight: float, target_reps: str, training
         return f"8 reps on Set 3 projects about a {round(predicted_pr)} lb estimated 1RM."
     return f"Push the final set hard. TM is {round(training_max)}."
 
+def get_unique_completed_workouts(user_id: str, days_back: int = 30) -> list[dict]:
+    response = (
+        supabase
+        .table("workouts")
+        .select("*")
+        .eq("user_id", user_id)
+        .order("created_at", desc=False)
+        .execute()
+    )
+
+    rows = response.data or []
+    seen = set()
+    unique = []
+
+    for row in rows:
+        lift = row.get("lift")
+        created_at = row.get("created_at")
+        notes = (row.get("notes") or "").lower()
+
+        if not lift or not created_at:
+            continue
+
+        # Convert created_at to local date
+        dt = datetime.fromisoformat(created_at.replace("Z", "+00:00")).astimezone(LOCAL_TZ)
+        local_date = dt.date().isoformat()
+
+        key = (lift, local_date)
+
+        # Only count real workout completions / top sets / voice logs
+        if key not in seen and (
+            "set 3" in notes or
+            "cycle" in notes or
+            "top set" in notes or
+            "voice log" in notes
+        ):
+            seen.add(key)
+            unique.append({
+                "lift": lift,
+                "date": local_date,
+                "created_at": created_at,
+                "notes": notes,
+            })
+
+    return unique
+
+
+def check_for_pr(user_id: str, lift: str, weight: float, reps: int) -> dict:
+    response = (
+        supabase
+        .table("workouts")
+        .select("weight,reps,notes,lift")
+        .eq("user_id", user_id)
+        .eq("lift", lift)
+        .execute()
+    )
+
+    history = response.data or []
+
+    current_est_1rm = estimate_one_rep_max(weight, reps)
+
+    best_weight = 0
+    best_est_1rm = 0
+
+    for row in history:
+        row_weight = float(row.get("weight", 0))
+        row_reps = int(row.get("reps", 0))
+        notes = (row.get("notes") or "").lower()
+
+        # Ignore deload if you want
+        if "week 4" in notes:
+            continue
+
+        if row_weight > best_weight:
+            best_weight = row_weight
+
+        row_est_1rm = estimate_one_rep_max(row_weight, row_reps)
+        if row_est_1rm > best_est_1rm:
+            best_est_1rm = row_est_1rm
+
+    return {
+        "is_weight_pr": weight > best_weight,
+        "is_est_1rm_pr": current_est_1rm > best_est_1rm,
+        "current_est_1rm": round(current_est_1rm),
+        "best_weight": best_weight,
+        "best_est_1rm": round(best_est_1rm),
+    }
+
+def get_scheduled_lift_for_date(date_obj) -> str | None:
+    return WEEKLY_TEMPLATE.get(date_obj.weekday())
+
+
+def get_due_lifts(user_id: str, lookback_days: int = 14) -> list[dict]:
+    today = datetime.now(LOCAL_TZ).date()
+    start_date = today - timedelta(days=lookback_days)
+
+    completed = get_unique_completed_workouts(user_id, days_back=lookback_days)
+
+    completed_by_lift_and_date = {(row["lift"], row["date"]) for row in completed}
+
+    due_queue = []
+
+    current = start_date
+    while current <= today:
+        scheduled_lift = get_scheduled_lift_for_date(current)
+
+        if scheduled_lift:
+            due_queue.append({
+                "date": current.isoformat(),
+                "lift": scheduled_lift,
+            })
+
+        current += timedelta(days=1)
+
+    # Reconcile completions against due queue in order
+    for completed_item in completed:
+        completed_lift = completed_item["lift"]
+
+        for i, due in enumerate(due_queue):
+            if due["lift"] == completed_lift:
+                due_queue.pop(i)
+                break
+
+    return due_queue
+
+
+def get_next_workout_logic(user_id: str) -> dict:
+    today = datetime.now(LOCAL_TZ).date()
+    scheduled_today = get_scheduled_lift_for_date(today)
+    due_queue = get_due_lifts(user_id)
+    next_scheduled = get_next_scheduled_lift_after(today)
+
+    if due_queue:
+        next_due = due_queue[0]
+        actual_next = next_due["lift"]
+        missed_date = next_due["date"]
+
+        if scheduled_today and actual_next != scheduled_today:
+            spoken = (
+                f"It's supposed to be {format_lift_name(scheduled_today)} day, "
+                f"but you missed {format_lift_name(actual_next)} on {missed_date}. "
+                f"So do {format_lift_name(actual_next)}, knucklehead."
+            )
+        elif scheduled_today is None:
+            spoken = (
+                f"Nothing is scheduled for today, "
+                f"but you still owe {format_lift_name(actual_next)} from {missed_date}."
+            )
+        else:
+            spoken = f"Your next workout is {format_lift_name(actual_next)}."
+
+        return {
+            "scheduled_today": scheduled_today,
+            "actual_next": actual_next,
+            "due_queue": due_queue,
+            "next_scheduled": next_scheduled,
+            "spoken_response": spoken,
+        }
+
+    if scheduled_today:
+        spoken = f"Today's scheduled workout is {format_lift_name(scheduled_today)}."
+        actual_next = scheduled_today
+    else:
+        if next_scheduled:
+            spoken = (
+                f"Nothing is scheduled for today. "
+                f"Your next scheduled workout is {format_lift_name(next_scheduled['lift'])} "
+                f"on {next_scheduled['weekday']}."
+            )
+            actual_next = next_scheduled["lift"]
+        else:
+            spoken = "Nothing is scheduled for today, and I could not find your next workout."
+            actual_next = None
+
+    return {
+        "scheduled_today": scheduled_today,
+        "actual_next": actual_next,
+        "due_queue": due_queue,
+        "next_scheduled": next_scheduled,
+        "spoken_response": spoken,
+    }
 
 class WorkoutSetLog(BaseModel):
     set_name: str
@@ -396,9 +727,31 @@ def log_complete_workout(workout: CompleteWorkoutLog):
 
     insert_response = supabase.table("workouts").insert(rows).execute()
 
-    next_week = workout.week + 1
+    # Find top set (Set 3)
+    top_set = None
+    for item in workout.sets:
+        if item.set_name == "Set 3":
+            top_set = item
+            break
+
+    if top_set is None:
+        top_set = workout.sets[-1]
+
+    # Check PR before updating progression
+    pr_result = check_for_pr(
+        user_id=workout.user_id,
+        lift=workout.lift,
+        weight=top_set.weight,
+        reps=top_set.reps
+    )
+
+    required_reps = minimum_required_reps_for_week(workout.week)
+    hit_minimum = top_set.reps >= required_reps
+
+    next_week = workout.week
     next_cycle = workout.cycle
     new_training_max = None
+    progression_note = ""
 
     if workout.week == 4:
         next_week = 1
@@ -424,18 +777,55 @@ def log_complete_workout(workout: CompleteWorkoutLog):
                 "cycle": next_cycle,
                 "training_max": new_training_max
             }).eq("user_id", workout.user_id).eq("lift", workout.lift).execute()
+
+            progression_note = (
+                f"Deload complete. Next cycle starts at training max {round(new_training_max)}."
+            )
+        else:
+            progression_note = "Deload complete. I could not find the lift profile to update training max."
     else:
-        supabase.table("lift_profiles").update({
-            "week": next_week,
-            "cycle": next_cycle
-        }).eq("user_id", workout.user_id).eq("lift", workout.lift).execute()
+        if hit_minimum:
+            next_week = workout.week + 1
+
+            supabase.table("lift_profiles").update({
+                "week": next_week,
+                "cycle": next_cycle
+            }).eq("user_id", workout.user_id).eq("lift", workout.lift).execute()
+
+            progression_note = f"You hit the minimum reps. Advancing to week {next_week}."
+        else:
+            supabase.table("lift_profiles").update({
+                "week": workout.week,
+                "cycle": next_cycle
+            }).eq("user_id", workout.user_id).eq("lift", workout.lift).execute()
+
+            progression_note = (
+                f"You missed the minimum reps for week {workout.week}. "
+                f"Repeat this week, knucklehead."
+            )
+
+    spoken_response = f"Workout logged for {format_lift_name(workout.lift)}. {progression_note}"
+
+    if pr_result["is_weight_pr"] and pr_result["is_est_1rm_pr"]:
+        spoken_response += " New weight PR and estimated one rep max PR."
+    elif pr_result["is_weight_pr"]:
+        spoken_response += " New weight PR."
+    elif pr_result["is_est_1rm_pr"]:
+        spoken_response += (
+            f" New estimated one rep max PR. "
+            f"Estimated max {pr_result['current_est_1rm']} pounds."
+        )
 
     return {
         "message": "Workout logged successfully",
         "logged_sets": insert_response.data,
         "next_week": next_week,
         "next_cycle": next_cycle,
-        "new_training_max": new_training_max
+        "new_training_max": new_training_max,
+        "required_reps": required_reps,
+        "hit_minimum": hit_minimum,
+        "pr_result": pr_result,
+        "spoken_response": spoken_response
     }
 
 
@@ -699,3 +1089,18 @@ def today_events():
         "status": "ok",
         "spoken_response": f"You have {len(events)} events today. {joined}."
     }
+
+@app.get("/nextworkout")
+def next_workout(user_id: str = "john"):
+    try:
+        result = get_next_workout_logic(user_id)
+        return {
+            "status": "ok",
+            **result
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "spoken_response": "Sorry Daddy! I had trouble determining your next workout.",
+            "error": str(e)
+        }

@@ -65,7 +65,7 @@ type WorkoutHistoryItem = {
 };
 
 export default function Home() {
-  const API_BASE = "https:api.schoolyardshowdown.com";
+  const API_BASE = "https://api.schoolyardshowdown.com";
   const userId = "john";
 
   const [status, setStatus] = useState<StatusResponse | null>(null);

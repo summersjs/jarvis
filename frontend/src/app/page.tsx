@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 
-const API_KEY ="superlongsecretJarvisAPIkey12345z0d8dke8dh3f927";
+// const API_KEY ="superlongsecretJarvisAPIkey12345z0d8dke8dh3f927";
+const API_KEY = process.env.NEXT_PUBLIC_JARVIS_API_KEY || "";
 
 const API_HEADERS: HeadersInit = {
   "Content-Type": "application/json",

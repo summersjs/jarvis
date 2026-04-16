@@ -1,7 +1,8 @@
 from datetime import datetime
 
-from backend.services.workout_service import get_next_lift_profile, get_latest_top_set
+from backend.services.workout_service import get_next_workout_logic, get_latest_top_set
 from backend.utils.formatters import format_lift_name, round_to_nearest_5
+from backend.db.supabase_client import supabase
 
 
 def build_business_status() -> str:
@@ -19,19 +20,50 @@ def get_shift_brief() -> str:
     return "You have no shifts scheduled for today."
 
 
-def build_morning_brief(user_id: str = "john") -> dict:
-    next_lift = get_next_lift_profile(user_id)
+def get_lift_profile(user_id: str, lift: str) -> dict | None:
+    response = (
+        supabase
+        .table("lift_profiles")
+        .select("*")
+        .eq("user_id", user_id)
+        .eq("lift", lift)
+        .limit(1)
+        .execute()
+    )
 
-    if not next_lift:
+    if not response.data:
+        return None
+
+    return response.data[0]
+
+
+def build_morning_brief(user_id: str = "john") -> dict:
+    workout_logic = get_next_workout_logic(user_id)
+    lift = workout_logic.get("actual_next")
+
+    if not lift:
         return {
-            "status": "error",
-            "spoken_response": "Good morning, Daddy. I could not find your workout data."
+            "status": "ok",
+            "user_id": user_id,
+            "next_lift": None,
+            "cycle": None,
+            "week": None,
+            "training_max": None,
+            "latest_top_set": None,
+            "business_status": build_business_status(),
+            "spoken_response": (
+                f"Good morning, Daddy. "
+                f"{get_shift_brief()} "
+                f"{workout_logic.get('spoken_response', 'No workout scheduled.')} "
+                f"{build_business_status()}"
+            )
         }
 
-    lift = next_lift["lift"]
-    cycle = int(next_lift.get("cycle", 1))
-    week = int(next_lift.get("week", 1))
-    training_max = round_to_nearest_5(float(next_lift.get("training_max", 0)))
+    profile = get_lift_profile(user_id, lift)
+
+    cycle = int(profile.get("cycle", 1)) if profile else None
+    week = int(profile.get("week", 1)) if profile and profile.get("week") else None
+    training_max = round_to_nearest_5(float(profile.get("training_max", 0))) if profile else None
 
     latest_top_set = get_latest_top_set(user_id, lift)
 
@@ -53,11 +85,21 @@ def build_morning_brief(user_id: str = "john") -> dict:
     else:
         greeting = "Good evening"
 
+    workout_line = workout_logic.get("spoken_response", f"Your next workout is {format_lift_name(lift)}.")
+
+    if cycle is not None and week is not None and training_max is not None:
+        workout_details = (
+            f"{format_lift_name(lift).capitalize()} is cycle {cycle} week {week}. "
+            f"Training max {training_max} pounds."
+        )
+    else:
+        workout_details = f"Your next lift is {format_lift_name(lift)}."
+
     spoken_response = (
         f"{greeting}, Sexy Daddy. All systems operational. "
         f"{shift_line} "
-        f"Today is {format_lift_name(lift)}, cycle {cycle} week {week}. "
-        f"Training max {training_max} pounds. "
+        f"{workout_line} "
+        f"{workout_details} "
         f"{latest_line} "
         f"{business_line}"
     )
@@ -71,5 +113,6 @@ def build_morning_brief(user_id: str = "john") -> dict:
         "training_max": training_max,
         "latest_top_set": latest_top_set,
         "business_status": business_line,
+        "workout_logic": workout_logic,
         "spoken_response": spoken_response
     }

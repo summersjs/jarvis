@@ -82,7 +82,7 @@ type WorkoutHistoryItem = {
 };
 
 export default function Home() {
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL;
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
   const userId = "john";
 
   const [status, setStatus] = useState<StatusResponse | null>(null);

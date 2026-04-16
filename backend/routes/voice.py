@@ -1,10 +1,11 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from backend.core.security import verify_api_key
 from backend.db.supabase_client import supabase
 from backend.schemas.voice import VoiceLogRequest
 from backend.services.voice_service import parse_voice_log_input
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(verify_api_key)])
 
 
 @router.post("/voice/log")

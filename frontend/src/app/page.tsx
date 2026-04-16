@@ -2,6 +2,22 @@
 
 import { useState } from "react";
 
+const API_KEY ="superlongsecretJarvisAPIkey12345z0d8dke8dh3f927";
+
+const API_HEADERS: HeadersInit = {
+  "Content-Type": "application/json",
+  "x-api-key": API_KEY,
+};
+
+async function parseApiError(res: Response): Promise<string> {
+  try {
+    const data = await res.json();
+    return data.detail || data.spoken_response || data.error || `Request failed: ${res.status}`;
+  } catch {
+    return `Request failed: ${res.status}`;
+  }
+}
+
 type StatusResponse = {
   systems: string;
   brain: string;
@@ -89,25 +105,38 @@ export default function Home() {
   const [actualReps, setActualReps] = useState<Record<string, string>>({});
   const [actualWeights, setActualWeights] = useState<Record<string, string>>({});
 
-  async function loadStatus() {
-    setError("");
-    try {
-      const res = await fetch(`${API_BASE}/status`);
-      if (!res.ok) throw new Error("Failed to load status");
-      const data = await res.json();
-      setStatus(data);
-    } catch (err) {
-      console.error(err);
-      setError("Could not reach Jarvis backend.");
+async function loadStatus() {
+  setError("");
+  try {
+    const res = await fetch(`${API_BASE}/status`, {
+      headers: {
+        "x-api-key": API_KEY,
+      },
+    });
+
+    if (!res.ok) {
+      throw new Error(await parseApiError(res));
     }
+
+    const data = await res.json();
+    setStatus(data);
+  } catch (err) {
+    console.error(err);
+    setError(err instanceof Error ? err.message : "Could not reach Jarvis backend.");
   }
+}
 
   async function loadHistory(liftOverride?: string) {
     const liftToLoad = liftOverride ?? selectedLift;
 
     try {
       const res = await fetch(
-        `${API_BASE}/history/${liftToLoad}?user_id=${userId}`
+        `${API_BASE}/history/${liftToLoad}?user_id=${userId}`,
+        {
+          headers: {
+            "x-api-key": API_KEY,
+          },
+        },
       );
       if (!res.ok) throw new Error("Failed to load history");
       const data = await res.json();
@@ -127,7 +156,12 @@ export default function Home() {
 
     try {
       const res = await fetch(
-        `${API_BASE}/workout/today/${selectedLift}?user_id=${userId}`
+        `${API_BASE}/workout/today/${selectedLift}?user_id=${userId}`,
+        {
+          headers: {
+            "x-api-key": API_KEY,
+          },
+        },
       );
       if (!res.ok) throw new Error("Failed to load today's workout");
 
@@ -204,6 +238,7 @@ export default function Home() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "x-api-key": API_KEY,
         },
         body: JSON.stringify({
           user_id: userId,
@@ -251,7 +286,11 @@ export default function Home() {
 
     try {
       const url = `${API_BASE}/fbi-score?pullups=${pullups}&run_seconds=${runSeconds}&sprint_seconds=${sprintSeconds}&pushups=${pushups}`;
-      const res = await fetch(url);
+      const res = await fetch(url, {
+        headers: {
+          "x-api-key": API_KEY,
+        },
+      });
       if (!res.ok) throw new Error("Failed to load FBI score");
       const data = await res.json();
       setFbiScore(data);

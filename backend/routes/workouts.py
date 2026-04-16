@@ -1,5 +1,6 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 
+from backend.core.security import verify_api_key
 from backend.db.supabase_client import supabase
 from backend.logic.five_three_one_logic import PowerliftingEngine
 from backend.schemas.workout import CompleteWorkoutLog
@@ -13,7 +14,7 @@ from backend.services.workout_service import (
 )
 from backend.utils.formatters import format_lift_name, round_to_nearest_5
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(verify_api_key)])
 
 
 @router.get("/lifts")

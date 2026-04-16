@@ -1,5 +1,9 @@
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
+load_dotenv()  # Load environment variables from .env file
 
 from backend.routes.status import router as status_router
 from backend.routes.fbi import router as fbi_router
@@ -7,6 +11,9 @@ from backend.routes.calendar import router as calendar_router
 from backend.routes.workouts import router as workouts_router
 from backend.routes.voice import router as voice_router
 from backend.routes.briefing import router as briefing_router
+
+
+
 
 app = FastAPI()
 

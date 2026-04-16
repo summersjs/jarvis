@@ -1,11 +1,12 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from backend.core.security import verify_api_key
 from backend.services.calendar_service import (
     get_next_calendar_summary,
     get_next_work_summary,
     get_today_calendar_summary,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(verify_api_key)])
 
 
 @router.get("/calendar/next")

@@ -281,7 +281,7 @@ export default function MealPlannerPage() {
                 </p>
 
                 <p className="mt-2 text-green-300/80">
-                  {entry.recipes?.title || entry.customMealName || "Unnamed meal"}
+                  {entry.recipes?.title || entry.custom_meal_name || "Unnamed meal"}
                 </p>
 
                 {entry.notes && (

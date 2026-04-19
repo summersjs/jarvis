@@ -12,6 +12,7 @@ from backend.routes.workouts import router as workouts_router
 from backend.routes.voice import router as voice_router
 from backend.routes.briefing import router as briefing_router
 from backend.routes.recipies import router as recipies_router
+from backend.routes.meal_planner import router as meal_planner_router
 
 
 
@@ -38,3 +39,4 @@ app.include_router(workouts_router)
 app.include_router(voice_router)
 app.include_router(briefing_router)
 app.include_router(recipies_router)
+app.include_router(meal_planner_router)

@@ -1,5 +1,8 @@
 from fastapi import APIRouter, HTTPException, Depends
 
+from datetime import datetime
+from backend.core.config import LOCAL_TZ
+
 from backend.core.security import verify_api_key
 from backend.db.supabase_client import supabase
 from backend.logic.five_three_one_logic import PowerliftingEngine
@@ -214,3 +217,68 @@ def next_workout(user_id: str = "john"):
             "spoken_response": "Sorry Daddy! I had trouble determining your next workout.",
             "error": str(e)
         }
+
+@router.post("/apple/workout")
+def log_apple_workout(payload:dict):
+    workout_type = payload.get("workout_type")
+
+    if workout_type == "strength":
+        supabase.table("apple_strength_workouts").insert({
+            "user_id": payload.get("user_id"),
+            "duration": payload.get("duration"),
+            "calories": payload.get("calories"),
+            "avg_heart_rate": payload.get("heart_rate"),
+        }).execute()
+
+    return {"status": "logged"} 
+
+@router.get("/workouts/today/recap")
+def workout_recap(user_id: str = "john"):
+    today = datetime.now(LOCAL_TZ).date()
+
+    # 5/3/1 workouts
+    strength_logs = (
+        supabase.table("workouts")
+        .select("*")
+        .eq("user_id", user_id)
+        .gte("created_at", str(today))
+        .execute()
+    )
+
+    # apple strength
+    apple_strength = (
+        supabase.table("apple_strength_workouts")
+        .select("*")
+        .eq("user_id", user_id)
+        .gte("created_at", str(today))
+        .execute()
+    )
+
+    # runs
+    runs = (
+        supabase.table("apple_run_workouts")
+        .select("*")
+        .eq("user_id", user_id)
+        .gte("created_at", str(today))
+        .execute()
+    )
+
+    spoken = "Here's your workout summary. "
+
+    if strength_logs.data:
+        spoken += "You completed your strength training workout. "
+
+    if apple_strength.data:
+        spoken += f"You also did a strength session for {apple_strength.data[0]['duration_minutes']} minutes. "
+
+    if runs.data:
+        run = runs.data[0]
+        spoken += f"You ran {run['distance_miles']} miles at {run['avg_pace']} pace. "
+
+    if not (strength_logs.data or apple_strength.data or runs.data):
+        spoken += "No workouts logged today. Get moving, knucklehead."
+
+    return {
+        "status": "ok",
+        "spoken_response": spoken
+    } 

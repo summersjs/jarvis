@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 
 // const API_KEY ="superlongsecretJarvisAPIkey12345z0d8dke8dh3f927";
 const API_KEY = process.env.NEXT_PUBLIC_JARVIS_API_KEY || "";
@@ -83,6 +84,7 @@ type WorkoutHistoryItem = {
 
 export default function Home() {
   const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  //const API_BASE = process.env.NEXT_PUBLIC_API_URL;
   const userId = "john";
 
   const [status, setStatus] = useState<StatusResponse | null>(null);
@@ -319,6 +321,12 @@ async function loadStatus() {
           >
             Ping Jarvis
           </button>
+                <Link
+        href="/recipes"
+        className="mt-4 inline-block rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
+      >
+        Open Recipe Vault
+      </Link>
 
           {status && (
             <div className="mt-4 grid gap-3 md:grid-cols-4 text-sm">

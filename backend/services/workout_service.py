@@ -274,12 +274,46 @@ def get_due_lifts(user_id: str, lookback_days: int = 14) -> list[dict]:
 
     return due_queue
 
+def did_workout_today(user_id: str) -> bool:
+    today = datetime.now(LOCAL_TZ).date()
+
+    logs = (
+        supabase.table("workouts")
+        .select("*")
+        .eq("user_id", user_id)
+        .gte("created_at", str(today))
+        .execute()
+    )
+
+    return len(logs.data or []) > 0
+
 
 def get_next_workout_logic(user_id: str) -> dict:
     today = datetime.now(LOCAL_TZ).date()
     scheduled_today = get_scheduled_lift_for_date(today)
     due_queue = get_due_lifts(user_id)
     next_scheduled = get_next_scheduled_lift_after(today)
+    worked_out_today = did_workout_today(user_id)
+
+    if worked_out_today:
+        if next_scheduled:
+            return {
+                "scheduled_today": scheduled_today,
+                "actual_next": next_scheduled["lift"],
+                "due_queue": due_queue,
+                "next_scheduled": next_scheduled,
+                "spoken_response": (
+                    f"You already trained today. "
+                    f"Tomorrow is {format_lift_name(next_scheduled['lift'])}."
+                ),
+            }
+        return {
+            "scheduled_today": scheduled_today,
+            "actual_next": None,
+            "due_queue": due_queue,
+            "next_scheduled": None,
+            "spoken_response": "You already trained today.",
+        }
 
     if due_queue:
         next_due = due_queue[0]

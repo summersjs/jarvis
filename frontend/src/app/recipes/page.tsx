@@ -231,6 +231,12 @@ export default function RecipesPage() {
                 🗓️ Meal Planner
             </Link>
             <Link
+            href="/shopping"
+            className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
+            >
+            🛒 Shopping Lists
+            </Link>
+            <Link
               href="/"
               className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
             >

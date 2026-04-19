@@ -333,6 +333,12 @@ async function loadStatus() {
 >
   🗓️ Meal Planner
 </Link>
+  <Link
+    href="/shopping"
+    className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
+  >
+    🛒 Shopping Lists
+  </Link>
 
           {status && (
             <div className="mt-4 grid gap-3 md:grid-cols-4 text-sm">

@@ -15,6 +15,7 @@ from backend.services.shopping_service import (
     add_shopping_list_item,
     update_shopping_list_item,
     delete_shopping_list_item,
+    generate_shopping_list_from_meal_plan,
 )
 
 router = APIRouter(
@@ -103,3 +104,26 @@ def delete_shopping_list_item_route(item_id: str):
         "status": "ok",
         "deleted": deleted
     }
+
+@router.post("/lists/{shopping_list_id}/generate-from-meal-plan")
+def generate_from_meal_plan_route(
+    shopping_list_id: str,
+    user_id: str,
+    start_date: str,
+    end_date: str,
+    skip_pantry: bool = True,
+):
+    try:
+        items = generate_shopping_list_from_meal_plan(
+            shopping_list_id=shopping_list_id,
+            user_id=user_id,
+            start_date=start_date,
+            end_date=end_date,
+            skip_pantry=skip_pantry,
+        )
+        return {
+            "status": "ok",
+            "generated_items": items
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

@@ -30,6 +30,7 @@ class RecipeUpdate(BaseModel):
     prep_minutes: Optional[int] = None
     cook_minutes: Optional[int] = None
     is_favorite: Optional[bool] = None
+    ingredients: Optional[List[RecipeIngredientIn]] = None
 
 class RecipeIngredientUpdate(BaseModel):
     item_name: Optional[str] = None

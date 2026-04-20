@@ -73,6 +73,8 @@ def list_recipes(user_id: str, favorites_only: bool = False):
 def update_recipe(recipe_id: str, payload: RecipeUpdate):
     update_data = payload.model_dump(exclude_unset=True)
 
+    ingredients = update_data.pop("ingredients", None)
+
     response = (
         supabase
         .table("recipes")
@@ -83,6 +85,22 @@ def update_recipe(recipe_id: str, payload: RecipeUpdate):
 
     if not response.data:
         return None
+
+    if ingredients is not None:
+        supabase.table("recipe_ingredients").delete().eq("recipe_id", recipe_id).execute()
+
+        ingredient_rows = []
+        for item in ingredients:
+            ingredient_rows.append({
+                "recipe_id": recipe_id,
+                "item_name": item.get("item_name"),
+                "quantity": item.get("quantity"),
+                "category": item.get("category"),
+                "is_optional": item.get("is_optional", False),
+            })
+
+        if ingredient_rows:
+            supabase.table("recipe_ingredients").insert(ingredient_rows).execute()
 
     return get_recipe(recipe_id)
 

@@ -231,11 +231,11 @@ export default function RecipesPage() {
                 🗓️ Meal Planner
             </Link>
             <Link
-            href="/shopping"
-            className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
-            >
-            🛒 Shopping Lists
-            </Link>
+        href="/shopping"
+        className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
+        >
+        🛒 Shopping Lists
+        </Link>
             <Link
               href="/"
               className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
@@ -420,9 +420,10 @@ export default function RecipesPage() {
           )}
 
           {recipes.map((recipe) => (
-            <div
-              key={recipe.id}
-              className="rounded-xl border border-green-500/20 bg-zinc-950 p-4"
+            <Link
+                key={recipe.id}
+                href={`/recipes/${recipe.id}`}
+                className="block rounded-xl border border-green-500/20 bg-zinc-950 p-4 hover:bg-green-500/5 transition"
             >
               <div className="flex items-center justify-between">
                 <h2 className="text-xl font-semibold">{recipe.title}</h2>
@@ -457,7 +458,7 @@ export default function RecipesPage() {
                   </ul>
                 </div>
               )}
-            </div>
+            </Link>
           ))}
         </div>
       </div>

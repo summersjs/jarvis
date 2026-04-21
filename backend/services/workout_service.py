@@ -113,10 +113,20 @@ def get_latest_top_set(user_id: str, lift: str) -> dict | None:
 
     for row in rows:
         notes = (row.get("notes") or "").lower()
-        if "set 3" in notes or "top set" in notes or "pr" in notes or "voice log" in notes:
+
+        is_top_set = (
+            "set 3" in notes
+            or "top set" in notes
+            or "pr" in notes
+            or "voice log" in notes
+        )
+
+        is_deload = "week 4" in notes
+
+        if is_top_set and not is_deload:
             return row
 
-    return rows[0] if rows else None
+    return None
 
 
 def get_next_lift_profile(user_id: str) -> dict | None:
@@ -212,7 +222,16 @@ def check_for_pr(user_id: str, lift: str, weight: float, reps: int) -> dict:
         row_reps = int(row.get("reps", 0))
         notes = (row.get("notes") or "").lower()
 
-        if "week 4" in notes:
+        is_top_set = (
+            "set 3" in notes
+            or "top set" in notes
+            or "pr" in notes
+            or "voice log" in notes
+        )
+
+        is_deload = "week 4" in notes
+
+        if not is_top_set or is_deload:
             continue
 
         if row_weight > best_weight:

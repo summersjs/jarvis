@@ -260,6 +260,12 @@ async function generateFromMealPlan() {
               Recipe Vault
             </Link>
             <Link
+              href="/preferences"
+              className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
+            >
+              Favorites
+            </Link>
+            <Link
               href="/"
               className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
             >

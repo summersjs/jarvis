@@ -14,6 +14,7 @@ from backend.routes.briefing import router as briefing_router
 from backend.routes.recipies import router as recipies_router
 from backend.routes.meal_planner import router as meal_planner_router
 from backend.routes.shopping import router as shopping_router
+from backend.routes.preferences import router as preferences_router
 
 
 
@@ -42,3 +43,4 @@ app.include_router(briefing_router)
 app.include_router(recipies_router)
 app.include_router(meal_planner_router)
 app.include_router(shopping_router)
+app.include_router(preferences_router)

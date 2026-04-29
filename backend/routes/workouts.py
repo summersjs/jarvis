@@ -11,8 +11,10 @@ from backend.services.workout_service import (
     build_warmup_sets,
     build_work_sets,
     check_for_pr,
+    did_workout_today,
     get_next_workout_logic,
     get_pr_prediction,
+    get_scheduled_lift_for_date,
     minimum_required_reps_for_week,
 )
 from backend.utils.formatters import format_lift_name, round_to_nearest_5
@@ -282,3 +284,38 @@ def workout_recap(user_id: str = "john"):
         "status": "ok",
         "spoken_response": spoken
     } 
+
+@router.get("/today-status")
+def today_status(user_id: str = "john"):
+    try:
+        today = datetime.now(LOCAL_TZ).date()
+        scheduled_today = get_scheduled_lift_for_date(today)
+        worked_out_today = did_workout_today(user_id)
+
+        if worked_out_today:
+            day_type = "completed"
+            spoken_response = "You already trained today."
+        elif scheduled_today:
+            day_type = scheduled_today
+            spoken_response = f"Today is {format_lift_name(scheduled_today)} day."
+        else:
+            day_type = "rest"
+            spoken_response = "Today is a rest day."
+
+        return {
+            "status": "ok",
+            "day_type": day_type,
+            "scheduled_today": scheduled_today,
+            "worked_out_today": worked_out_today,
+            "spoken_response": spoken_response,
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "day_type": "rest",
+            "scheduled_today": None,
+            "worked_out_today": False,
+            "spoken_response": "I had trouble checking today's workout status.",
+            "error": str(e),
+        }

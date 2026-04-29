@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends
 from backend.core.security import verify_api_key
+from backend.services.workout_service import get_next_workout_logic
 
 router = APIRouter()
 
@@ -12,3 +13,4 @@ def get_status():
         "user": "John Summers Sr",
         "clearance": "Active"
     }
+

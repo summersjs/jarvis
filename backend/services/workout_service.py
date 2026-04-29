@@ -314,19 +314,35 @@ def get_next_workout_logic(user_id: str) -> dict:
     next_scheduled = get_next_scheduled_lift_after(today)
     worked_out_today = did_workout_today(user_id)
 
+    # This is for the HUD icon/card.
+    # It should show what TODAY is, not what you owe.
+    if worked_out_today:
+        day_type = "completed"
+    elif scheduled_today:
+        day_type = scheduled_today
+    else:
+        day_type = "rest"
+
+    # If you already trained today, next actual workout is the next scheduled lift.
     if worked_out_today:
         if next_scheduled:
             return {
+                "status": "ok",
+                "day_type": day_type,
                 "scheduled_today": scheduled_today,
                 "actual_next": next_scheduled["lift"],
                 "due_queue": due_queue,
                 "next_scheduled": next_scheduled,
                 "spoken_response": (
                     f"You already trained today. "
-                    f"Tomorrow is {format_lift_name(next_scheduled['lift'])}."
+                    f"Your next scheduled workout is {format_lift_name(next_scheduled['lift'])} "
+                    f"on {next_scheduled['weekday']}."
                 ),
             }
+
         return {
+            "status": "ok",
+            "day_type": day_type,
             "scheduled_today": scheduled_today,
             "actual_next": None,
             "due_queue": due_queue,
@@ -334,6 +350,7 @@ def get_next_workout_logic(user_id: str) -> dict:
             "spoken_response": "You already trained today.",
         }
 
+    # If you owe missed work, actual_next still shows what you owe.
     if due_queue:
         next_due = due_queue[0]
         actual_next = next_due["lift"]
@@ -347,13 +364,15 @@ def get_next_workout_logic(user_id: str) -> dict:
             )
         elif scheduled_today is None:
             spoken = (
-                f"Nothing is scheduled for today, "
-                f"but you still owe {format_lift_name(actual_next)} from {missed_date}."
+                f"Today is a rest day, but you still owe "
+                f"{format_lift_name(actual_next)} from {missed_date}."
             )
         else:
             spoken = f"Your next workout is {format_lift_name(actual_next)}."
 
         return {
+            "status": "ok",
+            "day_type": day_type,
             "scheduled_today": scheduled_today,
             "actual_next": actual_next,
             "due_queue": due_queue,
@@ -361,22 +380,24 @@ def get_next_workout_logic(user_id: str) -> dict:
             "spoken_response": spoken,
         }
 
+    # No missed workouts.
     if scheduled_today:
-        spoken = f"Today's scheduled workout is {format_lift_name(scheduled_today)}."
         actual_next = scheduled_today
+        spoken = f"Today's scheduled workout is {format_lift_name(scheduled_today)}."
     else:
+        actual_next = next_scheduled["lift"] if next_scheduled else None
         if next_scheduled:
             spoken = (
-                f"Nothing is scheduled for today. "
+                f"Today is a rest day. "
                 f"Your next scheduled workout is {format_lift_name(next_scheduled['lift'])} "
                 f"on {next_scheduled['weekday']}."
             )
-            actual_next = next_scheduled["lift"]
         else:
-            spoken = "Nothing is scheduled for today, and I could not find your next workout."
-            actual_next = None
+            spoken = "Today is a rest day, and I could not find your next workout."
 
     return {
+        "status": "ok",
+        "day_type": day_type,
         "scheduled_today": scheduled_today,
         "actual_next": actual_next,
         "due_queue": due_queue,

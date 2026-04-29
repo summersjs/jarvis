@@ -1,15 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 
-// const API_KEY ="superlongsecretJarvisAPIkey12345z0d8dke8dh3f927";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const API_KEY = process.env.NEXT_PUBLIC_JARVIS_API_KEY || "";
-
-const API_HEADERS: HeadersInit = {
-  "Content-Type": "application/json",
-  "x-api-key": API_KEY,
-};
 
 async function parseApiError(res: Response): Promise<string> {
   try {
@@ -57,12 +52,6 @@ type TodayWorkoutResponse = {
   warmups: WarmupSet[];
   today: Record<string, WorkoutSet>;
   pr_prediction: string;
-  all_weeks: {
-    week_1: Record<string, WorkoutSet>;
-    week_2: Record<string, WorkoutSet>;
-    week_3: Record<string, WorkoutSet>;
-    week_4: Record<string, WorkoutSet>;
-  };
 };
 
 type FBIScoreResponse = {
@@ -82,12 +71,20 @@ type WorkoutHistoryItem = {
   created_at: string;
 };
 
+type TodayStatus = {
+  status: string;
+  day_type: string;
+  scheduled_today?: string | null;
+  actual_next?: string | null;
+  spoken_response?: string;
+};
+
 export default function Home() {
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-  //const API_BASE = process.env.NEXT_PUBLIC_API_URL;
   const userId = "john";
 
   const [status, setStatus] = useState<StatusResponse | null>(null);
+  const [todayStatus, setTodayStatus] = useState<TodayStatus | null>(null);
+
   const [error, setError] = useState("");
   const [logMessage, setLogMessage] = useState("");
 
@@ -108,40 +105,91 @@ export default function Home() {
   const [actualReps, setActualReps] = useState<Record<string, string>>({});
   const [actualWeights, setActualWeights] = useState<Record<string, string>>({});
 
-async function loadStatus() {
-  setError("");
-  try {
-    const res = await fetch(`${API_BASE}/status`, {
-      headers: {
-        "x-api-key": API_KEY,
-      },
-    });
+  useEffect(() => {
+    loadTodayStatus();
+  }, []);
 
-    if (!res.ok) {
-      throw new Error(await parseApiError(res));
+  function getWorkoutIcon(dayType?: string) {
+    switch (dayType) {
+      case "bench":
+        return "🏋️‍♂️";
+      case "squat":
+        return "🏋️‍♂️";
+      case "deadlift":
+        return "💀";
+      case "overhead_press":
+        return "🏋️";
+      case "completed":
+        return "✅";
+      case "rest":
+      default:
+        return "🛏️";
     }
-
-    const data = await res.json();
-    setStatus(data);
-  } catch (err) {
-    console.error(err);
-    setError(err instanceof Error ? err.message : "Could not reach Jarvis backend.");
   }
-}
+
+  function formatWorkoutDay(dayType?: string) {
+    if (!dayType) return "Loading";
+    if (dayType === "overhead_press") return "Overhead Press";
+    if (dayType === "rest") return "Rest Day";
+    if (dayType === "completed") return "Training Complete";
+    return dayType.charAt(0).toUpperCase() + dayType.slice(1);
+  }
+
+  async function loadTodayStatus() {
+    try {
+      const res = await fetch(`${API_BASE}/today-status?user_id=${userId}`, {
+        headers: {
+          "x-api-key": API_KEY,
+        },
+      });
+
+      if (!res.ok) {
+        throw new Error(await parseApiError(res));
+      }
+
+      const data = await res.json();
+      setTodayStatus(data);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function loadStatus() {
+    setError("");
+    try {
+      const res = await fetch(`${API_BASE}/status`, {
+        headers: {
+          "x-api-key": API_KEY,
+        },
+      });
+
+      if (!res.ok) {
+        throw new Error(await parseApiError(res));
+      }
+
+      const data = await res.json();
+      setStatus(data);
+      await loadTodayStatus();
+    } catch (err) {
+      console.error(err);
+      setError(err instanceof Error ? err.message : "Could not reach Jarvis backend.");
+    }
+  }
 
   async function loadHistory(liftOverride?: string) {
     const liftToLoad = liftOverride ?? selectedLift;
 
     try {
-      const res = await fetch(
-        `${API_BASE}/history/${liftToLoad}?user_id=${userId}`,
-        {
-          headers: {
-            "x-api-key": API_KEY,
-          },
+      const res = await fetch(`${API_BASE}/history/${liftToLoad}?user_id=${userId}`, {
+        headers: {
+          "x-api-key": API_KEY,
         },
-      );
-      if (!res.ok) throw new Error("Failed to load history");
+      });
+
+      if (!res.ok) {
+        throw new Error(await parseApiError(res));
+      }
+
       const data = await res.json();
       setHistory(data);
     } catch (err) {
@@ -164,9 +212,12 @@ async function loadStatus() {
           headers: {
             "x-api-key": API_KEY,
           },
-        },
+        }
       );
-      if (!res.ok) throw new Error("Failed to load today's workout");
+
+      if (!res.ok) {
+        throw new Error(await parseApiError(res));
+      }
 
       const data: TodayWorkoutResponse = await res.json();
       setTodayWorkout(data);
@@ -185,7 +236,7 @@ async function loadStatus() {
       await loadHistory(selectedLift);
     } catch (err) {
       console.error(err);
-      setError("Could not load today's workout.");
+      setError(err instanceof Error ? err.message : "Could not load today's workout.");
     }
   }
 
@@ -252,20 +303,24 @@ async function loadStatus() {
         }),
       });
 
-      if (!res.ok) throw new Error("Failed to complete workout");
+      if (!res.ok) {
+        throw new Error(await parseApiError(res));
+      }
 
       const data = await res.json();
 
       setLogMessage(
-        `Workout complete. Next: cycle ${data.next_cycle}, week ${data.next_week}` +
-          (data.new_training_max ? `, TM ${data.new_training_max}` : "")
+        data.spoken_response ||
+          `Workout complete. Next: cycle ${data.next_cycle}, week ${data.next_week}` +
+            (data.new_training_max ? `, TM ${data.new_training_max}` : "")
       );
 
       await loadHistory(selectedLift);
       await loadTodayWorkout();
+      await loadTodayStatus();
     } catch (err) {
       console.error(err);
-      setError("Could not complete workout.");
+      setError(err instanceof Error ? err.message : "Could not complete workout.");
     }
   }
 
@@ -294,12 +349,16 @@ async function loadStatus() {
           "x-api-key": API_KEY,
         },
       });
-      if (!res.ok) throw new Error("Failed to load FBI score");
+
+      if (!res.ok) {
+        throw new Error(await parseApiError(res));
+      }
+
       const data = await res.json();
       setFbiScore(data);
     } catch (err) {
       console.error(err);
-      setError("Could not load FBI score.");
+      setError(err instanceof Error ? err.message : "Could not load FBI score.");
     }
   }
 
@@ -307,41 +366,69 @@ async function loadStatus() {
     <main className="min-h-screen bg-black text-green-400 px-6 py-10">
       <div className="mx-auto max-w-7xl">
         <header className="mb-8 rounded-2xl border border-green-500/30 bg-green-500/5 p-6">
-          <p className="text-sm uppercase tracking-[0.3em] text-green-500/70">
-            Jarvis Systems
-          </p>
-          <h1 className="mt-2 text-4xl font-bold">Personal Command HUD</h1>
-          <p className="mt-3 text-green-300/80">
-            Fitness, FBI prep, project tracking, and assistant controls.
-          </p>
+          <div className="flex flex-wrap items-start justify-between gap-6">
+            <div>
+              <p className="text-sm uppercase tracking-[0.3em] text-green-500/70">
+                Jarvis Systems
+              </p>
 
-          <button
-            onClick={loadStatus}
-            className="mt-4 rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
-          >
-            Ping Jarvis
-          </button>
+              <h1 className="mt-2 text-4xl font-bold">Personal Command HUD</h1>
+
+              <p className="mt-3 text-green-300/80">
+                Fitness, FBI prep, project tracking, and assistant controls.
+              </p>
+
+              <div className="mt-5 flex flex-wrap gap-2">
+                <button
+                  onClick={loadStatus}
+                  className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
+                >
+                  Ping Jarvis
+                </button>
+
                 <Link
-        href="/recipes"
-        className="mt-4 inline-block rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
-      >
-        Open Recipe Vault
-      </Link>
-      <Link
-  href="/meal-planner"
-  className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
->
-  🗓️ Meal Planner
-</Link>
-  <Link
-    href="/shopping"
-    className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
-  >
-    🛒 Shopping Lists
-  </Link>
+                  href="/recipes"
+                  className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
+                >
+                  Open Recipe Vault
+                </Link>
+
+                <Link
+                  href="/meal-planner"
+                  className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
+                >
+                  🗓️ Meal Planner
+                </Link>
+
+                <Link
+                  href="/shopping"
+                  className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
+                >
+                  🛒 Shopping Lists
+                </Link>
+
+                <Link
+                  href="/preferences"
+                  className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
+                >
+                  ⭐ Favorites
+                </Link>
+              </div>
+            </div>
+
+            <div className="min-w-[170px] rounded-2xl border border-green-500/30 bg-black/60 p-4 text-center">
+              <div className="text-5xl">{getWorkoutIcon(todayStatus?.day_type)}</div>
+              <p className="mt-2 text-sm uppercase tracking-wide text-green-500/70">
+                Today
+              </p>
+              <p className="text-lg font-semibold">
+                {formatWorkoutDay(todayStatus?.day_type)}
+              </p>
+            </div>
+          </div>
 
           {status && (
-            <div className="mt-4 grid gap-3 md:grid-cols-4 text-sm">
+            <div className="mt-6 grid gap-3 md:grid-cols-4 text-sm">
               <StatusCard label="Systems" value={status.systems} />
               <StatusCard label="Brain" value={status.brain} />
               <StatusCard label="User" value={status.user} />
@@ -369,6 +456,7 @@ async function loadStatus() {
             <label className="mb-2 block text-sm text-green-300/80">
               Select Lift
             </label>
+
             <select
               value={selectedLift}
               onChange={(e) => setSelectedLift(e.target.value)}
@@ -391,7 +479,8 @@ async function loadStatus() {
               <div className="mt-6">
                 <div className="mb-4 rounded-xl border border-green-500/20 bg-black p-4">
                   <p className="text-lg font-semibold">
-                    {formatLiftName(todayWorkout.lift)} — Cycle {todayWorkout.cycle}, Week {todayWorkout.week}
+                    {formatLiftName(todayWorkout.lift)} — Cycle {todayWorkout.cycle}, Week{" "}
+                    {todayWorkout.week}
                   </p>
                   <p className="mt-2 text-green-300/80">
                     Training Max: {todayWorkout.training_max} lbs
@@ -444,6 +533,7 @@ async function loadStatus() {
                           <th className="p-3">Actual Weight</th>
                         </tr>
                       </thead>
+
                       <tbody>
                         {Object.entries(todayWorkout.today).map(([setName, setData]) => (
                           <tr key={setName} className="border-b border-green-500/10">
@@ -457,7 +547,6 @@ async function loadStatus() {
                             </td>
 
                             <td className="p-3 font-semibold">{setName}</td>
-
                             <td className="p-3">{setData.reps}</td>
 
                             <td className="p-3">
@@ -536,54 +625,21 @@ async function loadStatus() {
           <h2 className="mb-4 text-2xl font-semibold">FBI PFT Scoring</h2>
 
           <div className="grid gap-4 md:grid-cols-4">
-            <div>
-              <label className="mb-2 block text-sm text-green-300/80">Pull-ups</label>
-              <input
-                type="number"
-                value={pullups}
-                onChange={(e) => setPullups(e.target.value)}
-                placeholder="10"
-                className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
-              />
-            </div>
-
-            <div>
-              <label className="mb-2 block text-sm text-green-300/80">Push-ups</label>
-              <input
-                type="number"
-                value={pushups}
-                onChange={(e) => setPushups(e.target.value)}
-                placeholder="45"
-                className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
-              />
-            </div>
-
-            <div>
-              <label className="mb-2 block text-sm text-green-300/80">
-                1.5 Mile Run (sec)
-              </label>
-              <input
-                type="number"
-                value={runSeconds}
-                onChange={(e) => setRunSeconds(e.target.value)}
-                placeholder="700"
-                className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
-              />
-            </div>
-
-            <div>
-              <label className="mb-2 block text-sm text-green-300/80">
-                300m Sprint (sec)
-              </label>
-              <input
-                type="number"
-                step="0.1"
-                value={sprintSeconds}
-                onChange={(e) => setSprintSeconds(e.target.value)}
-                placeholder="45"
-                className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
-              />
-            </div>
+            <InputBox label="Pull-ups" value={pullups} setValue={setPullups} placeholder="10" />
+            <InputBox label="Push-ups" value={pushups} setValue={setPushups} placeholder="45" />
+            <InputBox
+              label="1.5 Mile Run (sec)"
+              value={runSeconds}
+              setValue={setRunSeconds}
+              placeholder="700"
+            />
+            <InputBox
+              label="300m Sprint (sec)"
+              value={sprintSeconds}
+              setValue={setSprintSeconds}
+              placeholder="45"
+              step="0.1"
+            />
           </div>
 
           <button
@@ -614,6 +670,34 @@ async function loadStatus() {
   );
 }
 
+function InputBox({
+  label,
+  value,
+  setValue,
+  placeholder,
+  step,
+}: {
+  label: string;
+  value: string;
+  setValue: (value: string) => void;
+  placeholder: string;
+  step?: string;
+}) {
+  return (
+    <div>
+      <label className="mb-2 block text-sm text-green-300/80">{label}</label>
+      <input
+        type="number"
+        step={step}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
+      />
+    </div>
+  );
+}
+
 function StatusCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl border border-green-500/20 bg-black p-4">
@@ -634,6 +718,7 @@ function PlateModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
       <div className="w-full max-w-md rounded-2xl border border-green-500/30 bg-zinc-950 p-6 shadow-2xl">
         <h3 className="text-2xl font-semibold">Plates per side</h3>
+
         <p className="mt-2 text-green-300/70">
           Total: {data.total_weight} lbs · Bar: {data.bar_weight} lbs
         </p>

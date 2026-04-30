@@ -112,18 +112,18 @@ export default function Home() {
   function getWorkoutIcon(dayType?: string) {
     switch (dayType) {
       case "bench":
-        return "🏋️‍♂️";
+        return "/icons/bench-press.png";
       case "squat":
-        return "🏋️‍♂️";
+        return "/icons/squat.png";
       case "deadlift":
-        return "💀";
+        return "/icons/deadlift.png";
       case "overhead_press":
-        return "🏋️";
+        return "/icons/overhead-press.png";
       case "completed":
-        return "✅";
+        return "/icons/complete.png";
       case "rest":
       default:
-        return "🛏️";
+        return "/icons/rest.png";
     }
   }
 
@@ -417,7 +417,11 @@ export default function Home() {
             </div>
 
             <div className="min-w-[170px] rounded-2xl border border-green-500/30 bg-black/60 p-4 text-center">
-              <div className="text-5xl">{getWorkoutIcon(todayStatus?.day_type)}</div>
+              <img
+                src={getWorkoutIcon(todayStatus?.day_type)}
+                alt={formatWorkoutDay(todayStatus?.day_type)}
+                className="mx-auto h-20 w-20 object-contain"
+              />
               <p className="mt-2 text-sm uppercase tracking-wide text-green-500/70">
                 Today
               </p>

@@ -161,6 +161,52 @@ def get_pr_prediction(lift: str, set_3_weight: float, target_reps: str, training
     return f"Push the final set hard. TM is {round(training_max)}."
 
 
+def get_estimated_pr(user_id: str, lift: str) -> dict | None:
+    response = (
+        supabase.table("workouts")
+        .select("weight,reps,notes,created_at")
+        .eq("user_id", user_id)
+        .eq("lift", lift)
+        .execute()
+    )
+
+    best = None
+    for row in response.data or []:
+        notes = (row.get("notes") or "").lower()
+        is_top_set = (
+            "set 3" in notes
+            or "top set" in notes
+            or "pr" in notes
+            or "voice log" in notes
+        )
+        is_deload = "week 4" in notes
+
+        if not is_top_set or is_deload:
+            continue
+
+        weight = float(row.get("weight", 0))
+        reps = int(row.get("reps", 0))
+        estimated_1rm = estimate_one_rep_max(weight, reps)
+
+        if best is None or estimated_1rm > best["estimated_1rm"]:
+            best = {
+                "estimated_1rm": estimated_1rm,
+                "weight": weight,
+                "reps": reps,
+                "created_at": row.get("created_at"),
+            }
+
+    if not best:
+        return None
+
+    return {
+        "estimated_1rm": round(best["estimated_1rm"]),
+        "weight": round_to_nearest_5(best["weight"]),
+        "reps": best["reps"],
+        "created_at": best["created_at"],
+    }
+
+
 def get_unique_completed_workouts(user_id: str) -> list[dict]:
     response = (
         supabase.table("workouts")

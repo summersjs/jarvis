@@ -49,6 +49,12 @@ type TodayWorkoutResponse = {
   cycle: number;
   week: number;
   training_max: number;
+  estimated_pr?: {
+    estimated_1rm: number;
+    weight: number;
+    reps: number;
+    created_at?: string | null;
+  } | null;
   warmups: WarmupSet[];
   today: Record<string, WorkoutSet>;
   pr_prediction: string;
@@ -488,6 +494,12 @@ export default function Home() {
                   </p>
                   <p className="mt-2 text-green-300/80">
                     Training Max: {todayWorkout.training_max} lbs
+                  </p>
+                  <p className="mt-1 text-green-300/80">
+                    ⭐ Estimated PR:{" "}
+                    {todayWorkout.estimated_pr
+                      ? `${todayWorkout.estimated_pr.estimated_1rm} lbs (${todayWorkout.estimated_pr.weight} × ${todayWorkout.estimated_pr.reps})`
+                      : "No PR history yet"}
                   </p>
                   <p className="mt-2 text-sm text-green-300/70">
                     {todayWorkout.pr_prediction}

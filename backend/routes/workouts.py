@@ -12,6 +12,7 @@ from backend.services.workout_service import (
     build_work_sets,
     check_for_pr,
     did_workout_today,
+    get_estimated_pr,
     get_next_workout_logic,
     get_pr_prediction,
     get_scheduled_lift_for_date,
@@ -71,6 +72,7 @@ def get_today_workout(lift: str, user_id: str):
         "cycle": cycle,
         "week": week,
         "training_max": round_to_nearest_5(training_max),
+        "estimated_pr": get_estimated_pr(user_id, lift),
         "warmups": build_warmup_sets(training_max),
         "today": today_sets,
         "pr_prediction": get_pr_prediction(

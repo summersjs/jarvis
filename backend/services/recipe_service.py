@@ -67,7 +67,27 @@ def list_recipes(user_id: str, favorites_only: bool = False):
         query = query.eq("is_favorite", True)
 
     response = query.order("created_at", desc=True).execute()
-    return response.data or []
+    recipes = response.data or []
+    if not recipes:
+        return []
+
+    recipe_ids = [recipe["id"] for recipe in recipes]
+    ingredients_response = (
+        supabase
+        .table("recipe_ingredients")
+        .select("*")
+        .in_("recipe_id", recipe_ids)
+        .execute()
+    )
+
+    ingredients_by_recipe_id = {}
+    for ingredient in ingredients_response.data or []:
+        ingredients_by_recipe_id.setdefault(ingredient["recipe_id"], []).append(ingredient)
+
+    for recipe in recipes:
+        recipe["ingredients"] = ingredients_by_recipe_id.get(recipe["id"], [])
+
+    return recipes
 
 
 def update_recipe(recipe_id: str, payload: RecipeUpdate):

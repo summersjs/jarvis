@@ -100,8 +100,6 @@ def log_complete_workout(workout: CompleteWorkoutLog):
             "notes": f"{item.set_name} - cycle {workout.cycle}, week {workout.week}"
         })
 
-    insert_response = supabase.table("workouts").insert(rows).execute()
-
     top_set = next((item for item in workout.sets if item.set_name == "Set 3"), workout.sets[-1])
 
     pr_result = check_for_pr(
@@ -110,6 +108,8 @@ def log_complete_workout(workout: CompleteWorkoutLog):
         weight=top_set.weight,
         reps=top_set.reps
     )
+
+    insert_response = supabase.table("workouts").insert(rows).execute()
 
     required_reps = minimum_required_reps_for_week(workout.week)
     hit_minimum = top_set.reps >= required_reps
@@ -227,7 +227,7 @@ def log_apple_workout(payload:dict):
     if workout_type == "strength":
         supabase.table("apple_strength_workouts").insert({
             "user_id": payload.get("user_id"),
-            "duration": payload.get("duration"),
+            "duration_minutes": payload.get("duration_minutes", payload.get("duration")),
             "calories": payload.get("calories"),
             "avg_heart_rate": payload.get("heart_rate"),
         }).execute()
@@ -271,7 +271,8 @@ def workout_recap(user_id: str = "john"):
         spoken += "You completed your strength training workout. "
 
     if apple_strength.data:
-        spoken += f"You also did a strength session for {apple_strength.data[0]['duration_minutes']} minutes. "
+        duration_minutes = apple_strength.data[0].get("duration_minutes") or apple_strength.data[0].get("duration")
+        spoken += f"You also did a strength session for {duration_minutes} minutes. "
 
     if runs.data:
         run = runs.data[0]

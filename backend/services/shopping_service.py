@@ -292,7 +292,8 @@ def generate_shopping_list_from_meal_plan(
         else:
             # If we cannot combine reliably, keep one merged line and mark it
             if existing.get("quantity"):
-                existing["quantity"] = f"{existing['quantity']} (multiple recipe uses)"
+                if "multiple recipe uses" not in existing["quantity"]:
+                    existing["quantity"] = f"{existing['quantity']} (multiple recipe uses)"
             else:
                 existing["quantity"] = "multiple recipe uses"
 

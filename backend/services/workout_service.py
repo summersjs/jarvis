@@ -148,17 +148,24 @@ def get_next_lift_profile(user_id: str) -> dict | None:
     return profiles_sorted[0]
 
 
-def get_pr_prediction(lift: str, set_3_weight: float, target_reps: str, training_max: float) -> str:
-    if target_reps == "1+":
-        predicted_pr = estimate_one_rep_max(set_3_weight, 3)
-        return f"3 reps on Set 3 projects about a {round(predicted_pr)} lb estimated 1RM."
-    if target_reps == "3+":
-        predicted_pr = estimate_one_rep_max(set_3_weight, 5)
-        return f"5 reps on Set 3 projects about a {round(predicted_pr)} lb estimated 1RM."
-    if target_reps == "5+":
-        predicted_pr = estimate_one_rep_max(set_3_weight, 8)
-        return f"8 reps on Set 3 projects about a {round(predicted_pr)} lb estimated 1RM."
-    return f"Push the final set hard. TM is {round(training_max)}."
+def get_pr_prediction(lift: str, set_3_weight: float, target_reps: str, training_max: float, user_id: str) -> str:
+    estimated_pr = get_estimated_pr(user_id, lift)
+
+    if "+" not in target_reps:
+        return f"Deload set. Move clean, stay fresh, and leave the PR chase for next week. TM is {round(training_max)}."
+
+    if not estimated_pr:
+        return f"No estimated PR yet. Set a baseline on the top set at {round(set_3_weight)} lbs."
+
+    current_estimated_1rm = float(estimated_pr["estimated_1rm"])
+    programmed_minimum = int(target_reps.replace("+", ""))
+    reps_to_beat = int(((current_estimated_1rm / set_3_weight) - 1) * 30) + 1
+    reps_to_beat = max(programmed_minimum, reps_to_beat)
+
+    return (
+        f"Get {reps_to_beat} reps at {round(set_3_weight)} lbs to beat your current "
+        f"estimated 1RM of {estimated_pr['estimated_1rm']} lbs."
+    )
 
 
 def get_estimated_pr(user_id: str, lift: str) -> dict | None:

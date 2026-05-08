@@ -79,7 +79,8 @@ def get_today_workout(lift: str, user_id: str):
             lift=lift,
             set_3_weight=set_3["weight"],
             target_reps=set_3["reps"],
-            training_max=training_max
+            training_max=training_max,
+            user_id=user_id,
         ),
         "all_weeks": {
             "week_1": build_work_sets(training_max, 1),

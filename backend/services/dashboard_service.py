@@ -1,10 +1,10 @@
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from backend.core.config import LOCAL_TZ
 from backend.db.supabase_client import supabase
 from backend.services.briefing_service import get_shift_brief
-from backend.services.calendar_service import get_today_calendar_summary
+from backend.services.calendar_service import get_calendar_summary_for_date
 from backend.services.meal_planner_service import list_meal_plan_entries
 from backend.services.workout_service import (
     estimate_one_rep_max,
@@ -74,14 +74,27 @@ def _get_latest_unchecked_shopping_items(user_id: str) -> dict:
     }
 
 
-def _get_calendar_summary() -> dict:
+def _get_shift_brief_for_date(date_obj) -> str:
+    weekday = date_obj.weekday()
+
+    if weekday in [0, 1]:
+        return "You have a 12 hour night shift starting at 6 PM."
+    if weekday in [5, 6]:
+        return "You have a 12 hour day shift starting at 6 AM."
+    return "You have no shifts scheduled."
+
+
+def _get_calendar_summary_for_day(date_obj, label: str) -> dict:
     fallback = get_shift_brief()
+    if label != "today":
+        fallback = _get_shift_brief_for_date(date_obj)
+
     try:
-        today_summary = get_today_calendar_summary()
-        if today_summary and "no events scheduled" not in today_summary.lower():
+        summary = get_calendar_summary_for_date(date_obj, label)
+        if summary and "no events scheduled" not in summary.lower():
             return {
                 "status": "ok",
-                "spoken_response": today_summary,
+                "spoken_response": summary,
                 "fallback_shift": fallback,
             }
     except Exception as e:
@@ -96,6 +109,14 @@ def _get_calendar_summary() -> dict:
         "status": "fallback",
         "spoken_response": fallback,
         "fallback_shift": fallback,
+    }
+
+
+def _get_calendar_summary(today_date) -> dict:
+    tomorrow_date = today_date + timedelta(days=1)
+    return {
+        "today": _get_calendar_summary_for_day(today_date, "today"),
+        "tomorrow": _get_calendar_summary_for_day(tomorrow_date, "tomorrow"),
     }
 
 
@@ -227,7 +248,7 @@ def build_daily_dashboard(user_id: str = "john") -> dict:
     workout_logic = get_next_workout_logic(user_id)
     meals = _get_today_meals(user_id, today)
     shopping = _get_latest_unchecked_shopping_items(user_id)
-    calendar = _get_calendar_summary()
+    calendar = _get_calendar_summary(now.date())
 
     return {
         "status": "ok",

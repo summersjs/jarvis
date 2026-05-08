@@ -45,9 +45,16 @@ type DashboardResponse = {
     unchecked_items: ShoppingItem[];
   };
   calendar: {
-    status: string;
-    spoken_response: string;
-    fallback_shift?: string;
+    today: {
+      status: string;
+      spoken_response: string;
+      fallback_shift?: string;
+    };
+    tomorrow: {
+      status: string;
+      spoken_response: string;
+      fallback_shift?: string;
+    };
   };
   coaching_note: string;
 };
@@ -217,12 +224,10 @@ export default function CommandCenterPage() {
               </DashboardPanel>
 
               <DashboardPanel title="Calendar / Work">
-                <p className="text-green-300/85">{dashboard.calendar.spoken_response}</p>
-                {dashboard.calendar.status === "fallback" && (
-                  <p className="mt-2 text-sm text-yellow-300/80">
-                    Calendar unavailable. Showing shift fallback.
-                  </p>
-                )}
+                <div className="space-y-4">
+                  <CalendarLine label="Today" item={dashboard.calendar.today} />
+                  <CalendarLine label="Tomorrow" item={dashboard.calendar.tomorrow} />
+                </div>
               </DashboardPanel>
 
               <DashboardPanel title="Meal Plan Today">
@@ -289,5 +294,28 @@ function DashboardPanel({
       <h2 className="mb-4 text-2xl font-semibold">{title}</h2>
       {children}
     </section>
+  );
+}
+
+function CalendarLine({
+  label,
+  item,
+}: {
+  label: string;
+  item: {
+    status: string;
+    spoken_response: string;
+  };
+}) {
+  return (
+    <div className="rounded-xl border border-green-500/20 bg-black p-4">
+      <p className="text-sm uppercase tracking-wide text-green-500/60">{label}</p>
+      <p className="mt-2 text-green-300/85">{item.spoken_response}</p>
+      {item.status === "fallback" && (
+        <p className="mt-2 text-sm text-yellow-300/80">
+          Calendar unavailable or empty. Showing shift fallback.
+        </p>
+      )}
+    </div>
   );
 }

@@ -59,6 +59,13 @@ type DashboardResponse = {
   coaching_note: string;
 };
 
+type StatusResponse = {
+  systems: string;
+  brain: string;
+  user: string;
+  clearance: string;
+};
+
 async function parseApiError(res: Response): Promise<string> {
   try {
     const data = await res.json();
@@ -105,6 +112,7 @@ function formatDate(date: string) {
 export default function CommandCenterPage() {
   const userId = "john";
   const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
+  const [status, setStatus] = useState<StatusResponse | null>(null);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
 
@@ -136,6 +144,32 @@ export default function CommandCenterPage() {
     loadDashboard();
   }, []);
 
+  async function toggleStatus() {
+    setError("");
+
+    if (status) {
+      setStatus(null);
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/status`, {
+        headers: {
+          "x-api-key": API_KEY,
+        },
+      });
+
+      if (!res.ok) {
+        throw new Error(await parseApiError(res));
+      }
+
+      const data = await res.json();
+      setStatus(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not reach Jarvis backend.");
+    }
+  }
+
   return (
     <main className="min-h-screen bg-black px-6 py-10 text-green-400">
       <div className="mx-auto max-w-7xl">
@@ -152,6 +186,9 @@ export default function CommandCenterPage() {
             </div>
 
             <nav className="flex flex-wrap gap-2">
+              <button className="command-nav-link" onClick={toggleStatus}>
+                {status ? "Hide Status" : "Ping Jarvis"}
+              </button>
               <Link className="command-nav-link" href="/meal-planner">
                 Meal Planner
               </Link>
@@ -167,6 +204,15 @@ export default function CommandCenterPage() {
             </nav>
           </div>
         </header>
+
+        {status && (
+          <div className="mb-6 grid gap-3 text-sm md:grid-cols-4">
+            <StatusCard label="Systems" value={status.systems} />
+            <StatusCard label="Brain" value={status.brain} />
+            <StatusCard label="User" value={status.user} />
+            <StatusCard label="Clearance" value={status.clearance} />
+          </div>
+        )}
 
         {error && (
           <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-red-300">
@@ -298,6 +344,15 @@ function DashboardPanel({
       <h2 className="mb-4 text-2xl font-semibold">{title}</h2>
       {children}
     </section>
+  );
+}
+
+function StatusCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-green-500/20 bg-zinc-950 p-4">
+      <p className="text-xs uppercase tracking-wide text-green-500/60">{label}</p>
+      <p className="mt-2 text-lg font-semibold text-green-300">{value}</p>
+    </div>
   );
 }
 

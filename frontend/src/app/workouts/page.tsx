@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -14,13 +14,6 @@ async function parseApiError(res: Response): Promise<string> {
     return `Request failed: ${res.status}`;
   }
 }
-
-type StatusResponse = {
-  systems: string;
-  brain: string;
-  user: string;
-  clearance: string;
-};
 
 type PlateBreakdown = {
   total_weight: number;
@@ -77,19 +70,8 @@ type WorkoutHistoryItem = {
   created_at: string;
 };
 
-type TodayStatus = {
-  status: string;
-  day_type: string;
-  scheduled_today?: string | null;
-  actual_next?: string | null;
-  spoken_response?: string;
-};
-
 export default function Home() {
   const userId = "john";
-
-  const [status, setStatus] = useState<StatusResponse | null>(null);
-  const [todayStatus, setTodayStatus] = useState<TodayStatus | null>(null);
 
   const [error, setError] = useState("");
   const [logMessage, setLogMessage] = useState("");
@@ -110,77 +92,6 @@ export default function Home() {
   const [completedSets, setCompletedSets] = useState<Record<string, boolean>>({});
   const [actualReps, setActualReps] = useState<Record<string, string>>({});
   const [actualWeights, setActualWeights] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    loadTodayStatus();
-  }, []);
-
-  function getWorkoutIcon(dayType?: string) {
-    switch (dayType) {
-      case "bench":
-        return "/icons/bench-press.png";
-      case "squat":
-        return "/icons/squat.png";
-      case "deadlift":
-        return "/icons/deadlift.png";
-      case "overhead_press":
-        return "/icons/overhead-press.png";
-      case "completed":
-        return "/icons/complete.png";
-      case "rest":
-      default:
-        return "/icons/rest.png";
-    }
-  }
-
-  function formatWorkoutDay(dayType?: string) {
-    if (!dayType) return "Loading";
-    if (dayType === "overhead_press") return "Overhead Press";
-    if (dayType === "rest") return "Rest Day";
-    if (dayType === "completed") return "Training Complete";
-    return dayType.charAt(0).toUpperCase() + dayType.slice(1);
-  }
-
-  async function loadTodayStatus() {
-    try {
-      const res = await fetch(`${API_BASE}/today-status?user_id=${userId}`, {
-        headers: {
-          "x-api-key": API_KEY,
-        },
-      });
-
-      if (!res.ok) {
-        throw new Error(await parseApiError(res));
-      }
-
-      const data = await res.json();
-      setTodayStatus(data);
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  async function loadStatus() {
-    setError("");
-    try {
-      const res = await fetch(`${API_BASE}/status`, {
-        headers: {
-          "x-api-key": API_KEY,
-        },
-      });
-
-      if (!res.ok) {
-        throw new Error(await parseApiError(res));
-      }
-
-      const data = await res.json();
-      setStatus(data);
-      await loadTodayStatus();
-    } catch (err) {
-      console.error(err);
-      setError(err instanceof Error ? err.message : "Could not reach Jarvis backend.");
-    }
-  }
 
   async function loadHistory(liftOverride?: string) {
     const liftToLoad = liftOverride ?? selectedLift;
@@ -323,7 +234,6 @@ export default function Home() {
 
       await loadHistory(selectedLift);
       await loadTodayWorkout();
-      await loadTodayStatus();
     } catch (err) {
       console.error(err);
       setError(err instanceof Error ? err.message : "Could not complete workout.");
@@ -371,87 +281,34 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-black text-green-400 px-6 py-10">
       <div className="mx-auto max-w-7xl">
-        <header className="mb-8 rounded-2xl border border-green-500/30 bg-green-500/5 p-6">
-          <div className="flex flex-wrap items-start justify-between gap-6">
-            <div>
-              <p className="text-sm uppercase tracking-[0.3em] text-green-500/70">
-                Jarvis Systems
-              </p>
-
-              <h1 className="mt-2 text-4xl font-bold">Workouts</h1>
-
-              <p className="mt-3 text-green-300/80">
-                Load today&apos;s workout, log main sets, review history, and score FBI PFT work.
-              </p>
-
-              <div className="mt-5 flex flex-wrap gap-2">
-                <Link
-                  href="/"
-                  className="command-nav-link"
-                >
-                  Command Center
-                </Link>
-
-                <button
-                  onClick={loadStatus}
-                  className="command-nav-link"
-                >
-                  Ping Jarvis
-                </button>
-
-                <Link
-                  href="/recipes"
-                  className="command-nav-link"
-                >
-                  Open Recipe Vault
-                </Link>
-
-                <Link
-                  href="/meal-planner"
-                  className="command-nav-link"
-                >
-                  🗓️ Meal Planner
-                </Link>
-
-                <Link
-                  href="/shopping"
-                  className="command-nav-link"
-                >
-                  🛒 Shopping Lists
-                </Link>
-
-                <Link
-                  href="/preferences"
-                  className="command-nav-link"
-                >
-                  ⭐ Favorites
-                </Link>
-              </div>
-            </div>
-
-            <div className="min-w-[170px] rounded-2xl border border-green-500/30 bg-black/60 p-4 text-center">
-              <img
-                src={getWorkoutIcon(todayStatus?.day_type)}
-                alt={formatWorkoutDay(todayStatus?.day_type)}
-                className="mx-auto h-20 w-20 object-contain"
-              />
-              <p className="mt-2 text-sm uppercase tracking-wide text-green-500/70">
-                Today
-              </p>
-              <p className="text-lg font-semibold">
-                {formatWorkoutDay(todayStatus?.day_type)}
-              </p>
-            </div>
+        <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="text-sm uppercase tracking-[0.3em] text-green-500/70">
+              Jarvis Training
+            </p>
+            <h1 className="mt-2 text-4xl font-bold">Workouts</h1>
+            <p className="mt-3 text-green-300/80">
+              Load today&apos;s workout, log main sets, review history, and score FBI PFT work.
+            </p>
           </div>
 
-          {status && (
-            <div className="mt-6 grid gap-3 md:grid-cols-4 text-sm">
-              <StatusCard label="Systems" value={status.systems} />
-              <StatusCard label="Brain" value={status.brain} />
-              <StatusCard label="User" value={status.user} />
-              <StatusCard label="Clearance" value={status.clearance} />
-            </div>
-          )}
+          <nav className="flex flex-wrap gap-2">
+            <Link href="/" className="command-nav-link">
+              Command Center
+            </Link>
+            <Link href="/recipes" className="command-nav-link">
+              Recipe Vault
+            </Link>
+            <Link href="/meal-planner" className="command-nav-link">
+              Meal Planner
+            </Link>
+            <Link href="/shopping" className="command-nav-link">
+              Shopping Lists
+            </Link>
+            <Link href="/preferences" className="command-nav-link">
+              Favorites
+            </Link>
+          </nav>
         </header>
 
         {error && (

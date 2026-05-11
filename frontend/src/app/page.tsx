@@ -201,6 +201,9 @@ export default function CommandCenterPage() {
               <Link className="command-nav-link" href="/preferences">
                 Preferences
               </Link>
+              <Link className="command-nav-link" href="/goals">
+                Goals
+              </Link>
             </nav>
           </div>
         </header>

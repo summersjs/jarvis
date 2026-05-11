@@ -7,6 +7,7 @@ from backend.core.security import verify_api_key
 from backend.db.supabase_client import supabase
 from backend.logic.five_three_one_logic import PowerliftingEngine
 from backend.schemas.workout import CompleteWorkoutLog
+from backend.services.goal_service import auto_update_strength_goals
 from backend.services.workout_service import (
     build_warmup_sets,
     build_work_sets,
@@ -175,6 +176,22 @@ def log_complete_workout(workout: CompleteWorkoutLog):
     elif pr_result["is_est_1rm_pr"]:
         spoken_response += f" New estimated one rep max PR. Estimated max {pr_result['current_est_1rm']} pounds."
 
+    updated_goals = []
+    if pr_result["is_est_1rm_pr"]:
+        updated_goals = auto_update_strength_goals(
+            user_id=workout.user_id,
+            lift=workout.lift,
+            estimated_1rm=pr_result["current_est_1rm"],
+            source_note=(
+                f"Auto-updated from {format_lift_name(workout.lift)} top set: "
+                f"{top_set.weight} x {top_set.reps}."
+            ),
+        )
+
+        if updated_goals:
+            goal_titles = ", ".join(goal["title"] for goal in updated_goals)
+            spoken_response += f" Updated goal progress for {goal_titles}."
+
     return {
         "message": "Workout logged successfully",
         "logged_sets": insert_response.data,
@@ -184,6 +201,7 @@ def log_complete_workout(workout: CompleteWorkoutLog):
         "required_reps": required_reps,
         "hit_minimum": hit_minimum,
         "pr_result": pr_result,
+        "updated_goals": updated_goals,
         "spoken_response": spoken_response
     }
 

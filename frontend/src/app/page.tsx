@@ -152,9 +152,6 @@ export default function CommandCenterPage() {
             </div>
 
             <nav className="flex flex-wrap gap-2">
-              <Link className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20" href="/workouts">
-                Workouts
-              </Link>
               <Link className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20" href="/meal-planner">
                 Meal Planner
               </Link>
@@ -186,16 +183,23 @@ export default function CommandCenterPage() {
         {dashboard && (
           <>
             <section className="mb-6 grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-              <div className="rounded-2xl border border-green-500/30 bg-zinc-950 p-6">
+              <Link
+                href="/workouts"
+                className="group relative block overflow-hidden rounded-2xl border border-green-500/30 bg-zinc-950 p-6 transition duration-300 hover:-translate-y-1 hover:border-green-300 hover:bg-green-500/10 hover:shadow-[0_0_45px_rgba(34,197,94,0.45)]"
+              >
+                <div className="pointer-events-none absolute inset-0 opacity-0 transition duration-300 group-hover:opacity-100">
+                  <div className="absolute inset-x-0 top-0 h-px bg-green-200" />
+                  <div className="absolute -left-24 top-0 h-full w-24 rotate-12 bg-green-200/20 blur-xl transition duration-700 group-hover:translate-x-[42rem]" />
+                </div>
                 <div className="flex flex-wrap items-center gap-5">
                   <img
                     src={getWorkoutIcon(dashboard.today.day_type)}
                     alt={formatDayType(dashboard.today.day_type)}
-                    className="h-24 w-24 object-contain"
+                    className="h-24 w-24 object-contain transition duration-300 group-hover:scale-110 group-hover:drop-shadow-[0_0_22px_rgba(134,239,172,0.9)]"
                   />
                   <div>
                     <p className="text-sm uppercase tracking-wide text-green-500/60">Today</p>
-                    <h2 className="mt-1 text-3xl font-bold">
+                    <h2 className="mt-1 text-3xl font-bold transition duration-300 group-hover:text-green-200 group-hover:drop-shadow-[0_0_12px_rgba(134,239,172,0.8)]">
                       {formatDayType(dashboard.today.day_type)}
                     </h2>
                     <p className="mt-2 text-green-300/80">
@@ -203,7 +207,7 @@ export default function CommandCenterPage() {
                     </p>
                   </div>
                 </div>
-              </div>
+              </Link>
 
               <div className="rounded-2xl border border-green-500/30 bg-zinc-950 p-6">
                 <p className="text-sm uppercase tracking-wide text-green-500/60">Jarvis Note</p>

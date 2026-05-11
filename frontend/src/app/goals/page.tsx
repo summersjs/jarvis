@@ -369,12 +369,19 @@ function GoalCard({
   onArchive: () => void;
 }) {
   const percent = goal.progress?.percent ?? 0;
+  const isLimitBreak = percent >= 100 || !!goal.progress?.is_complete;
+  const progressBarClass = isLimitBreak
+    ? "limit-break-bar h-full rounded-full transition-all"
+    : `${getProgressColorClass(percent)} h-full rounded-full transition-all`;
+  const cardClass = isLimitBreak
+    ? "rounded-2xl border border-yellow-300/70 bg-zinc-950 p-6 shadow-[0_0_38px_rgba(250,204,21,0.35)]"
+    : `${getProgressCardClass(percent)} rounded-2xl bg-zinc-950 p-6`;
   const etaDate = goal.eta?.estimated_completion_date
     ? new Date(`${goal.eta.estimated_completion_date}T12:00:00`).toLocaleDateString()
     : null;
 
   return (
-    <article className="rounded-2xl border border-green-500/30 bg-zinc-950 p-6">
+    <article className={cardClass}>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-sm uppercase tracking-wide text-green-500/60">
@@ -400,15 +407,28 @@ function GoalCard({
             {formatNumber(goal.current_value)}{goal.unit ? ` ${goal.unit}` : ""} /{" "}
             {goal.target_value ? `${formatNumber(goal.target_value)}${goal.unit ? ` ${goal.unit}` : ""}` : "No target"}
           </span>
-          <span>{goal.progress?.percent ?? 0}%</span>
+          <span className={isLimitBreak ? "font-bold text-yellow-200 drop-shadow-[0_0_10px_rgba(250,204,21,0.9)]" : ""}>
+            {goal.progress?.percent ?? 0}%
+          </span>
         </div>
 
-        <div className="h-4 overflow-hidden rounded-full border border-green-500/30 bg-black">
+        <div
+          className={
+            isLimitBreak
+              ? "h-5 overflow-hidden rounded-full border border-yellow-200/80 bg-black shadow-[0_0_22px_rgba(250,204,21,0.45)]"
+              : "h-4 overflow-hidden rounded-full border border-green-500/30 bg-black"
+          }
+        >
           <div
-            className="h-full rounded-full bg-green-400 shadow-[0_0_18px_rgba(74,222,128,0.75)] transition-all"
+            className={progressBarClass}
             style={{ width: `${Math.min(100, Math.max(0, percent || 0))}%` }}
           />
         </div>
+        {isLimitBreak && (
+          <p className="mt-3 text-sm font-bold uppercase tracking-[0.25em] text-yellow-200 drop-shadow-[0_0_10px_rgba(250,204,21,0.95)]">
+            Limit Break
+          </p>
+        )}
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -473,4 +493,30 @@ function formatNumber(value?: number | null) {
   if (value === null || value === undefined) return "0";
   if (Number.isInteger(value)) return String(value);
   return String(Math.round(value * 100) / 100);
+}
+
+function getProgressColorClass(percent: number) {
+  if (percent < 25) {
+    return "bg-red-500 shadow-[0_0_16px_rgba(239,68,68,0.7)]";
+  }
+  if (percent < 60) {
+    return "bg-orange-400 shadow-[0_0_16px_rgba(251,146,60,0.7)]";
+  }
+  if (percent < 90) {
+    return "bg-yellow-300 shadow-[0_0_16px_rgba(253,224,71,0.75)]";
+  }
+  return "bg-green-400 shadow-[0_0_18px_rgba(74,222,128,0.8)]";
+}
+
+function getProgressCardClass(percent: number) {
+  if (percent < 25) {
+    return "border border-red-500/50 shadow-[0_0_22px_rgba(239,68,68,0.22)]";
+  }
+  if (percent < 60) {
+    return "border border-orange-400/50 shadow-[0_0_22px_rgba(251,146,60,0.22)]";
+  }
+  if (percent < 90) {
+    return "border border-yellow-300/55 shadow-[0_0_22px_rgba(253,224,71,0.24)]";
+  }
+  return "border border-green-400/55 shadow-[0_0_24px_rgba(74,222,128,0.28)]";
 }

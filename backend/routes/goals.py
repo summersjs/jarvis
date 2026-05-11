@@ -8,6 +8,7 @@ from backend.services.goal_service import (
     delete_goal,
     delete_goal_log,
     get_goal,
+    get_goal_period_history,
     list_goal_logs,
     list_goals,
     update_goal,
@@ -39,6 +40,41 @@ def list_goals_route(user_id: str, active_only: bool = True):
         "goals": list_goals(user_id, active_only),
     }
 
+@router.get("/brief")
+def goals_brief_route(user_id: str = "john"):
+    goals = list_goals(user_id, active_only=True)
+
+    if not goals:
+        return {
+            "status": "ok",
+            "spoken_response": "You do not have any active goals yet."
+        }
+
+    lines = []
+    for goal in goals:
+        title = goal.get("title", "Unnamed goal")
+        current = float(goal.get("current_value") or 0)
+        target = float(goal.get("target_value") or 0)
+        unit = goal.get("unit") or ""
+
+        if target > 0:
+            percent = round((current / target) * 100)
+            remaining = max(target - current, 0)
+            lines.append(
+                f"{title}: {percent} percent complete. "
+                f"{remaining:g} {unit} remaining."
+            )
+        else:
+            lines.append(f"{title}: current progress is {current:g} {unit}.")
+
+    spoken_response = "Here is your goals progress. " + " ".join(lines)
+
+    return {
+        "status": "ok",
+        "goal_count": len(goals),
+        "goals": goals,
+        "spoken_response": spoken_response
+    }
 
 @router.get("/{goal_id}")
 def get_goal_route(goal_id: str):
@@ -75,6 +111,18 @@ def list_goal_logs_route(goal_id: str):
     return {
         "status": "ok",
         "logs": list_goal_logs(goal_id),
+    }
+
+
+@router.get("/{goal_id}/period-history")
+def goal_period_history_route(goal_id: str, periods: int = 8):
+    history = get_goal_period_history(goal_id, periods)
+    if history is None:
+        raise HTTPException(status_code=404, detail="Goal not found.")
+
+    return {
+        "status": "ok",
+        "period_history": history,
     }
 
 

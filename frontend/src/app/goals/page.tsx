@@ -13,6 +13,19 @@ type GoalLog = {
   created_at: string;
 };
 
+type GoalPeriod = {
+  frequency: string;
+  label: string;
+  period_start: string;
+  period_end: string;
+  value: number;
+  target_value?: number | null;
+  percent?: number | null;
+  hit_goal: boolean;
+  missed_goal: boolean;
+  is_current: boolean;
+};
+
 type Goal = {
   id: string;
   title: string;
@@ -26,6 +39,8 @@ type Goal = {
   is_active: boolean;
   created_at: string;
   logs?: GoalLog[];
+  period?: GoalPeriod;
+  period_history?: GoalPeriod[];
   progress?: {
     percent?: number | null;
     remaining?: number | null;
@@ -67,6 +82,7 @@ export default function GoalsPage() {
   const [form, setForm] = useState<GoalForm>(emptyForm);
   const [logValues, setLogValues] = useState<Record<string, string>>({});
   const [logNotes, setLogNotes] = useState<Record<string, string>>({});
+  const [historyGoal, setHistoryGoal] = useState<Goal | null>(null);
 
   async function loadGoals() {
     try {
@@ -342,12 +358,84 @@ export default function GoalsPage() {
                 onLogNoteChange={(value) => setLogNotes((prev) => ({ ...prev, [goal.id]: value }))}
                 onLog={() => logGoal(goal)}
                 onArchive={() => archiveGoal(goal.id)}
+                onOpenHistory={() => setHistoryGoal(goal)}
               />
             ))}
           </section>
         </div>
       </div>
+
+      {historyGoal && (
+        <GoalHistoryModal goal={historyGoal} onClose={() => setHistoryGoal(null)} />
+      )}
     </main>
+  );
+}
+
+function GoalHistoryModal({ goal, onClose }: { goal: Goal; onClose: () => void }) {
+  const periodHistory = goal.period_history || [];
+  const completedPeriods = periodHistory.filter((period) => !period.is_current);
+  const hitCount = completedPeriods.filter((period) => period.hit_goal).length;
+  const missedCount = completedPeriods.filter((period) => period.missed_goal).length;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4 py-8 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <section
+        className="max-h-[85vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-cyan-300/40 bg-zinc-950 p-6 text-green-300 shadow-[0_0_45px_rgba(34,211,238,0.28)]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-sm uppercase tracking-[0.25em] text-cyan-200/70">
+              Goal History
+            </p>
+            <h2 className="mt-2 text-3xl font-bold text-green-300">{goal.title}</h2>
+            <p className="mt-2 text-green-300/70">
+              {goal.frequency ? `${goal.frequency} goal` : "Goal"} · Hit {hitCount} · Missed {missedCount}
+            </p>
+          </div>
+
+          <button
+            onClick={onClose}
+            className="rounded-xl border border-cyan-300/40 px-4 py-2 text-cyan-100 transition hover:bg-cyan-300/10"
+          >
+            Close
+          </button>
+        </div>
+
+        {periodHistory.length === 0 ? (
+          <div className="mt-6 rounded-xl border border-green-500/20 bg-black p-4">
+            No history has been logged yet.
+          </div>
+        ) : (
+          <div className="mt-6 grid gap-3">
+            {periodHistory.map((period) => (
+              <div
+                key={`${period.period_start}-${period.period_end}`}
+                className="rounded-xl border border-green-500/20 bg-black p-4"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-green-300">{period.label}</p>
+                    <p className="mt-1 text-sm text-green-300/60">
+                      {formatNumber(period.value)}
+                      {goal.unit ? ` ${goal.unit}` : ""} /{" "}
+                      {period.target_value ? formatNumber(period.target_value) : "No target"}
+                    </p>
+                  </div>
+                  <span className={getPeriodStatusClass(period)}>
+                    {period.is_current ? "Current" : period.hit_goal ? "Hit" : "Miss"}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
   );
 }
 
@@ -359,6 +447,7 @@ function GoalCard({
   onLogNoteChange,
   onLog,
   onArchive,
+  onOpenHistory,
 }: {
   goal: Goal;
   logValue: string;
@@ -367,6 +456,7 @@ function GoalCard({
   onLogNoteChange: (value: string) => void;
   onLog: () => void;
   onArchive: () => void;
+  onOpenHistory: () => void;
 }) {
   const percent = goal.progress?.percent ?? 0;
   const isLimitBreak = percent >= 100 || !!goal.progress?.is_complete;
@@ -381,7 +471,10 @@ function GoalCard({
     : null;
 
   return (
-    <article className={cardClass}>
+    <article
+      className={`${cardClass} ${goal.period ? "cursor-pointer transition hover:-translate-y-0.5 hover:shadow-[0_0_34px_rgba(34,211,238,0.22)]" : ""}`}
+      onClick={goal.period ? onOpenHistory : undefined}
+    >
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-sm uppercase tracking-wide text-green-500/60">
@@ -394,7 +487,10 @@ function GoalCard({
         </div>
 
         <button
-          onClick={onArchive}
+          onClick={(e) => {
+            e.stopPropagation();
+            onArchive();
+          }}
           className="rounded-xl border border-red-500/30 px-3 py-2 text-sm text-red-300 transition hover:bg-red-500/10"
         >
           Archive
@@ -449,7 +545,28 @@ function GoalCard({
         </div>
       </div>
 
-      <div className="mt-5 grid gap-3 md:grid-cols-[0.45fr_1fr_auto]">
+      {goal.period && (
+        <div className="mt-4 rounded-xl border border-green-500/20 bg-black p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-green-500/60">
+                Current {goal.period.frequency}
+              </p>
+              <p className="mt-1 font-semibold text-green-300">{goal.period.label}</p>
+            </div>
+            <div className="text-right">
+              <p className="font-semibold text-green-300">
+                {formatNumber(goal.period.value)}{goal.unit ? ` ${goal.unit}` : ""}
+              </p>
+              <p className="text-sm text-green-300/65">
+                {goal.period.hit_goal ? "Goal hit" : "In progress"}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="mt-5 grid gap-3 md:grid-cols-[0.45fr_1fr_auto]" onClick={(e) => e.stopPropagation()}>
         <input
           type="number"
           value={logValue}
@@ -519,4 +636,14 @@ function getProgressCardClass(percent: number) {
     return "border border-yellow-300/55 shadow-[0_0_22px_rgba(253,224,71,0.24)]";
   }
   return "border border-green-400/55 shadow-[0_0_24px_rgba(74,222,128,0.28)]";
+}
+
+function getPeriodStatusClass(period: GoalPeriod) {
+  if (period.is_current) {
+    return "rounded-full border border-cyan-300/40 px-2 py-0.5 text-xs uppercase tracking-wide text-cyan-200";
+  }
+  if (period.hit_goal) {
+    return "rounded-full border border-green-400/40 px-2 py-0.5 text-xs uppercase tracking-wide text-green-200";
+  }
+  return "rounded-full border border-red-400/40 px-2 py-0.5 text-xs uppercase tracking-wide text-red-200";
 }

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from math import ceil
 
 from backend.core.config import LOCAL_TZ
@@ -14,6 +14,8 @@ LIFT_GOAL_KEYWORDS = {
     "deadlift": {"deadlift"},
     "overhead_press": {"overhead press", "ohp", "press"},
 }
+PERIODIC_GOAL_TYPES = {"habit", "count", "binary"}
+PERIODIC_FREQUENCIES = {"daily", "weekly"}
 
 
 def create_goal(payload: GoalCreate):
@@ -105,7 +107,7 @@ def list_goal_logs(goal_id: str):
 
 
 def create_goal_log(goal_id: str, payload: GoalLogCreate):
-    goal = get_goal(goal_id)
+    goal = get_goal_row(goal_id)
     if not goal:
         return None
 
@@ -124,10 +126,14 @@ def create_goal_log(goal_id: str, payload: GoalLogCreate):
     if not response.data:
         raise Exception("Failed to create goal log.")
 
+    logs = list_goal_logs(goal_id)
     current_value = float(goal.get("current_value") or 0)
     goal_type = (goal.get("goal_type") or "").lower()
 
-    if goal_type in {"count", "habit"}:
+    if is_periodic_goal(goal):
+        period_start, period_end = get_current_period_bounds(goal)
+        next_value = sum_log_values_for_period(logs, period_start, period_end)
+    elif goal_type in {"count", "habit"}:
         next_value = current_value + float(value or 0)
     else:
         next_value = float(value or 0)
@@ -149,6 +155,15 @@ def update_goal_log(log_id: str, payload: GoalLogUpdate):
 def delete_goal_log(log_id: str):
     response = supabase.table("goal_logs").delete().eq("id", log_id).execute()
     return response.data or []
+
+
+def get_goal_period_history(goal_id: str, periods: int = 8):
+    goal = get_goal_row(goal_id)
+    if not goal:
+        return None
+
+    logs = list_goal_logs(goal_id)
+    return build_period_history(goal, logs, periods)
 
 
 def auto_update_strength_goals(user_id: str, lift: str, estimated_1rm: float, source_note: str):
@@ -202,9 +217,20 @@ def is_matching_strength_goal(goal: dict, lift: str) -> bool:
 def enrich_goal(goal: dict):
     logs = list_goal_logs(goal["id"])
     enriched = dict(goal)
+
+    if is_periodic_goal(goal):
+        period_start, period_end = get_current_period_bounds(goal)
+        period_value = sum_log_values_for_period(logs, period_start, period_end)
+        enriched["current_value"] = period_value
+        enriched["period"] = build_period_snapshot(goal, period_start, period_end, period_value, True)
+        enriched["period_history"] = build_period_history(goal, logs)
+
     enriched["logs"] = logs[:5]
-    enriched["progress"] = calculate_progress(goal)
-    enriched["eta"] = calculate_eta(goal, logs)
+    enriched["progress"] = calculate_progress(enriched)
+    if is_periodic_goal(goal):
+        enriched["eta"] = calculate_periodic_eta(enriched)
+    else:
+        enriched["eta"] = calculate_eta(enriched, logs)
     return enriched
 
 
@@ -266,6 +292,32 @@ def calculate_eta(goal: dict, logs: list[dict]) -> dict:
     }
 
 
+def calculate_periodic_eta(goal: dict) -> dict:
+    period = goal.get("period") or {}
+    frequency = (goal.get("frequency") or "").lower()
+    target = goal.get("target_value")
+
+    if not target:
+        return {
+            "estimated_completion_date": None,
+            "summary": "No target value set.",
+            "method": "none",
+        }
+
+    if goal.get("progress", {}).get("is_complete"):
+        return {
+            "estimated_completion_date": datetime.now(LOCAL_TZ).date().isoformat(),
+            "summary": f"{frequency.title()} target hit.",
+            "method": "periodic_complete",
+        }
+
+    return {
+        "estimated_completion_date": period.get("period_end"),
+        "summary": f"Resets after this {frequency} period.",
+        "method": f"{frequency}_period_reset",
+    }
+
+
 def calculate_strength_eta(goal: dict, remaining: float) -> dict | None:
     title = (goal.get("title") or "").lower()
     unit = (goal.get("unit") or "").lower()
@@ -324,6 +376,108 @@ def calculate_log_rate_eta(goal: dict, logs: list[dict], remaining: float) -> di
         "summary": f"About {days_remaining} days at your logged pace.",
         "method": "log_rate",
     }
+
+
+def get_goal_row(goal_id: str):
+    response = (
+        supabase
+        .table("goals")
+        .select("*")
+        .eq("id", goal_id)
+        .limit(1)
+        .execute()
+    )
+    return response.data[0] if response.data else None
+
+
+def is_periodic_goal(goal: dict) -> bool:
+    goal_type = (goal.get("goal_type") or "").lower()
+    frequency = (goal.get("frequency") or "").lower()
+    return goal_type in PERIODIC_GOAL_TYPES and frequency in PERIODIC_FREQUENCIES
+
+
+def get_current_period_bounds(goal: dict):
+    today = datetime.now(LOCAL_TZ).date()
+    return get_period_bounds_for_date(goal, today)
+
+
+def get_period_bounds_for_date(goal: dict, anchor_date: date):
+    frequency = (goal.get("frequency") or "").lower()
+
+    if frequency == "weekly":
+        start_date = anchor_date - timedelta(days=anchor_date.weekday())
+        end_date = start_date + timedelta(days=7)
+    else:
+        start_date = anchor_date
+        end_date = start_date + timedelta(days=1)
+
+    return (
+        datetime.combine(start_date, time.min, tzinfo=LOCAL_TZ),
+        datetime.combine(end_date, time.min, tzinfo=LOCAL_TZ),
+    )
+
+
+def sum_log_values_for_period(logs: list[dict], period_start: datetime, period_end: datetime) -> float:
+    total = 0.0
+    for log in logs:
+        created_at = parse_datetime(log.get("created_at"))
+        if created_at and period_start <= created_at < period_end:
+            total += float(log.get("value") if log.get("value") is not None else 1)
+    return total
+
+
+def build_period_history(goal: dict, logs: list[dict], periods: int = 8):
+    if not is_periodic_goal(goal):
+        return []
+
+    frequency = (goal.get("frequency") or "").lower()
+    today = datetime.now(LOCAL_TZ).date()
+    step_days = 7 if frequency == "weekly" else 1
+    history = []
+
+    for index in range(max(1, periods)):
+        anchor_date = today - timedelta(days=index * step_days)
+        period_start, period_end = get_period_bounds_for_date(goal, anchor_date)
+        value = sum_log_values_for_period(logs, period_start, period_end)
+        history.append(build_period_snapshot(goal, period_start, period_end, value, index == 0))
+
+    return history
+
+
+def build_period_snapshot(
+    goal: dict,
+    period_start: datetime,
+    period_end: datetime,
+    value: float,
+    is_current: bool,
+):
+    target = float(goal.get("target_value") or 0)
+    percent = round(min(100, max(0, (value / target) * 100)), 1) if target > 0 else None
+    hit_goal = target > 0 and value >= target
+    inclusive_end = (period_end - timedelta(days=1)).date()
+
+    return {
+        "frequency": (goal.get("frequency") or "").lower(),
+        "label": format_period_label(goal, period_start, period_end),
+        "period_start": period_start.date().isoformat(),
+        "period_end": inclusive_end.isoformat(),
+        "value": round(value, 2),
+        "target_value": target if target > 0 else None,
+        "percent": percent,
+        "hit_goal": hit_goal,
+        "missed_goal": (not is_current) and target > 0 and not hit_goal,
+        "is_current": is_current,
+    }
+
+
+def format_period_label(goal: dict, period_start: datetime, period_end: datetime):
+    frequency = (goal.get("frequency") or "").lower()
+
+    if frequency == "weekly":
+        inclusive_end = (period_end - timedelta(days=1)).date()
+        return f"{period_start.date().isoformat()} to {inclusive_end.isoformat()}"
+
+    return period_start.date().isoformat()
 
 
 def parse_datetime(value: str | None):

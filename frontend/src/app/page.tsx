@@ -152,16 +152,16 @@ export default function CommandCenterPage() {
             </div>
 
             <nav className="flex flex-wrap gap-2">
-              <Link className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20" href="/meal-planner">
+              <Link className="command-nav-link" href="/meal-planner">
                 Meal Planner
               </Link>
-              <Link className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20" href="/shopping">
+              <Link className="command-nav-link" href="/shopping">
                 Shopping
               </Link>
-              <Link className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20" href="/recipes">
+              <Link className="command-nav-link" href="/recipes">
                 Recipes
               </Link>
-              <Link className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20" href="/preferences">
+              <Link className="command-nav-link" href="/preferences">
                 Preferences
               </Link>
             </nav>

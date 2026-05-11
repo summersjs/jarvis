@@ -387,42 +387,42 @@ export default function Home() {
               <div className="mt-5 flex flex-wrap gap-2">
                 <Link
                   href="/"
-                  className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
+                  className="command-nav-link"
                 >
                   Command Center
                 </Link>
 
                 <button
                   onClick={loadStatus}
-                  className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
+                  className="command-nav-link"
                 >
                   Ping Jarvis
                 </button>
 
                 <Link
                   href="/recipes"
-                  className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
+                  className="command-nav-link"
                 >
                   Open Recipe Vault
                 </Link>
 
                 <Link
                   href="/meal-planner"
-                  className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
+                  className="command-nav-link"
                 >
                   🗓️ Meal Planner
                 </Link>
 
                 <Link
                   href="/shopping"
-                  className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
+                  className="command-nav-link"
                 >
                   🛒 Shopping Lists
                 </Link>
 
                 <Link
                   href="/preferences"
-                  className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
+                  className="command-nav-link"
                 >
                   ⭐ Favorites
                 </Link>

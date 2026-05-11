@@ -220,25 +220,25 @@ export default function RecipesPage() {
                 setError("");
                 setMessage("");
               }}
-              className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
+              className="command-nav-link"
             >
               {showCreateForm ? "Close Form" : "Create Recipe"}
             </button>
               <Link
                 href="/meal-planner"
-                className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
+                className="command-nav-link"
               >
                 🗓️ Meal Planner
             </Link>
             <Link
         href="/shopping"
-        className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
+        className="command-nav-link"
         >
         🛒 Shopping Lists
         </Link>
             <Link
               href="/"
-              className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
+              className="command-nav-link"
             >
               Back to HUD
             </Link>

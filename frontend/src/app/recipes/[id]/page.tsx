@@ -219,14 +219,14 @@ export default function RecipeDetailPage() {
                 setError("");
                 setMessage("");
               }}
-              className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
+              className="command-nav-link"
             >
               {isEditing ? "Cancel Edit" : "Edit Recipe"}
             </button>
 
             <Link
               href="/recipes"
-              className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
+              className="command-nav-link"
             >
               Back to Recipe Vault
             </Link>

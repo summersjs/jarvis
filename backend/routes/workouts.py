@@ -6,7 +6,7 @@ from backend.core.config import LOCAL_TZ
 from backend.core.security import verify_api_key
 from backend.db.supabase_client import supabase
 from backend.logic.five_three_one_logic import PowerliftingEngine
-from backend.schemas.workout import CompleteWorkoutLog
+from backend.schemas.workout import CompleteWorkoutLog, LiftProfileUpdate
 from backend.services.goal_service import auto_update_strength_goals
 from backend.services.workout_service import (
     build_warmup_sets,
@@ -25,9 +25,29 @@ router = APIRouter(dependencies=[Depends(verify_api_key)])
 
 
 @router.get("/lifts")
-def get_lifts():
-    response = supabase.table("lift_profiles").select("*").execute()
+def get_lifts(user_id: str | None = None):
+    query = supabase.table("lift_profiles").select("*")
+    if user_id:
+        query = query.eq("user_id", user_id)
+
+    response = query.execute()
     return response.data
+
+
+@router.patch("/lifts/{lift}")
+def update_lift_profile(lift: str, payload: LiftProfileUpdate):
+    response = (
+        supabase.table("lift_profiles")
+        .update({"training_max": payload.training_max})
+        .eq("user_id", payload.user_id)
+        .eq("lift", lift)
+        .execute()
+    )
+
+    if not response.data:
+        raise HTTPException(status_code=404, detail="No lift profile found")
+
+    return response.data[0]
 
 
 @router.get("/calculate/531/{weight}")

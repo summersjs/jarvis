@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import Image from "next/image";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const API_KEY = process.env.NEXT_PUBLIC_JARVIS_API_KEY || "";
+const LIFTS = ["deadlift", "squat", "bench", "overhead_press"];
 
 async function parseApiError(res: Response): Promise<string> {
   try {
@@ -53,6 +55,8 @@ type TodayWorkoutResponse = {
   pr_prediction: string;
 };
 
+type LiftSummary = TodayWorkoutResponse;
+
 type FBIScoreResponse = {
   pullups: number;
   run: number;
@@ -78,6 +82,9 @@ export default function Home() {
 
   const [selectedLift, setSelectedLift] = useState("deadlift");
   const [todayWorkout, setTodayWorkout] = useState<TodayWorkoutResponse | null>(null);
+  const [liftSummaries, setLiftSummaries] = useState<Record<string, LiftSummary>>({});
+  const [trainingMaxInputs, setTrainingMaxInputs] = useState<Record<string, string>>({});
+  const [savingLift, setSavingLift] = useState("");
   const [history, setHistory] = useState<WorkoutHistoryItem[]>([]);
 
   const [pullups, setPullups] = useState("");
@@ -92,6 +99,44 @@ export default function Home() {
   const [completedSets, setCompletedSets] = useState<Record<string, boolean>>({});
   const [actualReps, setActualReps] = useState<Record<string, string>>({});
   const [actualWeights, setActualWeights] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    loadLiftSummaries();
+    loadTodayWorkout(selectedLift);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function loadLiftSummaries() {
+    try {
+      const results = await Promise.all(
+        LIFTS.map(async (lift) => {
+          const res = await fetch(`${API_BASE}/workout/today/${lift}?user_id=${userId}`, {
+            headers: {
+              "x-api-key": API_KEY,
+            },
+          });
+
+          if (!res.ok) {
+            throw new Error(await parseApiError(res));
+          }
+
+          const data: LiftSummary = await res.json();
+          return [lift, data] as const;
+        })
+      );
+
+      const summaries = Object.fromEntries(results);
+      setLiftSummaries(summaries);
+      setTrainingMaxInputs(
+        Object.fromEntries(
+          results.map(([lift, data]) => [lift, String(data.training_max)])
+        )
+      );
+    } catch (err) {
+      console.error(err);
+      setError(err instanceof Error ? err.message : "Could not load lift summaries.");
+    }
+  }
 
   async function loadHistory(liftOverride?: string) {
     const liftToLoad = liftOverride ?? selectedLift;
@@ -114,17 +159,20 @@ export default function Home() {
     }
   }
 
-  async function loadTodayWorkout() {
+  async function loadTodayWorkout(liftOverride?: string) {
+    const liftToLoad = liftOverride ?? selectedLift;
+
     setError("");
     setLogMessage("");
     setTodayWorkout(null);
+    setSelectedLift(liftToLoad);
     setCompletedSets({});
     setActualReps({});
     setActualWeights({});
 
     try {
       const res = await fetch(
-        `${API_BASE}/workout/today/${selectedLift}?user_id=${userId}`,
+        `${API_BASE}/workout/today/${liftToLoad}?user_id=${userId}`,
         {
           headers: {
             "x-api-key": API_KEY,
@@ -150,10 +198,51 @@ export default function Home() {
       setActualWeights(initialWeights);
       setActualReps(initialReps);
 
-      await loadHistory(selectedLift);
+      await loadHistory(liftToLoad);
     } catch (err) {
       console.error(err);
       setError(err instanceof Error ? err.message : "Could not load today's workout.");
+    }
+  }
+
+  async function saveTrainingMax(lift: string) {
+    const value = Number(trainingMaxInputs[lift]);
+    if (!value || value <= 0) {
+      setError("Enter a valid training max.");
+      return;
+    }
+
+    setSavingLift(lift);
+    setError("");
+    setLogMessage("");
+
+    try {
+      const res = await fetch(`${API_BASE}/lifts/${lift}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": API_KEY,
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          training_max: value,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error(await parseApiError(res));
+      }
+
+      setLogMessage(`${formatLiftName(lift)} training max updated to ${value} lbs.`);
+      await loadLiftSummaries();
+      if (todayWorkout?.lift === lift) {
+        await loadTodayWorkout(lift);
+      }
+    } catch (err) {
+      console.error(err);
+      setError(err instanceof Error ? err.message : "Could not update training max.");
+    } finally {
+      setSavingLift("");
     }
   }
 
@@ -233,7 +322,8 @@ export default function Home() {
       );
 
       await loadHistory(selectedLift);
-      await loadTodayWorkout();
+      await loadLiftSummaries();
+      await loadTodayWorkout(selectedLift);
     } catch (err) {
       console.error(err);
       setError(err instanceof Error ? err.message : "Could not complete workout.");
@@ -327,27 +417,29 @@ export default function Home() {
           <section className="rounded-2xl border border-green-500/30 bg-zinc-950 p-6">
             <h2 className="mb-4 text-2xl font-semibold">Main Sets</h2>
 
-            <label className="mb-2 block text-sm text-green-300/80">
-              Select Lift
-            </label>
-
-            <select
-              value={selectedLift}
-              onChange={(e) => setSelectedLift(e.target.value)}
-              className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3 outline-none focus:border-green-400"
-            >
-              <option value="deadlift">Deadlift</option>
-              <option value="squat">Squat</option>
-              <option value="bench">Bench Press</option>
-              <option value="overhead_press">Overhead Press</option>
-            </select>
-
-            <button
-              onClick={loadTodayWorkout}
-              className="mt-4 w-full rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-3 hover:bg-green-500/20 transition"
-            >
-              Load Today&apos;s Workout
-            </button>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {LIFTS.map((lift) => {
+                const summary = liftSummaries[lift];
+                return (
+                  <LiftCard
+                    key={lift}
+                    lift={lift}
+                    active={selectedLift === lift}
+                    summary={summary}
+                    trainingMaxValue={trainingMaxInputs[lift] || ""}
+                    saving={savingLift === lift}
+                    onSelect={() => loadTodayWorkout(lift)}
+                    onTrainingMaxChange={(value) =>
+                      setTrainingMaxInputs((prev) => ({
+                        ...prev,
+                        [lift]: value,
+                      }))
+                    }
+                    onSave={() => saveTrainingMax(lift)}
+                  />
+                );
+              })}
+            </div>
 
             {todayWorkout && (
               <div className="mt-6">
@@ -550,6 +642,86 @@ export default function Home() {
   );
 }
 
+function LiftCard({
+  lift,
+  active,
+  summary,
+  trainingMaxValue,
+  saving,
+  onSelect,
+  onTrainingMaxChange,
+  onSave,
+}: {
+  lift: string;
+  active: boolean;
+  summary?: LiftSummary;
+  trainingMaxValue: string;
+  saving: boolean;
+  onSelect: () => void;
+  onTrainingMaxChange: (value: string) => void;
+  onSave: () => void;
+}) {
+  const estimatedPr = summary?.estimated_pr
+    ? `${summary.estimated_pr.estimated_1rm} lbs`
+    : "No PR";
+
+  return (
+    <div
+      className={`rounded-xl border bg-black p-4 transition ${
+        active
+          ? "border-green-300 shadow-[0_0_22px_rgba(74,222,128,0.18)]"
+          : "border-green-500/20"
+      }`}
+    >
+      <button
+        type="button"
+        onClick={onSelect}
+        className="flex w-full items-center gap-4 text-left"
+      >
+        <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg border border-green-500/20 bg-zinc-950">
+          <Image
+            src={getLiftIcon(lift)}
+            alt=""
+            width={38}
+            height={38}
+            className="h-10 w-10 object-contain"
+          />
+        </span>
+
+        <span className="min-w-0">
+          <span className="block text-lg font-semibold text-green-300">
+            {formatLiftName(lift)}
+          </span>
+          <span className="mt-1 block text-sm text-green-300/70">
+            PR: {estimatedPr}
+          </span>
+          <span className="block text-sm text-green-300/70">
+            Training Max: {summary ? `${summary.training_max} lbs` : "Loading"}
+          </span>
+        </span>
+      </button>
+
+      <div className="mt-4 flex items-center gap-2">
+        <input
+          type="number"
+          value={trainingMaxValue}
+          onChange={(e) => onTrainingMaxChange(e.target.value)}
+          className="min-w-0 flex-1 rounded-lg border border-green-500/30 bg-zinc-950 px-3 py-2 text-green-300 outline-none focus:border-green-300"
+          aria-label={`${formatLiftName(lift)} training max`}
+        />
+        <button
+          type="button"
+          onClick={onSave}
+          disabled={saving}
+          className="rounded-lg border border-green-500/40 bg-green-500/10 px-3 py-2 text-sm text-green-300 transition hover:bg-green-500/20 disabled:opacity-50"
+        >
+          {saving ? "Saving" : "Save"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function InputBox({
   label,
   value,
@@ -632,4 +804,12 @@ function formatLiftName(lift: string) {
   if (lift === "bench") return "Bench Press";
   if (lift === "squat") return "Squat";
   return lift;
+}
+
+function getLiftIcon(lift: string) {
+  if (lift === "overhead_press") return "/icons/overhead-press.png";
+  if (lift === "deadlift") return "/icons/deadlift.png";
+  if (lift === "bench") return "/icons/bench-press.png";
+  if (lift === "squat") return "/icons/squat.png";
+  return "/icons/complete.png";
 }

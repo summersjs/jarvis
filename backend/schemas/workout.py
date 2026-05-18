@@ -13,3 +13,8 @@ class CompleteWorkoutLog(BaseModel):
     cycle: int
     week: int
     sets: list[WorkoutSetLog]
+
+
+class LiftProfileUpdate(BaseModel):
+    user_id: str
+    training_max: float

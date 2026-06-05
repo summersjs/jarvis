@@ -2,6 +2,33 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import {
+  Activity,
+  AlertTriangle,
+  ArrowUpCircle,
+  BrainCircuit,
+  BriefcaseBusiness,
+  Cake,
+  CalendarDays,
+  CheckCircle2,
+  ChevronRight,
+  ChevronsDown,
+  Circle,
+  ClipboardList,
+  DatabaseZap,
+  DollarSign,
+  Dumbbell,
+  Pickaxe,
+  Server,
+  ShieldCheck,
+  ShoppingCart,
+  Utensils,
+  UserRound,
+  Wifi,
+  WifiOff,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
 import BirthdayAlert from "@/components/BirthdayAlert";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -68,30 +95,75 @@ type StatusResponse = {
   clearance: string;
 };
 
+type CalendarEvent = {
+  title: string;
+  time: string;
+  date?: string;
+  location?: string;
+  type: "birthday" | "work" | "payday" | "default";
+};
+
+type WorkoutConfig = {
+  label: string;
+  Icon: LucideIcon;
+  missionType: string;
+  focus: string;
+  accentClass: string;
+};
+
+const WORKOUT_CONFIG: Record<string, WorkoutConfig> = {
+  squat: {
+    label: "LOWER BODY PROTOCOL",
+    Icon: ChevronsDown,
+    missionType: "MISSION ACTIVE",
+    focus: "Lower Body",
+    accentClass: "workout-accent-squat",
+  },
+  bench: {
+    label: "CHEST PROTOCOL",
+    Icon: Dumbbell,
+    missionType: "MISSION ACTIVE",
+    focus: "Upper Body",
+    accentClass: "workout-accent-bench",
+  },
+  deadlift: {
+    label: "POWER PROTOCOL",
+    Icon: Pickaxe,
+    missionType: "MISSION ACTIVE",
+    focus: "Posterior Chain",
+    accentClass: "workout-accent-deadlift",
+  },
+  overhead_press: {
+    label: "SHOULDER PROTOCOL",
+    Icon: ArrowUpCircle,
+    missionType: "MISSION ACTIVE",
+    focus: "Upper Body",
+    accentClass: "workout-accent-overhead",
+  },
+  overheadPress: {
+    label: "SHOULDER PROTOCOL",
+    Icon: ArrowUpCircle,
+    missionType: "MISSION ACTIVE",
+    focus: "Upper Body",
+    accentClass: "workout-accent-overhead",
+  },
+};
+
+// TODO: Replace temporary Lucide workout icons with custom Jarvis lift silhouettes.
+const DEFAULT_WORKOUT_CONFIG: WorkoutConfig = {
+  label: "RECOVERY PROTOCOL",
+  Icon: Activity,
+  missionType: "STANDBY",
+  focus: "Recovery",
+  accentClass: "workout-accent-recovery",
+};
+
 async function parseApiError(res: Response): Promise<string> {
   try {
     const data = await res.json();
     return data.detail || data.spoken_response || data.error || `Request failed: ${res.status}`;
   } catch {
     return `Request failed: ${res.status}`;
-  }
-}
-
-function getWorkoutIcon(dayType?: string | null) {
-  switch (dayType) {
-    case "bench":
-      return "/icons/bench-press.png";
-    case "squat":
-      return "/icons/squat.png";
-    case "deadlift":
-      return "/icons/deadlift.png";
-    case "overhead_press":
-      return "/icons/overhead-press.png";
-    case "completed":
-      return "/icons/complete.png";
-    case "rest":
-    default:
-      return "/icons/rest.png";
   }
 }
 
@@ -109,6 +181,87 @@ function formatDate(date: string) {
     month: "long",
     day: "numeric",
   });
+}
+
+function getWorkoutConfig(lift?: string | null) {
+  if (!lift) return DEFAULT_WORKOUT_CONFIG;
+  return WORKOUT_CONFIG[lift] || DEFAULT_WORKOUT_CONFIG;
+}
+
+function getLiftForConfig(dashboard: DashboardResponse) {
+  return dashboard.today.scheduled_lift || dashboard.next_workout.lift || dashboard.today.day_type;
+}
+
+function parseBirthdayName(note?: string | null) {
+  if (!note) return null;
+  return note
+    .replace(/^today is\s+/i, "")
+    .replace(/'s birthday\.?$/i, "")
+    .replace(/^birthdays today:\s*/i, "")
+    .replace(/\.$/, "")
+    .trim();
+}
+
+function getCalendarCount(item?: { spoken_response: string }) {
+  const match = item?.spoken_response.match(/You have (\d+) events?/i);
+  return match ? Number(match[1]) : 0;
+}
+
+function getEventType(title: string): CalendarEvent["type"] {
+  const normalized = title.toLowerCase();
+  if (normalized.includes("birthday") || normalized.includes("bday")) return "birthday";
+  if (normalized.includes("scheduled to work") || normalized.includes("work")) return "work";
+  if (normalized.includes("payday") || normalized.includes("pay")) return "payday";
+  return "default";
+}
+
+function stripBirthdayTitle(title: string) {
+  return title
+    .replace(/'s birthday$/i, " Birthday")
+    .replace(/\sbday$/i, " Birthday")
+    .trim();
+}
+
+function parseCalendarEvents(item: { spoken_response: string }, label: string): CalendarEvent[] {
+  const response = item.spoken_response;
+  const [, eventText = ""] = response.split(/events? (?:today|tomorrow)\.\s*/i);
+  if (!eventText || response.toLowerCase().includes("no events scheduled")) return [];
+
+  return eventText
+    .split(". ")
+    .map((part) => part.replace(/\.$/, "").trim())
+    .filter(Boolean)
+    .map((part) => {
+      const match = part.match(/^(.*?) from (all day on \d{4}-\d{2}-\d{2}|\d{1,2}:\d{2} [AP]M to \d{1,2}:\d{2} [AP]M)(?: at (.*))?$/i);
+      if (!match) {
+        return {
+          title: part,
+          time: label === "today" ? "Today" : "Tomorrow",
+          type: getEventType(part),
+        };
+      }
+
+      const rawTitle = match[1].trim();
+      const rawTime = match[2].trim();
+      const isAllDay = rawTime.toLowerCase().startsWith("all day");
+      const dateMatch = rawTime.match(/\d{4}-\d{2}-\d{2}/);
+
+      return {
+        title: stripBirthdayTitle(rawTitle),
+        time: isAllDay ? "All day" : rawTime.replace(" to ", " - "),
+        date: isAllDay ? dateMatch?.[0] : undefined,
+        location: match[3]?.trim(),
+        type: getEventType(rawTitle),
+      };
+    });
+}
+
+function getCategoryCounts(items: ShoppingItem[]) {
+  return items.reduce<Record<string, number>>((counts, item) => {
+    const category = item.category || "Other";
+    counts[category] = (counts[category] || 0) + 1;
+    return counts;
+  }, {});
 }
 
 export default function CommandCenterPage() {
@@ -217,12 +370,7 @@ export default function CommandCenterPage() {
         </header>
 
         {status && (
-          <div className="mb-6 grid gap-3 text-sm md:grid-cols-4">
-            <StatusCard label="Systems" value={status.systems} />
-            <StatusCard label="Brain" value={status.brain} />
-            <StatusCard label="User" value={status.user} />
-            <StatusCard label="Clearance" value={status.clearance} />
-          </div>
+          <SystemStatusPanel status={status} dashboard={dashboard} />
         )}
 
         {error && (
@@ -240,101 +388,15 @@ export default function CommandCenterPage() {
         {dashboard && (
           <>
             <section className="mb-6 grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-              <Link
-                href="/workouts"
-                className="group relative block overflow-hidden rounded-2xl border border-green-500/30 bg-zinc-950 p-6 transition duration-300 hover:-translate-y-1 hover:border-green-300 hover:bg-green-500/10 hover:shadow-[0_0_45px_rgba(34,197,94,0.45)]"
-              >
-                <div className="pointer-events-none absolute inset-0 opacity-0 transition duration-300 group-hover:opacity-100">
-                  <div className="absolute inset-x-0 top-0 h-px bg-green-200" />
-                  <div className="absolute -left-24 top-0 h-full w-24 rotate-12 bg-green-200/20 blur-xl transition duration-700 group-hover:translate-x-[42rem]" />
-                </div>
-                <div className="flex flex-wrap items-center gap-5">
-                  <img
-                    src={getWorkoutIcon(dashboard.today.day_type)}
-                    alt={formatDayType(dashboard.today.day_type)}
-                    className="h-24 w-24 object-contain transition duration-300 group-hover:scale-110 group-hover:drop-shadow-[0_0_22px_rgba(134,239,172,0.9)]"
-                  />
-                  <div>
-                    <p className="text-sm uppercase tracking-wide text-green-500/60">Today</p>
-                    <h2 className="mt-1 text-3xl font-bold transition duration-300 group-hover:text-green-200 group-hover:drop-shadow-[0_0_12px_rgba(134,239,172,0.8)]">
-                      {formatDayType(dashboard.today.day_type)}
-                    </h2>
-                    <p className="mt-2 text-green-300/80">
-                      {dashboard.today.spoken_response || "No workout status available."}
-                    </p>
-                  </div>
-                </div>
-              </Link>
-
-              <div className="rounded-2xl border border-green-500/30 bg-zinc-950 p-6">
-                <p className="text-sm uppercase tracking-wide text-green-500/60">Jarvis Note</p>
-                <p className="mt-3 text-xl font-semibold text-green-300">
-                  {dashboard.coaching_note}
-                </p>
-              </div>
+              <WorkoutMissionCard dashboard={dashboard} />
+              <DailyBriefing dashboard={dashboard} />
             </section>
 
             <section className="grid gap-6 lg:grid-cols-2">
-              <DashboardPanel title="Next Workout">
-                <p className="text-2xl font-semibold">
-                  {dashboard.next_workout.lift_label || "No lift queued"}
-                </p>
-                <p className="mt-2 text-green-300/75">
-                  {dashboard.next_workout.spoken_response || "No next workout found."}
-                </p>
-              </DashboardPanel>
-
-              <DashboardPanel title="Calendar / Work">
-                <div className="space-y-4">
-                  <CalendarLine label="Today" item={dashboard.calendar.today} />
-                  <CalendarLine label="Tomorrow" item={dashboard.calendar.tomorrow} />
-                </div>
-              </DashboardPanel>
-
-              <DashboardPanel title="Meal Plan Today">
-                {dashboard.meals.length === 0 ? (
-                  <p className="text-green-300/70">No meals planned today.</p>
-                ) : (
-                  <div className="space-y-3">
-                    {dashboard.meals.map((meal) => (
-                      <div key={meal.id} className="rounded-xl border border-green-500/20 bg-black p-4">
-                        <p className="font-semibold capitalize">{meal.meal_type}</p>
-                        <p className="mt-1 text-green-300/80">{meal.name}</p>
-                        {meal.notes && <p className="mt-1 text-sm text-green-300/60">{meal.notes}</p>}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </DashboardPanel>
-
-              <DashboardPanel title="Unchecked Shopping">
-                {!dashboard.shopping.list ? (
-                  <p className="text-green-300/70">No shopping list found.</p>
-                ) : dashboard.shopping.unchecked_count === 0 ? (
-                  <div>
-                    <p className="text-xl font-semibold">{dashboard.shopping.list.title}</p>
-                    <p className="mt-2 text-green-300/70">Everything is checked off.</p>
-                  </div>
-                ) : (
-                  <div>
-                    <p className="text-xl font-semibold">
-                      {dashboard.shopping.unchecked_count} open item{dashboard.shopping.unchecked_count === 1 ? "" : "s"}
-                    </p>
-                    <p className="mt-1 text-sm text-green-300/60">{dashboard.shopping.list.title}</p>
-                    <div className="mt-4 space-y-2">
-                      {dashboard.shopping.unchecked_items.slice(0, 8).map((item) => (
-                        <div key={item.id} className="rounded-lg border border-green-500/20 bg-black px-3 py-2">
-                          <span className="font-semibold">{item.item_name}</span>
-                          <span className="text-green-300/60">
-                            {item.quantity ? ` · ${item.quantity}` : ""}
-                            {item.category ? ` · ${item.category}` : ""}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </DashboardPanel>
+              <NextWorkoutPanel dashboard={dashboard} />
+              <CalendarPanel dashboard={dashboard} />
+              <MealPlanPanel meals={dashboard.meals} />
+              <ShoppingPanel shopping={dashboard.shopping} />
             </section>
           </>
         )}
@@ -343,31 +405,188 @@ export default function CommandCenterPage() {
   );
 }
 
-function DashboardPanel({
+function HudPanel({
   title,
+  Icon,
   children,
+  className = "",
 }: {
   title: string;
+  Icon: LucideIcon;
   children: React.ReactNode;
+  className?: string;
 }) {
   return (
-    <section className="rounded-2xl border border-green-500/30 bg-zinc-950 p-6">
-      <h2 className="mb-4 text-2xl font-semibold">{title}</h2>
+    <section className={`hud-panel ${className}`}>
+      <div className="mb-5 flex items-center gap-3">
+        <div className="hud-panel-icon">
+          <Icon className="h-5 w-5" />
+        </div>
+        <h2 className="hud-panel-title">{title}</h2>
+      </div>
       {children}
     </section>
   );
 }
 
-function StatusCard({ label, value }: { label: string; value: string }) {
+function WorkoutMissionCard({ dashboard }: { dashboard: DashboardResponse }) {
+  const lift = getLiftForConfig(dashboard);
+  const config = getWorkoutConfig(lift);
+  const Icon = config.Icon;
+  const title = formatDayType(lift).toUpperCase();
+
   return (
-    <div className="rounded-xl border border-green-500/20 bg-zinc-950 p-4">
-      <p className="text-xs uppercase tracking-wide text-green-500/60">{label}</p>
-      <p className="mt-2 text-lg font-semibold text-green-300">{value}</p>
+    <Link href="/workouts" className={`mission-card group ${config.accentClass}`}>
+      <div className="mission-scan" />
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="hud-kicker">Today&apos;s Training Objective</p>
+          <h2 className="mt-2 text-4xl font-black leading-none text-green-100 md:text-5xl">
+            {title}
+          </h2>
+          <p className="mt-3 text-sm font-bold uppercase tracking-[0.24em] text-green-300">
+            {config.label}
+          </p>
+        </div>
+        <div className="mission-icon-shell">
+          <Icon className="h-12 w-12" />
+        </div>
+      </div>
+
+      <div className="mt-7 grid gap-3 text-sm sm:grid-cols-3">
+        <MissionMetric label="Status" value="Active" />
+        <MissionMetric label="Type" value={config.missionType.replace("MISSION ", "")} />
+        <MissionMetric label="Action" value="Open Protocol" />
+      </div>
+
+      <p className="mt-5 inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.18em] text-green-200/80 transition group-hover:text-green-100">
+        Open Workout Protocol <ChevronRight className="h-4 w-4" />
+      </p>
+    </Link>
+  );
+}
+
+function MissionMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="hud-metric">
+      <p>{label}</p>
+      <strong>{value}</strong>
     </div>
   );
 }
 
-function CalendarLine({
+function DailyBriefing({ dashboard }: { dashboard: DashboardResponse }) {
+  const birthdayName = parseBirthdayName(dashboard.birthday_note);
+  const lift = getLiftForConfig(dashboard);
+  const shoppingCount = dashboard.shopping.unchecked_count;
+  const todayEvents = getCalendarCount(dashboard.calendar.today);
+  const todayParsedEvents = parseCalendarEvents(dashboard.calendar.today, "today");
+  const tomorrowParsedEvents = parseCalendarEvents(dashboard.calendar.tomorrow, "tomorrow");
+  const nextScheduleEvent = [
+    ...todayParsedEvents.filter((event) => event.type !== "birthday"),
+    ...tomorrowParsedEvents,
+  ][0];
+  const recommendation = [
+    `complete ${formatDayType(lift).toLowerCase()}`,
+    birthdayName ? `acknowledge ${birthdayName}'s birthday` : null,
+    shoppingCount > 0 ? "clear the highest-priority shopping item" : null,
+  ].filter(Boolean).join(", ");
+
+  return (
+    <HudPanel title="Daily Briefing" Icon={Zap}>
+      <p className="text-2xl font-black uppercase text-green-100">Good morning, John.</p>
+
+      <div className="mt-5">
+        <p className="hud-kicker">Primary Priorities</p>
+        <ol className="mt-3 space-y-2 text-sm text-green-100/90">
+          {birthdayName && <li>1. {birthdayName} birthday</li>}
+          <li>{birthdayName ? "2" : "1"}. {formatDayType(lift)} training objective</li>
+          <li>{birthdayName ? "3" : "2"}. Clear {shoppingCount} shopping item{shoppingCount === 1 ? "" : "s"}</li>
+        </ol>
+      </div>
+
+      <div className="mt-5 grid gap-4 text-sm sm:grid-cols-2">
+        <BriefingBlock
+          label="Schedule"
+          lines={[
+            `${todayEvents} event${todayEvents === 1 ? "" : "s"} today`,
+            nextScheduleEvent ? `Next event: ${nextScheduleEvent.title} at ${nextScheduleEvent.time}` : "No upcoming event detected",
+          ]}
+        />
+        <BriefingBlock
+          label="Nutrition"
+          lines={[
+            dashboard.meals.length
+              ? `${dashboard.meals.length} meal${dashboard.meals.length === 1 ? "" : "s"} planned`
+              : "No meals planned today",
+          ]}
+        />
+      </div>
+
+      <div className="mt-5 rounded-lg border border-green-500/20 bg-black/35 p-3">
+        <p className="hud-kicker">Recommendation</p>
+        <p className="mt-2 text-green-200/85">
+          Keep today simple: {recommendation || dashboard.coaching_note}.
+        </p>
+      </div>
+    </HudPanel>
+  );
+}
+
+function BriefingBlock({ label, lines }: { label: string; lines: string[] }) {
+  return (
+    <div className="rounded-lg border border-green-500/20 bg-black/30 p-3">
+      <p className="hud-kicker">{label}</p>
+      <div className="mt-2 space-y-1 text-green-200/80">
+        {lines.map((line) => (
+          <p key={line}>{line}</p>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function NextWorkoutPanel({ dashboard }: { dashboard: DashboardResponse }) {
+  const lift = dashboard.next_workout.lift || dashboard.today.scheduled_lift || dashboard.today.day_type;
+  const config = getWorkoutConfig(lift);
+  const Icon = config.Icon;
+
+  return (
+    <HudPanel title="Next Training Protocol" Icon={ClipboardList}>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-3xl font-black uppercase text-green-100">
+            {dashboard.next_workout.lift_label || formatDayType(lift)}
+          </p>
+          <p className="mt-2 text-sm font-bold uppercase tracking-[0.2em] text-green-300/75">
+            {config.label}
+          </p>
+        </div>
+        <div className="hud-panel-icon h-12 w-12">
+          <Icon className="h-7 w-7" />
+        </div>
+      </div>
+      <div className="mt-5 grid gap-3 sm:grid-cols-3">
+        <MissionMetric label="Status" value="Scheduled" />
+        <MissionMetric label="Focus" value={config.focus} />
+        <MissionMetric label="Action" value="Review Plan" />
+      </div>
+    </HudPanel>
+  );
+}
+
+function CalendarPanel({ dashboard }: { dashboard: DashboardResponse }) {
+  return (
+    <HudPanel title="Calendar / Work" Icon={CalendarDays}>
+      <div className="space-y-5">
+        <CalendarDay label="Today" item={dashboard.calendar.today} />
+        <CalendarDay label="Tomorrow" item={dashboard.calendar.tomorrow} />
+      </div>
+    </HudPanel>
+  );
+}
+
+function CalendarDay({
   label,
   item,
 }: {
@@ -377,15 +596,190 @@ function CalendarLine({
     spoken_response: string;
   };
 }) {
+  const events = parseCalendarEvents(item, label.toLowerCase());
+
   return (
-    <div className="rounded-xl border border-green-500/20 bg-black p-4">
-      <p className="text-sm uppercase tracking-wide text-green-500/60">{label}</p>
-      <p className="mt-2 text-green-300/85">{item.spoken_response}</p>
-      {item.status === "fallback" && (
-        <p className="mt-2 text-sm text-yellow-300/80">
-          Calendar unavailable or empty. Showing shift fallback.
+    <div>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <p className="hud-kicker">{label}</p>
+        {item.status === "fallback" && (
+          <span className="status-pill status-pill-warning">Fallback</span>
+        )}
+      </div>
+      {events.length === 0 ? (
+        <p className="rounded-lg border border-green-500/15 bg-black/30 p-3 text-sm text-green-300/70">
+          No calendar events detected.
         </p>
+      ) : (
+        <div className="space-y-2">
+          {events.map((event, index) => (
+            <CalendarEventRow key={`${event.title}-${index}`} event={event} />
+          ))}
+        </div>
       )}
     </div>
+  );
+}
+
+function CalendarEventRow({ event }: { event: CalendarEvent }) {
+  return (
+    <div className="hud-row">
+      <div className="hud-row-icon">
+        <CalendarEventIcon type={event.type} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <p className="font-semibold text-green-100">{event.title}</p>
+          <p className="text-sm text-green-300/75">{event.time}</p>
+        </div>
+        {(event.date || event.location) && (
+          <p className="mt-1 text-xs text-green-300/55">
+            {event.date ? event.date : ""}
+            {event.date && event.location ? " · " : ""}
+            {event.location ? `Location: ${event.location}` : ""}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CalendarEventIcon({ type }: { type: CalendarEvent["type"] }) {
+  switch (type) {
+    case "birthday":
+      return <Cake className="h-4 w-4" />;
+    case "work":
+      return <BriefcaseBusiness className="h-4 w-4" />;
+    case "payday":
+      return <DollarSign className="h-4 w-4" />;
+    default:
+      return <CalendarDays className="h-4 w-4" />;
+  }
+}
+
+function MealPlanPanel({ meals }: { meals: MealEntry[] }) {
+  return (
+    <HudPanel title="Meal Plan Today" Icon={Utensils}>
+      {meals.length === 0 ? (
+        <p className="rounded-lg border border-green-500/15 bg-black/30 p-3 text-green-300/70">
+          No meals planned today.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {meals.map((meal) => (
+            <div key={meal.id} className="hud-row">
+              <div className="hud-row-icon">
+                <Utensils className="h-4 w-4" />
+              </div>
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-green-500/70">{meal.meal_type}</p>
+                <p className="mt-1 font-semibold text-green-100">{meal.name}</p>
+                {meal.notes && <p className="mt-1 text-sm text-green-300/60">{meal.notes}</p>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </HudPanel>
+  );
+}
+
+function ShoppingPanel({ shopping }: { shopping: DashboardResponse["shopping"] }) {
+  const categoryCounts = getCategoryCounts(shopping.unchecked_items);
+
+  return (
+    <HudPanel title="Supply Status" Icon={ShoppingCart}>
+      {!shopping.list ? (
+        <p className="text-green-300/70">No shopping list found.</p>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="text-3xl font-black text-green-100">
+                {shopping.unchecked_count} OPEN ITEM{shopping.unchecked_count === 1 ? "" : "S"}
+              </p>
+              <p className="mt-1 text-sm text-green-300/60">{shopping.list.title}</p>
+            </div>
+            <ShoppingCart className="h-8 w-8 text-green-300/70" />
+          </div>
+
+          {Object.keys(categoryCounts).length > 0 && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {Object.entries(categoryCounts).map(([category, count]) => (
+                <span key={category} className="status-pill">
+                  {category}: {count}
+                </span>
+              ))}
+            </div>
+          )}
+
+          <div className="mt-5 space-y-2">
+            {shopping.unchecked_items.slice(0, 8).map((item) => (
+              <div key={item.id} className="hud-row hoverable-row">
+                <Circle className="h-4 w-4 text-green-500/70" />
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-green-100">{item.item_name}</p>
+                  <p className="text-sm text-green-300/60">
+                    {[item.quantity, item.category].filter(Boolean).join(" · ") || "No details"}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </HudPanel>
+  );
+}
+
+function SystemStatusPanel({
+  status,
+  dashboard,
+}: {
+  status: StatusResponse;
+  dashboard: DashboardResponse | null;
+}) {
+  // TODO: Replace mock/pending values with real backend health checks.
+  const statusItems = [
+    { label: "Systems", value: status.systems || "Online", Icon: Server, state: "online" },
+    { label: "Brain", value: status.brain || "Gemini 1.5 Flash", Icon: BrainCircuit, state: "online" },
+    { label: "User", value: status.user || "John Summers Sr", Icon: UserRound, state: "online" },
+    { label: "Clearance", value: status.clearance || "Active", Icon: ShieldCheck, state: "online" },
+    { label: "Local API", value: "Online", Icon: Wifi, state: "online" },
+    { label: "Ollama", value: "Pending", Icon: WifiOff, state: "pending" },
+    {
+      label: "Calendar Sync",
+      value: dashboard?.calendar.today.status === "ok" ? "Online" : "Offline",
+      Icon: CalendarDays,
+      state: dashboard?.calendar.today.status === "ok" ? "online" : "pending",
+    },
+    { label: "Meal Planner", value: "Ready", Icon: DatabaseZap, state: "online" },
+    { label: "Shopping List", value: "Ready", Icon: CheckCircle2, state: "online" },
+  ];
+
+  return (
+    <section className="hud-panel mb-6">
+      <div className="mb-4 flex items-center gap-3">
+        <div className="hud-panel-icon">
+          <Activity className="h-5 w-5" />
+        </div>
+        <h2 className="hud-panel-title">Jarvis System Status</h2>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {statusItems.map((item) => (
+          <div key={item.label} className={`system-status-card ${item.state === "pending" ? "is-pending" : ""}`}>
+            <item.Icon className="h-5 w-5" />
+            <div>
+              <p>{item.label}</p>
+              <strong>{item.value}</strong>
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="mt-4 flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-yellow-300/70">
+        <AlertTriangle className="h-4 w-4" />
+        Some health checks are mocked pending backend probes.
+      </p>
+    </section>
   );
 }

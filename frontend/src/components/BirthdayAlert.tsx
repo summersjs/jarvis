@@ -1,3 +1,5 @@
+import { Gift } from "lucide-react";
+
 type BirthdayAlertProps = {
   note: string;
 };
@@ -29,6 +31,7 @@ export default function BirthdayAlert({ note }: BirthdayAlertProps) {
       <span className="birthday-hud-corner birthday-hud-corner-br" aria-hidden="true" />
 
       <div className="birthday-hud-icon" aria-hidden="true">
+        <Gift className="birthday-hud-lucide-icon" />
         <span className="birthday-hud-icon-box" />
         <span className="birthday-hud-icon-ribbon" />
         <span className="birthday-hud-spark birthday-hud-spark-a" />

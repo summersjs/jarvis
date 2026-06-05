@@ -1022,9 +1022,11 @@ function ProgressTracker({
       ? Math.min(100, Math.max(0, (current / Math.max(current, previous)) * 100))
       : 35;
   const isLimitBreak = !!goal && (progressPercent >= 100 || !!goal.progress?.is_complete);
-  const progressBarClass = isLimitBreak
-    ? "limit-break-bar h-full rounded-full transition-all"
-    : `${getProgressColorClass(progressPercent)} h-full rounded-full transition-all`;
+  const progressStatus = getProgressStatus(progressPercent, isLimitBreak);
+  const milestones = goal
+    ? getStrengthMilestones(goal.title, goalTarget, goalCurrent, goal.unit || "lbs")
+    : [];
+  const upcomingMilestone = milestones.find((milestone) => goalCurrent < milestone.value);
   const trackerClass = isLimitBreak
     ? "mt-6 rounded-xl border border-yellow-300/70 bg-black/35 p-4 shadow-[0_0_38px_rgba(250,204,21,0.35)]"
     : `mt-6 rounded-xl bg-black/35 p-4 ${getProgressCardClass(progressPercent)}`;
@@ -1062,17 +1064,51 @@ function ProgressTracker({
           {Math.round(progressPercent)}%
         </span>
       </div>
-      <div
-        className={
-          isLimitBreak
-            ? "h-5 overflow-hidden rounded-full border border-yellow-200/80 bg-black shadow-[0_0_22px_rgba(250,204,21,0.45)]"
-            : "h-4 overflow-hidden rounded-full border border-green-500/30 bg-black"
-        }
-      >
+
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <span className={`goal-progress-status goal-progress-status-${progressStatus.tone}`}>
+          {progressStatus.label}
+        </span>
+        {upcomingMilestone && !isLimitBreak && (
+          <span className="text-xs uppercase tracking-[0.16em] text-green-300/65">
+            Next unlock: {formatNumber(upcomingMilestone.value)}
+            {goal?.unit ? ` ${goal.unit}` : " lbs"}
+          </span>
+        )}
+      </div>
+
+      <div className={`goal-progress-track ${isLimitBreak ? "goal-progress-track-complete" : ""}`}>
         <div
-          className={progressBarClass}
+          className={`goal-progress-fill ${
+            isLimitBreak ? "limit-break-bar goal-progress-fill-complete" : `goal-progress-fill-${progressStatus.tone}`
+          }`}
           style={{ width: `${progressPercent}%` }}
-        />
+        >
+          {(progressStatus.tone === "green" || isLimitBreak) && (
+            <span className="goal-progress-particles" aria-hidden="true" />
+          )}
+        </div>
+
+        {milestones.map((milestone) => {
+          const crossed = goalCurrent >= milestone.value || isLimitBreak;
+          const upcoming = upcomingMilestone?.value === milestone.value;
+          return (
+            <div
+              key={`${milestone.value}-${milestone.kind}`}
+              className={[
+                "goal-milestone",
+                crossed ? "goal-milestone-crossed" : "",
+                upcoming ? "goal-milestone-upcoming" : "",
+                milestone.kind === "final" ? "goal-milestone-final" : "",
+              ].join(" ")}
+              style={{ left: `${milestone.percent}%` }}
+              title={milestone.tooltip}
+              aria-label={milestone.tooltip}
+            >
+              <span className="goal-milestone-pin">{crossed ? "✓" : ""}</span>
+            </div>
+          );
+        })}
       </div>
       {isLimitBreak && (
         <p className="mt-3 text-sm font-bold uppercase tracking-[0.25em] text-yellow-200 drop-shadow-[0_0_10px_rgba(250,204,21,0.95)]">
@@ -1083,17 +1119,80 @@ function ProgressTracker({
   );
 }
 
-function getProgressColorClass(percent: number) {
-  if (percent < 25) {
-    return "bg-red-500 shadow-[0_0_16px_rgba(239,68,68,0.7)]";
+function getProgressStatus(percent: number, isComplete: boolean) {
+  if (isComplete) {
+    return {
+      tone: "rainbow",
+      label: "ACHIEVEMENT UNLOCKED",
+    };
   }
-  if (percent < 60) {
-    return "bg-orange-400 shadow-[0_0_16px_rgba(251,146,60,0.7)]";
+  if (percent >= 95) {
+    return {
+      tone: "green",
+      label: "GOAL IMMINENT",
+    };
   }
-  if (percent < 90) {
-    return "bg-yellow-300 shadow-[0_0_16px_rgba(253,224,71,0.75)]";
+  if (percent >= 85) {
+    return {
+      tone: "green",
+      label: "FINAL STRETCH",
+    };
   }
-  return "bg-green-400 shadow-[0_0_18px_rgba(74,222,128,0.8)]";
+  if (percent >= 70) {
+    return {
+      tone: "yellow",
+      label: "MOMENTUM BUILDING",
+    };
+  }
+  if (percent >= 50) {
+    return {
+      tone: "yellow",
+      label: "PROGRESSING",
+    };
+  }
+  return {
+    tone: "red",
+    label: "LONG ROAD AHEAD",
+  };
+}
+
+function getStrengthMilestones(title: string, target: number, current: number, unit: string) {
+  if (target <= 0) return [];
+
+  const normalizedTitle = title.toLowerCase();
+  const normalizedUnit = unit.toLowerCase();
+  const isStrengthGoal =
+    normalizedUnit.includes("lb") &&
+    ["bench", "squat", "deadlift", "press", "ohp"].some((lift) =>
+      normalizedTitle.includes(lift)
+    );
+
+  const values = isStrengthGoal
+    ? getPlateMilestones(target)
+    : [0.5, 0.75, 0.9, 1].map((ratio) => Math.round(target * ratio * 100) / 100);
+
+  return values
+    .filter((value) => value > 0 && value <= target)
+    .filter((value, index, list) => list.indexOf(value) === index)
+    .map((value) => ({
+      value,
+      percent: Math.min(100, Math.max(0, (value / target) * 100)),
+      kind: value === target ? "final" : "milestone",
+      tooltip:
+        value === target
+          ? "Final Goal"
+          : current >= value
+            ? "Reached"
+            : "Next Unlock",
+    }));
+}
+
+function getPlateMilestones(target: number) {
+  const ratios = target <= 250
+    ? [0.6, 0.8, 0.8888888889, 1]
+    : [0.7142857143, 0.873015873, 0.9523809524, 1];
+
+  return ratios.map((ratio) => roundToNearest5(target * ratio));
 }
 
 function getProgressCardClass(percent: number) {
@@ -1107,6 +1206,10 @@ function getProgressCardClass(percent: number) {
     return "border border-yellow-300/55 shadow-[0_0_22px_rgba(253,224,71,0.24)]";
   }
   return "border border-green-400/55 shadow-[0_0_24px_rgba(74,222,128,0.28)]";
+}
+
+function roundToNearest5(value: number) {
+  return Math.round(value / 5) * 5;
 }
 
 function RecoveryBriefing({

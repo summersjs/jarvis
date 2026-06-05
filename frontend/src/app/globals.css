@@ -843,3 +843,274 @@ body {
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.75), transparent);
   animation: limit-break-sweep 1.1s linear infinite;
 }
+
+.goal-progress-shell {
+  position: relative;
+  padding-top: 0.1rem;
+}
+
+.goal-progress-status {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid;
+  padding: 0.28rem 0.62rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+}
+
+.goal-progress-status-red {
+  border-color: rgba(248, 113, 113, 0.54);
+  color: rgb(254, 202, 202);
+  background: rgba(127, 29, 29, 0.24);
+  text-shadow: 0 0 10px rgba(239, 68, 68, 0.55);
+}
+
+.goal-progress-status-yellow {
+  border-color: rgba(250, 204, 21, 0.58);
+  color: rgb(254, 240, 138);
+  background: rgba(113, 63, 18, 0.24);
+  text-shadow: 0 0 10px rgba(250, 204, 21, 0.58);
+}
+
+.goal-progress-status-green {
+  border-color: rgba(74, 222, 128, 0.64);
+  color: rgb(187, 247, 208);
+  background: rgba(20, 83, 45, 0.26);
+  text-shadow: 0 0 12px rgba(74, 222, 128, 0.75);
+}
+
+.goal-progress-status-rainbow {
+  border-color: rgba(250, 204, 21, 0.72);
+  color: rgb(254, 249, 195);
+  background: rgba(113, 63, 18, 0.28);
+  text-shadow:
+    0 0 10px rgba(250, 204, 21, 0.95),
+    0 0 18px rgba(34, 211, 238, 0.72);
+}
+
+.goal-progress-track {
+  position: relative;
+  height: 1.25rem;
+  overflow: visible;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent),
+    rgb(0, 0, 0);
+  box-shadow:
+    inset 0 0 12px rgba(0, 0, 0, 0.88),
+    0 0 10px rgba(34, 197, 94, 0.12);
+}
+
+.goal-progress-track-complete {
+  height: 1.45rem;
+  border-color: rgba(250, 204, 21, 0.8);
+  box-shadow:
+    inset 0 0 14px rgba(0, 0, 0, 0.82),
+    0 0 24px rgba(250, 204, 21, 0.44);
+}
+
+.goal-progress-fill {
+  position: relative;
+  height: 100%;
+  min-width: 0.55rem;
+  overflow: hidden;
+  border-radius: 999px;
+  transition: width 700ms ease;
+}
+
+.goal-progress-fill-red {
+  background: linear-gradient(90deg, rgb(127, 29, 29), rgb(239, 68, 68));
+  box-shadow:
+    0 0 15px rgba(239, 68, 68, 0.68),
+    inset 0 0 10px rgba(254, 202, 202, 0.16);
+  animation: goal-red-pulse 2.45s ease-in-out infinite;
+}
+
+.goal-progress-fill-yellow {
+  background:
+    linear-gradient(102deg, transparent 0%, rgba(255, 255, 255, 0.42) 18%, transparent 35%) 0 0 / 42% 100%,
+    linear-gradient(90deg, rgb(161, 98, 7), rgb(250, 204, 21), rgb(234, 179, 8));
+  box-shadow:
+    0 0 18px rgba(250, 204, 21, 0.7),
+    inset 0 0 10px rgba(254, 240, 138, 0.2);
+  animation: goal-yellow-shimmer 1.35s linear infinite;
+}
+
+.goal-progress-fill-green {
+  background:
+    linear-gradient(90deg, rgb(22, 101, 52), rgb(74, 222, 128), rgb(34, 197, 94));
+  box-shadow:
+    0 0 23px rgba(74, 222, 128, 0.88),
+    0 0 42px rgba(34, 197, 94, 0.45),
+    inset 0 0 12px rgba(220, 252, 231, 0.26);
+  animation: goal-heartbeat 1.08s ease-in-out infinite;
+}
+
+.goal-progress-fill-complete {
+  box-shadow:
+    0 0 24px rgba(250, 204, 21, 0.9),
+    0 0 48px rgba(34, 211, 238, 0.56),
+    inset 0 0 14px rgba(255, 255, 255, 0.32);
+}
+
+.goal-progress-particles {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle, rgba(255, 255, 255, 0.95) 0 0.08rem, transparent 0.11rem) 0 22% / 2.2rem 100% repeat-x,
+    radial-gradient(circle, rgba(187, 247, 208, 0.9) 0 0.06rem, transparent 0.1rem) 1rem 72% / 2.8rem 100% repeat-x;
+  opacity: 0.78;
+  animation: goal-particles 900ms linear infinite;
+}
+
+.goal-milestone {
+  position: absolute;
+  top: 50%;
+  z-index: 3;
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+}
+
+.goal-milestone-pin {
+  display: grid;
+  width: 0.72rem;
+  height: 0.72rem;
+  place-items: center;
+  border: 1px solid rgba(134, 239, 172, 0.46);
+  border-radius: 999px;
+  background: rgb(0, 0, 0);
+  color: rgb(187, 247, 208);
+  font-size: 0.48rem;
+  font-weight: 900;
+  box-shadow: 0 0 10px rgba(34, 197, 94, 0.18);
+}
+
+.goal-milestone-crossed .goal-milestone-pin {
+  border-color: rgba(74, 222, 128, 0.95);
+  background: rgb(22, 101, 52);
+  color: rgb(240, 253, 244);
+  box-shadow:
+    0 0 10px rgba(74, 222, 128, 0.9),
+    0 0 22px rgba(34, 197, 94, 0.46);
+}
+
+.goal-milestone-upcoming .goal-milestone-pin {
+  width: 1rem;
+  height: 1rem;
+  border-color: rgba(250, 204, 21, 0.98);
+  background: rgb(113, 63, 18);
+  box-shadow:
+    0 0 12px rgba(250, 204, 21, 0.95),
+    0 0 25px rgba(250, 204, 21, 0.42);
+  animation: goal-marker-pulse 1.45s ease-in-out infinite;
+}
+
+.goal-milestone-final .goal-milestone-pin {
+  width: 1.18rem;
+  height: 1.18rem;
+  border-color: rgba(34, 211, 238, 0.98);
+  background:
+    radial-gradient(circle, rgba(250, 204, 21, 0.48), transparent 58%),
+    rgb(8, 47, 73);
+  box-shadow:
+    0 0 14px rgba(34, 211, 238, 0.96),
+    0 0 34px rgba(250, 204, 21, 0.45);
+}
+
+.goal-milestone::after {
+  content: attr(title);
+  position: absolute;
+  top: -1.75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  border-radius: 999px;
+  border: 1px solid rgba(187, 247, 208, 0.36);
+  background: rgba(0, 0, 0, 0.9);
+  color: rgb(220, 252, 231);
+  padding: 0.18rem 0.46rem;
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.goal-milestone:hover::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(-2px);
+}
+
+.goal-milestone-final::after {
+  border-color: rgba(34, 211, 238, 0.65);
+  color: rgb(165, 243, 252);
+}
+
+@keyframes goal-red-pulse {
+  0%,
+  100% {
+    filter: brightness(0.95);
+    opacity: 0.84;
+  }
+  50% {
+    filter: brightness(1.22);
+    opacity: 1;
+  }
+}
+
+@keyframes goal-yellow-shimmer {
+  from {
+    background-position:
+      -45% 0,
+      0 0;
+  }
+  to {
+    background-position:
+      145% 0,
+      0 0;
+  }
+}
+
+@keyframes goal-heartbeat {
+  0%,
+  100% {
+    transform: scaleY(1);
+    filter: brightness(1);
+  }
+  18% {
+    transform: scaleY(1.2);
+    filter: brightness(1.36);
+  }
+  32% {
+    transform: scaleY(0.94);
+    filter: brightness(1.05);
+  }
+  46% {
+    transform: scaleY(1.13);
+    filter: brightness(1.26);
+  }
+}
+
+@keyframes goal-particles {
+  to {
+    background-position:
+      2.2rem 22%,
+      3.8rem 72%;
+  }
+}
+
+@keyframes goal-marker-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.18);
+  }
+}

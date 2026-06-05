@@ -31,6 +31,7 @@ app.add_middleware(
         "https://jarvis.schoolyardshowdown.com",
         "https://jarvis-git-master-johnfsummers-9948s-projects.vercel.app",
     ],
+    allow_origin_regex=r"^http://(10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+):3000$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

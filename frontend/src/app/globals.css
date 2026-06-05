@@ -73,6 +73,290 @@ body {
   outline-offset: 3px;
 }
 
+.birthday-hud-card {
+  position: relative;
+  display: grid;
+  width: 100%;
+  grid-template-columns: 4.4rem 1fr;
+  gap: 1.1rem;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(74, 222, 128, 0.58);
+  border-radius: 0.35rem;
+  background:
+    radial-gradient(circle at 48% 48%, rgba(74, 222, 128, 0.22), transparent 24rem),
+    linear-gradient(135deg, rgba(3, 20, 12, 0.96), rgba(2, 44, 34, 0.86) 54%, rgba(0, 0, 0, 0.96));
+  box-shadow:
+    0 0 0 1px rgba(187, 247, 208, 0.1) inset,
+    0 0 22px rgba(34, 197, 94, 0.2),
+    inset 0 0 34px rgba(34, 197, 94, 0.08);
+  padding: 1.25rem 1.35rem;
+  isolation: isolate;
+  animation: birthday-hud-pulse 2.8s ease-in-out infinite;
+}
+
+.birthday-hud-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, transparent 0%, rgba(187, 247, 208, 0.42) 48%, transparent 100%);
+  width: 34%;
+  opacity: 0.48;
+  transform: translateX(-120%) skewX(-18deg);
+  animation: birthday-hud-scan 3.2s linear infinite;
+}
+
+.birthday-hud-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    repeating-linear-gradient(0deg, rgba(134, 239, 172, 0.06) 0, rgba(134, 239, 172, 0.06) 1px, transparent 1px, transparent 9px),
+    linear-gradient(120deg, transparent, rgba(45, 212, 191, 0.1), transparent);
+  opacity: 0.46;
+}
+
+.birthday-hud-corner {
+  position: absolute;
+  width: 1.05rem;
+  height: 1.05rem;
+  border-color: rgba(187, 247, 208, 0.88);
+  pointer-events: none;
+}
+
+.birthday-hud-corner-tl {
+  top: 0.55rem;
+  left: 0.55rem;
+  border-top: 2px solid;
+  border-left: 2px solid;
+}
+
+.birthday-hud-corner-tr {
+  top: 0.55rem;
+  right: 0.55rem;
+  border-top: 2px solid;
+  border-right: 2px solid;
+}
+
+.birthday-hud-corner-bl {
+  bottom: 0.55rem;
+  left: 0.55rem;
+  border-bottom: 2px solid;
+  border-left: 2px solid;
+}
+
+.birthday-hud-corner-br {
+  right: 0.55rem;
+  bottom: 0.55rem;
+  border-right: 2px solid;
+  border-bottom: 2px solid;
+}
+
+.birthday-hud-icon {
+  position: relative;
+  display: grid;
+  width: 3.7rem;
+  height: 3.7rem;
+  place-items: center;
+  border: 1px solid rgba(134, 239, 172, 0.46);
+  border-radius: 0.25rem;
+  background: rgba(0, 0, 0, 0.34);
+  box-shadow:
+    inset 0 0 18px rgba(34, 197, 94, 0.12),
+    0 0 18px rgba(34, 197, 94, 0.14);
+  animation: birthday-icon-bounce 2.8s ease-in-out infinite;
+}
+
+.birthday-hud-icon-box {
+  position: absolute;
+  bottom: 0.82rem;
+  width: 1.65rem;
+  height: 1.35rem;
+  border: 2px solid rgba(220, 252, 231, 0.86);
+  border-top-width: 5px;
+  box-shadow: 0 0 12px rgba(134, 239, 172, 0.28);
+}
+
+.birthday-hud-icon-ribbon {
+  position: absolute;
+  bottom: 0.82rem;
+  width: 0.28rem;
+  height: 1.35rem;
+  background: rgba(134, 239, 172, 0.9);
+  box-shadow: 0 0 10px rgba(134, 239, 172, 0.42);
+}
+
+.birthday-hud-icon-ribbon::before,
+.birthday-hud-icon-ribbon::after {
+  content: "";
+  position: absolute;
+  top: -0.72rem;
+  width: 0.72rem;
+  height: 0.48rem;
+  border: 2px solid rgba(220, 252, 231, 0.78);
+  border-radius: 50% 50% 0 50%;
+}
+
+.birthday-hud-icon-ribbon::before {
+  right: 0.18rem;
+  transform: rotate(-22deg);
+}
+
+.birthday-hud-icon-ribbon::after {
+  left: 0.18rem;
+  transform: rotate(22deg) scaleX(-1);
+}
+
+.birthday-hud-spark {
+  position: absolute;
+  width: 0.34rem;
+  height: 0.34rem;
+  border-radius: 999px;
+  background: rgb(220, 252, 231);
+  box-shadow: 0 0 10px rgba(220, 252, 231, 0.62);
+  opacity: 0.7;
+  animation: birthday-sparkle 2.8s ease-in-out infinite;
+}
+
+.birthday-hud-spark-a {
+  top: 0.58rem;
+  right: 0.72rem;
+}
+
+.birthday-hud-spark-b {
+  bottom: 0.74rem;
+  left: 0.65rem;
+  animation-delay: 0.7s;
+}
+
+.birthday-hud-content {
+  position: relative;
+  min-width: 0;
+}
+
+.birthday-hud-content::before {
+  content: "";
+  position: absolute;
+  inset: -0.45rem auto auto -1rem;
+  z-index: -1;
+  width: min(100%, 25rem);
+  height: 4.2rem;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(74, 222, 128, 0.2), transparent 68%);
+  filter: blur(2px);
+}
+
+.birthday-hud-label {
+  margin: 0;
+  color: rgba(134, 239, 172, 0.82);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.28em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.birthday-hud-name {
+  margin: 0.35rem 0 0;
+  color: rgb(220, 252, 231);
+  font-size: clamp(2rem, 5vw, 4.25rem);
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 0.92;
+}
+
+.birthday-hud-subtitle {
+  margin: 0.42rem 0 0;
+  color: rgb(134, 239, 172);
+  font-size: clamp(1rem, 2.2vw, 1.45rem);
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.birthday-hud-footer {
+  margin: 0.58rem 0 0;
+  color: rgba(187, 247, 208, 0.76);
+  font-size: 0.95rem;
+  line-height: 1.35;
+}
+
+@keyframes birthday-hud-pulse {
+  0%,
+  100% {
+    border-color: rgba(74, 222, 128, 0.58);
+    box-shadow:
+      0 0 0 1px rgba(187, 247, 208, 0.1) inset,
+      0 0 22px rgba(34, 197, 94, 0.2),
+      inset 0 0 34px rgba(34, 197, 94, 0.08);
+  }
+  48% {
+    border-color: rgba(187, 247, 208, 0.92);
+    box-shadow:
+      0 0 0 1px rgba(187, 247, 208, 0.2) inset,
+      0 0 34px rgba(34, 197, 94, 0.34),
+      0 0 62px rgba(45, 212, 191, 0.14),
+      inset 0 0 42px rgba(34, 197, 94, 0.12);
+  }
+}
+
+@keyframes birthday-hud-scan {
+  to {
+    transform: translateX(380%) skewX(-18deg);
+  }
+}
+
+@keyframes birthday-icon-bounce {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  45% {
+    transform: translateY(-3px);
+  }
+  58% {
+    transform: translateY(0);
+  }
+}
+
+@keyframes birthday-sparkle {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.78);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.22);
+  }
+}
+
+@media (max-width: 640px) {
+  .birthday-hud-card {
+    grid-template-columns: 1fr;
+    padding: 1rem;
+  }
+
+  .birthday-hud-icon {
+    width: 3.25rem;
+    height: 3.25rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .birthday-hud-card,
+  .birthday-hud-card::before,
+  .birthday-hud-icon,
+  .birthday-hud-spark {
+    animation: none;
+  }
+}
+
 @keyframes limit-break-pulse {
   0%,
   100% {

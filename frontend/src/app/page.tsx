@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import BirthdayAlert from "@/components/BirthdayAlert";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const API_KEY = process.env.NEXT_PUBLIC_JARVIS_API_KEY || "";
@@ -184,11 +185,6 @@ export default function CommandCenterPage() {
               <p className="mt-3 text-green-300/80">
                 {dashboard ? formatDate(dashboard.date) : "Loading today..."}
               </p>
-              {dashboard?.birthday_note && (
-                <p className="mt-2 text-lg font-semibold text-green-200">
-                  {dashboard.birthday_note}
-                </p>
-              )}
             </div>
 
             <nav className="flex flex-wrap gap-2">
@@ -212,6 +208,12 @@ export default function CommandCenterPage() {
               </Link>
             </nav>
           </div>
+
+          {dashboard?.birthday_note && (
+            <div className="mt-6">
+              <BirthdayAlert note={dashboard.birthday_note} />
+            </div>
+          )}
         </header>
 
         {status && (

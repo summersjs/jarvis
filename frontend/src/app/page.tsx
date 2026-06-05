@@ -5,20 +5,16 @@ import { useEffect, useState } from "react";
 import {
   Activity,
   AlertTriangle,
-  ArrowUpCircle,
   BrainCircuit,
   BriefcaseBusiness,
   Cake,
   CalendarDays,
   CheckCircle2,
   ChevronRight,
-  ChevronsDown,
   Circle,
   ClipboardList,
   DatabaseZap,
   DollarSign,
-  Dumbbell,
-  Pickaxe,
   Server,
   ShieldCheck,
   ShoppingCart,
@@ -30,6 +26,13 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import BirthdayAlert from "@/components/BirthdayAlert";
+import {
+  BenchIcon,
+  DeadliftIcon,
+  OverheadPressIcon,
+  RecoveryIcon,
+  SquatIcon,
+} from "@/components/WorkoutHudIcons";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const API_KEY = process.env.NEXT_PUBLIC_JARVIS_API_KEY || "";
@@ -105,7 +108,7 @@ type CalendarEvent = {
 
 type WorkoutConfig = {
   label: string;
-  Icon: LucideIcon;
+  Icon: React.ComponentType<{ className?: string }>;
   missionType: string;
   focus: string;
   accentClass: string;
@@ -114,45 +117,44 @@ type WorkoutConfig = {
 const WORKOUT_CONFIG: Record<string, WorkoutConfig> = {
   squat: {
     label: "LOWER BODY PROTOCOL",
-    Icon: ChevronsDown,
+    Icon: SquatIcon,
     missionType: "MISSION ACTIVE",
-    focus: "Lower Body",
+    focus: "Legs",
     accentClass: "workout-accent-squat",
   },
   bench: {
     label: "CHEST PROTOCOL",
-    Icon: Dumbbell,
+    Icon: BenchIcon,
     missionType: "MISSION ACTIVE",
-    focus: "Upper Body",
+    focus: "Chest",
     accentClass: "workout-accent-bench",
   },
   deadlift: {
     label: "POWER PROTOCOL",
-    Icon: Pickaxe,
+    Icon: DeadliftIcon,
     missionType: "MISSION ACTIVE",
-    focus: "Posterior Chain",
+    focus: "Back",
     accentClass: "workout-accent-deadlift",
   },
   overhead_press: {
     label: "SHOULDER PROTOCOL",
-    Icon: ArrowUpCircle,
+    Icon: OverheadPressIcon,
     missionType: "MISSION ACTIVE",
-    focus: "Upper Body",
+    focus: "Shoulders",
     accentClass: "workout-accent-overhead",
   },
   overheadPress: {
     label: "SHOULDER PROTOCOL",
-    Icon: ArrowUpCircle,
+    Icon: OverheadPressIcon,
     missionType: "MISSION ACTIVE",
-    focus: "Upper Body",
+    focus: "Shoulders",
     accentClass: "workout-accent-overhead",
   },
 };
 
-// TODO: Replace temporary Lucide workout icons with custom Jarvis lift silhouettes.
 const DEFAULT_WORKOUT_CONFIG: WorkoutConfig = {
   label: "RECOVERY PROTOCOL",
-  Icon: Activity,
+  Icon: RecoveryIcon,
   missionType: "STANDBY",
   focus: "Recovery",
   accentClass: "workout-accent-recovery",
@@ -434,6 +436,7 @@ function WorkoutMissionCard({ dashboard }: { dashboard: DashboardResponse }) {
   const config = getWorkoutConfig(lift);
   const Icon = config.Icon;
   const title = formatDayType(lift).toUpperCase();
+  const statusLabel = dashboard.today.day_type === "completed" ? "Complete" : "Active";
 
   return (
     <Link href="/workouts" className={`mission-card group ${config.accentClass}`}>
@@ -454,8 +457,8 @@ function WorkoutMissionCard({ dashboard }: { dashboard: DashboardResponse }) {
       </div>
 
       <div className="mt-7 grid gap-3 text-sm sm:grid-cols-3">
-        <MissionMetric label="Status" value="Active" />
-        <MissionMetric label="Type" value={config.missionType.replace("MISSION ", "")} />
+        <MissionMetric label="Status" value={statusLabel} />
+        <MissionMetric label="Focus" value={config.focus} />
         <MissionMetric label="Action" value="Open Protocol" />
       </div>
 

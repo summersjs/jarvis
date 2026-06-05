@@ -23,6 +23,7 @@ type ShoppingItem = {
 type DashboardResponse = {
   status: string;
   date: string;
+  birthday_note?: string | null;
   today: {
     day_type?: string | null;
     scheduled_lift?: string | null;
@@ -183,6 +184,11 @@ export default function CommandCenterPage() {
               <p className="mt-3 text-green-300/80">
                 {dashboard ? formatDate(dashboard.date) : "Loading today..."}
               </p>
+              {dashboard?.birthday_note && (
+                <p className="mt-2 text-lg font-semibold text-green-200">
+                  {dashboard.birthday_note}
+                </p>
+              )}
             </div>
 
             <nav className="flex flex-wrap gap-2">

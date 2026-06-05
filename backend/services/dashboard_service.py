@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from backend.core.config import LOCAL_TZ
 from backend.db.supabase_client import supabase
 from backend.services.briefing_service import get_shift_brief
-from backend.services.calendar_service import get_calendar_summary_for_date
+from backend.services.calendar_service import get_birthday_note_for_date, get_calendar_summary_for_date
 from backend.services.meal_planner_service import list_meal_plan_entries
 from backend.services.workout_service import (
     estimate_one_rep_max,
@@ -118,6 +118,13 @@ def _get_calendar_summary(today_date) -> dict:
         "today": _get_calendar_summary_for_day(today_date, "today"),
         "tomorrow": _get_calendar_summary_for_day(tomorrow_date, "tomorrow"),
     }
+
+
+def _get_birthday_note(today_date) -> str | None:
+    try:
+        return get_birthday_note_for_date(today_date)
+    except Exception:
+        return None
 
 
 def _parse_week_from_notes(notes: str) -> int:
@@ -254,6 +261,7 @@ def build_daily_dashboard(user_id: str = "john") -> dict:
         "status": "ok",
         "user_id": user_id,
         "date": today,
+        "birthday_note": _get_birthday_note(now.date()),
         "today": {
             "day_type": workout_logic.get("day_type"),
             "scheduled_lift": scheduled_today,

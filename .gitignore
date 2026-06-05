@@ -25,6 +25,7 @@ out/
 *.pem
 credentials.json
 token.json
+token.json*
 
 # Cloudflare
 .cloudflare/

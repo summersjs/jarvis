@@ -360,6 +360,46 @@ def did_workout_today(user_id: str) -> bool:
     return len(logs.data or []) > 0
 
 
+def get_workouts_for_date(user_id: str, date_obj) -> list[dict]:
+    start_of_day = datetime.combine(date_obj, datetime.min.time(), LOCAL_TZ).isoformat()
+    end_of_day = datetime.combine(date_obj + timedelta(days=1), datetime.min.time(), LOCAL_TZ).isoformat()
+
+    response = (
+        supabase.table("workouts")
+        .select("*")
+        .eq("user_id", user_id)
+        .gte("created_at", start_of_day)
+        .lt("created_at", end_of_day)
+        .order("created_at", desc=False)
+        .execute()
+    )
+
+    return response.data or []
+
+
+def get_todays_workout_summary(user_id: str, date_obj) -> dict | None:
+    logs = get_workouts_for_date(user_id, date_obj)
+    if not logs:
+        return None
+
+    top_set = None
+    lift = None
+    for row in logs:
+        notes = (row.get("notes") or "").lower()
+        if not lift:
+            lift = row.get("lift")
+        if "set 3" in notes or "top set" in notes or "pr" in notes or "voice log" in notes:
+            top_set = row
+
+    return {
+        "lift": lift,
+        "lift_label": format_lift_name(lift) if lift else None,
+        "sets_completed": len(logs),
+        "top_set": top_set or logs[-1],
+        "logs": logs,
+    }
+
+
 def get_next_workout_logic(user_id: str) -> dict:
     today = datetime.now(LOCAL_TZ).date()
     scheduled_today = get_scheduled_lift_for_date(today)

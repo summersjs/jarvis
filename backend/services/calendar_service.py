@@ -155,6 +155,21 @@ def get_calendar_summary_for_date(date_obj: date, label: str) -> str:
     return f"You have {len(events)} events {label}. {joined}."
 
 
+def get_calendar_events_for_date(date_obj: date) -> list[dict]:
+    service = get_calendar_service()
+    events = _events_for_date(service, "primary", date_obj)
+    return [
+        {
+            "summary": event.get("summary") or "Unnamed event",
+            "start": event.get("start", {}),
+            "end": event.get("end", {}),
+            "location": event.get("location"),
+            "event_type": event.get("eventType"),
+        }
+        for event in events
+    ]
+
+
 def get_today_calendar_summary() -> str:
     now = datetime.now(LOCAL_TZ)
     return get_calendar_summary_for_date(now.date(), "today")

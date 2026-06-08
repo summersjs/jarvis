@@ -9,17 +9,6 @@ def build_business_status() -> str:
     return "No active Aegis Intake Systems alerts. No Fiverr spike alerts yet."
 
 
-def get_shift_brief() -> str:
-    now = datetime.now()
-    weekday = now.weekday()
-
-    if weekday in [0, 1]:
-        return "You have a 12 hour night shift starting at 6 PM."
-    if weekday in [5, 6]:
-        return "You have a 12 hour day shift starting at 6 AM."
-    return "You have no shifts scheduled for today."
-
-
 def get_lift_profile(user_id: str, lift: str) -> dict | None:
     response = (
         supabase
@@ -53,7 +42,6 @@ def build_morning_brief(user_id: str = "john") -> dict:
             "business_status": build_business_status(),
             "spoken_response": (
                 f"Good morning, Daddy. "
-                f"{get_shift_brief()} "
                 f"{workout_logic.get('spoken_response', 'No workout scheduled.')} "
                 f"{build_business_status()}"
             )
@@ -74,7 +62,6 @@ def build_morning_brief(user_id: str = "john") -> dict:
     else:
         latest_line = f"No recent {format_lift_name(lift)} history found."
 
-    shift_line = get_shift_brief()
     business_line = build_business_status()
 
     now = datetime.now().hour
@@ -97,7 +84,6 @@ def build_morning_brief(user_id: str = "john") -> dict:
 
     spoken_response = (
         f"{greeting}, Sexy Daddy. All systems operational. "
-        f"{shift_line} "
         f"{workout_line} "
         f"{workout_details} "
         f"{latest_line} "

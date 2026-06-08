@@ -64,6 +64,11 @@ type DashboardResponse = {
   next_workout: {
     lift?: string | null;
     lift_label?: string | null;
+    next_scheduled?: {
+      date: string;
+      lift: string;
+      weekday: string;
+    } | null;
     spoken_response?: string | null;
   };
   meals: MealEntry[];
@@ -88,6 +93,51 @@ type DashboardResponse = {
       fallback_shift?: string;
     };
   };
+  finance_summary?: {
+    dashboard_cards: {
+      food_budget_remaining_week: number;
+      eating_out_budget_remaining_week: number;
+      total_food_over_under: number;
+      spending_status: string;
+    };
+    weekly_food_budget: {
+      total_actual_food_spend_this_week: number;
+      over_under_amount: number;
+    };
+  };
+  mission_phase?: {
+    key: string;
+    label: string;
+    window: string;
+  };
+  mission_status?: {
+    score: number;
+    label: string;
+    class: "online" | "pending" | "offline";
+  };
+  mission?: {
+    phase: string;
+    phase_key: string;
+    phase_window: string;
+    status: string;
+    score: number;
+    class: "online" | "pending" | "offline";
+    objectives_completed: number;
+    objectives_total: number;
+    workout_completed: boolean;
+    shopping_open: number;
+    budget_status: string;
+    calendar_today_status?: string | null;
+    calendar_tomorrow_status?: string | null;
+    title: string;
+    items: string[];
+    recommendation: string;
+    primary_label: string;
+    primary_value: string;
+    secondary_label: string;
+    secondary_value: string;
+  };
+  highest_priority_remaining_task?: string;
   coaching_note: string;
 };
 
@@ -191,17 +241,7 @@ function getWorkoutConfig(lift?: string | null) {
 }
 
 function getLiftForConfig(dashboard: DashboardResponse) {
-  return dashboard.today.scheduled_lift || dashboard.next_workout.lift || dashboard.today.day_type;
-}
-
-function parseBirthdayName(note?: string | null) {
-  if (!note) return null;
-  return note
-    .replace(/^today is\s+/i, "")
-    .replace(/'s birthday\.?$/i, "")
-    .replace(/^birthdays today:\s*/i, "")
-    .replace(/\.$/, "")
-    .trim();
+  return dashboard.today.scheduled_lift || null;
 }
 
 function getCalendarCount(item?: { spoken_response: string }) {
@@ -340,6 +380,19 @@ export default function CommandCenterPage() {
               <p className="mt-3 text-green-300/80">
                 {dashboard ? formatDate(dashboard.date) : "Loading today..."}
               </p>
+              {dashboard?.mission_phase && (
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <span className="status-pill">
+                    {dashboard.mission_phase.label} · {dashboard.mission_phase.window}
+                  </span>
+                  <span className={`status-pill ${dashboard.mission_status?.class === "pending" ? "status-pill-warning" : ""}`}>
+                    Mission Status: {dashboard.mission_status?.label || "ON TRACK"}
+                  </span>
+                  <span className="text-xs uppercase tracking-[0.22em] text-green-500/55">
+                    Score {dashboard.mission_status?.score ?? 0}
+                  </span>
+                </div>
+              )}
             </div>
 
             <nav className="flex flex-wrap gap-2">
@@ -360,6 +413,12 @@ export default function CommandCenterPage() {
               </Link>
               <Link className="command-nav-link" href="/goals">
                 Goals
+              </Link>
+              <Link className="command-nav-link" href="/daily-debrief">
+                Daily Debrief
+              </Link>
+              <Link className="command-nav-link" href="/finance-ops">
+                Finance Ops
               </Link>
             </nav>
           </div>
@@ -435,8 +494,16 @@ function WorkoutMissionCard({ dashboard }: { dashboard: DashboardResponse }) {
   const lift = getLiftForConfig(dashboard);
   const config = getWorkoutConfig(lift);
   const Icon = config.Icon;
-  const title = formatDayType(lift).toUpperCase();
-  const statusLabel = dashboard.today.day_type === "completed" ? "Complete" : "Active";
+  const title =
+    dashboard.today.day_type === "rest"
+      ? "Rest Day"
+      : formatDayType(lift).toUpperCase();
+  const statusLabel =
+    dashboard.today.day_type === "completed"
+      ? "Complete"
+      : dashboard.today.day_type === "rest"
+        ? "Recovery"
+        : "Active";
 
   return (
     <Link href="/workouts" className={`mission-card group ${config.accentClass}`}>
@@ -479,61 +546,185 @@ function MissionMetric({ label, value }: { label: string; value: string }) {
 }
 
 function DailyBriefing({ dashboard }: { dashboard: DashboardResponse }) {
-  const birthdayName = parseBirthdayName(dashboard.birthday_note);
-  const lift = getLiftForConfig(dashboard);
-  const shoppingCount = dashboard.shopping.unchecked_count;
+  const mission = dashboard.mission;
+  const phaseKey = mission?.phase_key || dashboard.mission_phase?.key || "briefing";
   const todayEvents = getCalendarCount(dashboard.calendar.today);
-  const todayParsedEvents = parseCalendarEvents(dashboard.calendar.today, "today");
-  const tomorrowParsedEvents = parseCalendarEvents(dashboard.calendar.tomorrow, "tomorrow");
-  const nextScheduleEvent = [
-    ...todayParsedEvents.filter((event) => event.type !== "birthday"),
-    ...tomorrowParsedEvents,
-  ][0];
-  const recommendation = [
-    `complete ${formatDayType(lift).toLowerCase()}`,
-    birthdayName ? `acknowledge ${birthdayName}'s birthday` : null,
-    shoppingCount > 0 ? "clear the highest-priority shopping item" : null,
-  ].filter(Boolean).join(", ");
+  const tomorrowEvents = getCalendarCount(dashboard.calendar.tomorrow);
+  const topPriority = dashboard.highest_priority_remaining_task || mission?.secondary_value || "Hold the line";
+  const phaseCopy = getMissionPhaseCopy(phaseKey, dashboard);
+  const missionItems = dedupePhaseLines(mission?.items || phaseCopy.items);
+  const recommendation = mission?.recommendation || phaseCopy.recommendation;
+  const title = mission?.title || phaseCopy.title;
+  const primaryLabel = mission?.primary_label || phaseCopy.primaryLabel;
+  const primaryValue = mission?.primary_value || phaseCopy.primaryValue;
+  const secondaryLabel = mission?.secondary_label || phaseCopy.secondaryLabel;
+  const secondaryValue = mission?.secondary_value || phaseCopy.secondaryValue;
+  const statusLabel = dashboard.mission_status?.label || "ON TRACK";
+  const showSecondaryCard = normalizePhaseText(primaryValue) !== normalizePhaseText(secondaryValue);
 
   return (
-    <HudPanel title="Daily Briefing" Icon={Zap}>
-      <p className="text-2xl font-black uppercase text-green-100">Good morning, John.</p>
+    <HudPanel title={title} Icon={Zap}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-2xl font-black uppercase text-green-100">
+            {getMissionPhaseGreeting(phaseKey)}
+          </p>
+          <p className="mt-1 text-sm uppercase tracking-[0.22em] text-green-300/70">
+            Mission Status: {statusLabel}
+          </p>
+        </div>
+        <span className="status-pill">{phaseCopy.badge}</span>
+      </div>
 
       <div className="mt-5">
-        <p className="hud-kicker">Primary Priorities</p>
+        <p className="hud-kicker">{phaseCopy.kicker}</p>
         <ol className="mt-3 space-y-2 text-sm text-green-100/90">
-          {birthdayName && <li>1. {birthdayName} birthday</li>}
-          <li>{birthdayName ? "2" : "1"}. {formatDayType(lift)} training objective</li>
-          <li>{birthdayName ? "3" : "2"}. Clear {shoppingCount} shopping item{shoppingCount === 1 ? "" : "s"}</li>
+          {missionItems.map((item, index) => (
+            <li key={`${item}-${index}`}>{index + 1}. {item}</li>
+          ))}
         </ol>
       </div>
 
       <div className="mt-5 grid gap-4 text-sm sm:grid-cols-2">
         <BriefingBlock
-          label="Schedule"
-          lines={[
-            `${todayEvents} event${todayEvents === 1 ? "" : "s"} today`,
-            nextScheduleEvent ? `Next event: ${nextScheduleEvent.title} at ${nextScheduleEvent.time}` : "No upcoming event detected",
-          ]}
+          label={primaryLabel}
+          lines={dedupePhaseLines([primaryValue, phaseCopy.secondaryLineA, phaseCopy.secondaryLineB].filter(Boolean) as string[])}
         />
-        <BriefingBlock
-          label="Nutrition"
-          lines={[
-            dashboard.meals.length
-              ? `${dashboard.meals.length} meal${dashboard.meals.length === 1 ? "" : "s"} planned`
-              : "No meals planned today",
-          ]}
-        />
+        {showSecondaryCard && (
+          <BriefingBlock
+            label={secondaryLabel}
+            lines={dedupePhaseLines([secondaryValue, `Today events: ${todayEvents}`, `Tomorrow events: ${tomorrowEvents}`])}
+          />
+        )}
       </div>
 
       <div className="mt-5 rounded-lg border border-green-500/20 bg-black/35 p-3">
-        <p className="hud-kicker">Recommendation</p>
-        <p className="mt-2 text-green-200/85">
-          Keep today simple: {recommendation || dashboard.coaching_note}.
+        <p className="hud-kicker">{phaseCopy.recommendationLabel}</p>
+        <p className="mt-2 text-green-200/85">{recommendation || dashboard.coaching_note}</p>
+        <p className="mt-3 text-xs uppercase tracking-[0.2em] text-green-400/60">
+          Highest priority: {topPriority}
         </p>
       </div>
     </HudPanel>
   );
+}
+
+function getMissionPhaseGreeting(phaseKey: string) {
+  switch (phaseKey) {
+    case "execution":
+      return "Execute with intent.";
+    case "debrief":
+      return "Close the day cleanly.";
+    case "recovery":
+      return "Recover and reset.";
+    default:
+      return "Set the day in motion.";
+  }
+}
+
+function dedupePhaseLines(lines: string[]) {
+  const seen = new Set<string>();
+  return lines.filter((line) => {
+    const normalized = line.toLowerCase().replace(/^[^:]+:\s*/, "").trim();
+    if (seen.has(normalized)) return false;
+    seen.add(normalized);
+    return true;
+  });
+}
+
+function normalizePhaseText(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function getMissionPhaseCopy(phaseKey: string, dashboard: DashboardResponse) {
+  const mealCount = dashboard.meals.length;
+  const shoppingCount = dashboard.shopping.unchecked_count;
+  const mission = dashboard.mission;
+  const weeklyFoodSpend = dashboard.finance_summary?.weekly_food_budget?.total_actual_food_spend_this_week ?? 0;
+  const budgetStatus = dashboard.finance_summary?.dashboard_cards?.spending_status || dashboard.mission_status?.label || "ON TRACK";
+
+  switch (phaseKey) {
+    case "execution":
+      return {
+        badge: "EXECUTION",
+        title: mission?.title || "Mission Control",
+        kicker: "Execution priorities",
+        recommendationLabel: "Execution recommendation",
+        primaryLabel: "Objectives completed",
+        primaryValue: `${mission?.objectives_completed ?? 0}/${mission?.objectives_total ?? 0}`,
+        secondaryLabel: "Highest priority remaining task",
+        secondaryValue: dashboard.highest_priority_remaining_task || mission?.secondary_value || "Keep pushing the plan.",
+        items: mission?.items || [
+          `Objectives completed: ${mission?.objectives_completed ?? 0}/${mission?.objectives_total ?? 0}`,
+          `Workout progress: ${mission?.workout_completed ? "Workout covered" : "Workout pending"}`,
+          `Shopping progress: ${shoppingCount} open item${shoppingCount === 1 ? "" : "s"}`,
+          `Budget status: ${budgetStatus}`,
+        ],
+        recommendation: mission?.recommendation || dashboard.highest_priority_remaining_task || dashboard.coaching_note,
+        secondaryLineA: `${mealCount} meal${mealCount === 1 ? "" : "s"} planned`,
+        secondaryLineB: `Mission score ${dashboard.mission_status?.score ?? mission?.score ?? 0}`,
+      };
+    case "debrief":
+      return {
+        badge: "DEBRIEF",
+        title: mission?.title || "End-of-Day Wrap",
+        kicker: "Debrief priorities",
+        recommendationLabel: "Debrief recommendation",
+        primaryLabel: "Workout completion",
+        primaryValue: mission?.workout_completed ? "Completed" : dashboard.today.day_type === "rest" ? "Recovery day" : "Missing",
+        secondaryLabel: "Tomorrow's focus",
+        secondaryValue: dashboard.next_workout.next_scheduled ? formatDayType(dashboard.next_workout.next_scheduled.lift) : "Rest day",
+        items: mission?.items || [
+          `Objectives completed: ${mission?.objectives_completed ?? 0}/${mission?.objectives_total ?? 0}`,
+          `Workout completion status: ${mission?.workout_completed ? "Done" : "Not logged"}`,
+          `Food spending: $${weeklyFoodSpend.toFixed(2)} this week`,
+          `Tomorrow's focus: ${dashboard.next_workout.next_scheduled ? formatDayType(dashboard.next_workout.next_scheduled.lift) : "Rest"}`,
+        ],
+        recommendation: mission?.recommendation || dashboard.coaching_note,
+        secondaryLineA: `${(dashboard.finance_summary?.weekly_food_budget?.total_actual_food_spend_this_week ?? 0).toFixed(2)} food spend`,
+        secondaryLineB: dashboard.calendar.tomorrow.spoken_response,
+      };
+    case "recovery":
+      return {
+        badge: "RECOVERY",
+        title: mission?.title || "Recovery Protocol",
+        kicker: "Recovery priorities",
+        recommendationLabel: "Recovery recommendation",
+        primaryLabel: "Tomorrow's workout",
+        primaryValue: dashboard.next_workout.lift_label || "Rest day",
+        secondaryLabel: "Tomorrow's calendar",
+        secondaryValue: dashboard.calendar.tomorrow.spoken_response,
+        items: mission?.items || [
+          `Tomorrow's workout: ${dashboard.next_workout.lift_label || "Rest day"}`,
+          `Tomorrow's calendar: ${dashboard.calendar.tomorrow.spoken_response}`,
+          `Meal prep status: ${mealCount} meal${mealCount === 1 ? "" : "s"} planned`,
+          `Recovery recommendation: ${dashboard.coaching_note}`,
+        ],
+        recommendation: mission?.recommendation || dashboard.coaching_note,
+        secondaryLineA: `Shopping: ${shoppingCount} open item${shoppingCount === 1 ? "" : "s"}`,
+        secondaryLineB: `Budget: ${budgetStatus}`,
+      };
+    default:
+      return {
+        badge: "BRIEFING",
+        title: mission?.title || "Daily Briefing",
+        kicker: "Briefing priorities",
+        recommendationLabel: "Daily recommendation",
+        primaryLabel: "Today's priorities",
+        primaryValue: dashboard.today.scheduled_lift_label || "Recovery",
+        secondaryLabel: "Today's schedule",
+        secondaryValue: dashboard.calendar.today.spoken_response,
+        items: mission?.items || [
+          `Today's priorities: ${dashboard.today.scheduled_lift_label || "Recovery day"}`,
+          `Today's workout: ${dashboard.today.scheduled_lift_label || "Recovery"}`,
+          `Today's schedule: ${dashboard.calendar.today.spoken_response}`,
+          `Nutrition plan: ${mealCount ? `${mealCount} meal${mealCount === 1 ? "" : "s"} planned` : "No meals planned"}`,
+        ],
+        recommendation: mission?.recommendation || dashboard.coaching_note,
+        secondaryLineA: `Shopping: ${shoppingCount} open item${shoppingCount === 1 ? "" : "s"}`,
+        secondaryLineB: `Mission status: ${budgetStatus}`,
+      };
+  }
 }
 
 function BriefingBlock({ label, lines }: { label: string; lines: string[] }) {

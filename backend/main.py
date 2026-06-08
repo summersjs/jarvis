@@ -17,6 +17,8 @@ from backend.routes.shopping import router as shopping_router
 from backend.routes.preferences import router as preferences_router
 from backend.routes.dashboard import router as dashboard_router
 from backend.routes.goals import router as goals_router
+from backend.routes.debrief import router as debrief_router
+from backend.routes.finance import router as finance_router
 
 
 
@@ -49,3 +51,5 @@ app.include_router(shopping_router)
 app.include_router(preferences_router)
 app.include_router(dashboard_router)
 app.include_router(goals_router)
+app.include_router(debrief_router)
+app.include_router(finance_router)

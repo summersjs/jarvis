@@ -3,12 +3,14 @@ from datetime import datetime, timedelta
 
 from backend.core.config import LOCAL_TZ
 from backend.db.supabase_client import supabase
-from backend.services.briefing_service import get_shift_brief
 from backend.services.calendar_service import get_birthday_note_for_date, get_calendar_summary_for_date
+from backend.services.debrief_service import build_finance_ops_summary
+from backend.services.goal_service import list_goals
 from backend.services.meal_planner_service import list_meal_plan_entries
 from backend.services.workout_service import (
     estimate_one_rep_max,
     get_next_workout_logic,
+    get_todays_workout_summary,
     get_scheduled_lift_for_date,
     minimum_required_reps_for_week,
 )
@@ -74,41 +76,24 @@ def _get_latest_unchecked_shopping_items(user_id: str) -> dict:
     }
 
 
-def _get_shift_brief_for_date(date_obj) -> str:
-    weekday = date_obj.weekday()
-
-    if weekday in [0, 1]:
-        return "You have a 12 hour night shift starting at 6 PM."
-    if weekday in [5, 6]:
-        return "You have a 12 hour day shift starting at 6 AM."
-    return "You have no shifts scheduled."
-
-
 def _get_calendar_summary_for_day(date_obj, label: str) -> dict:
-    fallback = get_shift_brief()
-    if label != "today":
-        fallback = _get_shift_brief_for_date(date_obj)
-
     try:
         summary = get_calendar_summary_for_date(date_obj, label)
         if summary and "no events scheduled" not in summary.lower():
             return {
                 "status": "ok",
                 "spoken_response": summary,
-                "fallback_shift": fallback,
             }
     except Exception as e:
         return {
-            "status": "fallback",
-            "spoken_response": fallback,
-            "fallback_shift": fallback,
+            "status": "error",
+            "spoken_response": f"You have no events scheduled for {label}.",
             "error": str(e),
         }
 
     return {
-        "status": "fallback",
-        "spoken_response": fallback,
-        "fallback_shift": fallback,
+        "status": "ok",
+        "spoken_response": f"You have no events scheduled for {label}.",
     }
 
 
@@ -120,11 +105,245 @@ def _get_calendar_summary(today_date) -> dict:
     }
 
 
+def _get_mission_phase(now: datetime) -> dict:
+    hour = now.hour
+    if 5 <= hour < 12:
+        return {
+            "key": "briefing",
+            "label": "BRIEFING",
+            "window": "05:00 - 11:59",
+        }
+    if 12 <= hour < 18:
+        return {
+            "key": "execution",
+            "label": "EXECUTION",
+            "window": "12:00 - 17:59",
+        }
+    if 18 <= hour < 22:
+        return {
+            "key": "debrief",
+            "label": "DEBRIEF",
+            "window": "18:00 - 21:59",
+        }
+    return {
+        "key": "recovery",
+        "label": "RECOVERY",
+        "window": "22:00 - 04:59",
+    }
+
+
 def _get_birthday_note(today_date) -> str | None:
     try:
         return get_birthday_note_for_date(today_date)
     except Exception:
         return None
+
+
+def _mission_status_label(score: int) -> str:
+    if score >= 75:
+        return "ON TRACK"
+    if score >= 45:
+        return "AT RISK"
+    return "OFF MISSION"
+
+
+def _mission_status_class(label: str) -> str:
+    if label == "ON TRACK":
+        return "online"
+    if label == "AT RISK":
+        return "pending"
+    return "offline"
+
+
+def _objective_completion_ratio(goals: list[dict]) -> float:
+    if not goals:
+        return 1.0
+    completed = sum(1 for goal in goals if goal.get("progress", {}).get("is_complete"))
+    return completed / len(goals)
+
+
+def _budget_score(finance_summary: dict) -> float:
+    status = finance_summary.get("dashboard_cards", {}).get("spending_status", "WATCH")
+    if status == "ON TRACK":
+        return 1.0
+    if status == "WATCH":
+        return 0.65
+    return 0.15
+
+
+def _shopping_score(shopping: dict) -> float:
+    unchecked = int(shopping.get("unchecked_count") or 0)
+    if unchecked == 0:
+        return 1.0
+    if unchecked <= 3:
+        return 0.8
+    if unchecked <= 6:
+        return 0.55
+    return 0.3
+
+
+def _calendar_score(calendar: dict) -> float:
+    today_status = calendar.get("today", {}).get("status")
+    tomorrow_status = calendar.get("tomorrow", {}).get("status")
+    today_score = 1.0 if today_status == "ok" else 0.65
+    tomorrow_score = 1.0 if tomorrow_status == "ok" else 0.65
+    return round((today_score + tomorrow_score) / 2, 2)
+
+
+def _workout_score(workout_logic: dict) -> float:
+    if workout_logic.get("day_type") == "rest":
+        return 1.0
+    if workout_logic.get("day_type") == "completed":
+        return 1.0
+    if workout_logic.get("actual_next"):
+        return 0.15
+    return 0.6
+
+
+def _mission_score(user_id: str, workout_logic: dict, shopping: dict, calendar: dict, finance_summary: dict) -> dict:
+    goals = get_goal_overview(user_id)
+    workout_score = _workout_score(workout_logic)
+    goal_score = _objective_completion_ratio(goals)
+    shopping_score = _shopping_score(shopping)
+    budget_score = _budget_score(finance_summary)
+    calendar_score = _calendar_score(calendar)
+
+    score = round(
+        100
+        * (
+            workout_score * 0.3
+            + goal_score * 0.25
+            + shopping_score * 0.15
+            + budget_score * 0.15
+            + calendar_score * 0.15
+        )
+    )
+    label = _mission_status_label(score)
+
+    return {
+        "score": score,
+        "label": label,
+        "class": _mission_status_class(label),
+        "workout_score": workout_score,
+        "goal_score": goal_score,
+        "shopping_score": shopping_score,
+        "budget_score": budget_score,
+        "calendar_score": calendar_score,
+        "goals": goals,
+    }
+
+
+def get_goal_overview(user_id: str) -> list[dict]:
+    return list_goals(user_id, active_only=True)
+
+
+def _highest_priority_remaining_task(user_id: str, workout_logic: dict, shopping: dict, mission: dict) -> str:
+    goals = mission.get("goals") or []
+    incomplete_goal = next(
+        (
+            goal
+            for goal in goals
+            if not goal.get("progress", {}).get("is_complete")
+        ),
+        None,
+    )
+
+    if workout_logic.get("day_type") == "rest":
+        if workout_logic.get("next_scheduled"):
+            return f"Prepare for {format_lift_name(workout_logic['next_scheduled']['lift'])} on {workout_logic['next_scheduled']['weekday']}."
+        return "Protect recovery and keep tomorrow clean."
+
+    if workout_logic.get("day_type") != "completed" and workout_logic.get("scheduled_today"):
+        return f"Complete {format_lift_name(workout_logic['scheduled_today'])}."
+
+    if shopping.get("unchecked_count", 0) > 0:
+        item = shopping.get("unchecked_items", [])[0]
+        return f"Clear {item.get('item_name', 'the top shopping item')}."
+
+    if incomplete_goal:
+        return f"Move {incomplete_goal.get('title', 'the next goal')} forward."
+
+    return "Hold the line and keep the system clean."
+
+
+def _mission_phase_content(phase: dict, dashboard: dict, mission: dict) -> dict:
+    today = dashboard.get("today", {})
+    next_workout = dashboard.get("next_workout", {})
+    shopping = dashboard.get("shopping", {})
+    calendar = dashboard.get("calendar", {})
+    meals = dashboard.get("meals", [])
+    finance_summary = dashboard.get("finance_summary", {})
+    goals = mission.get("goals") or []
+    incomplete_goal = next((goal for goal in goals if not goal.get("progress", {}).get("is_complete")), None)
+    priority = dashboard.get("highest_priority_remaining_task") or "Hold the line."
+
+    if phase["key"] == "briefing":
+        items = [
+            f"Priority: {today.get('scheduled_lift_label') or 'Recovery'}",
+            f"Workout: {today.get('spoken_response') or 'No workout data'}",
+            f"Schedule: {calendar.get('today', {}).get('spoken_response') or 'No schedule data'}",
+            f"Nutrition: {len(meals)} meal{'' if len(meals) == 1 else 's'} planned",
+        ]
+        recommendation = dashboard.get("coaching_note") or "Keep the day simple and execute the plan."
+        return {
+            "title": "Today's Priorities",
+            "items": items,
+            "recommendation": recommendation,
+            "primary_label": "Daily recommendation",
+            "primary_value": recommendation,
+            "secondary_label": "Highest priority remaining task",
+            "secondary_value": priority,
+        }
+
+    if phase["key"] == "execution":
+        return {
+            "title": "Mission Control",
+            "items": [
+                f"Objectives: {dashboard.get('objectives_completed', 0)}/{dashboard.get('objectives_total', 0)} complete",
+                f"Workout: {today.get('day_type', 'rest').replace('_', ' ').title()}",
+                f"Shopping: {shopping.get('unchecked_count', 0)} items open",
+                f"Budget: {finance_summary.get('dashboard_cards', {}).get('spending_status', 'WATCH')}",
+            ],
+            "recommendation": priority,
+            "primary_label": "Highest priority remaining task",
+            "primary_value": priority,
+            "secondary_label": "Progress note",
+            "secondary_value": (
+                incomplete_goal.get("title")
+                if incomplete_goal
+                else "All active goals are moving."
+            ),
+        }
+
+    if phase["key"] == "debrief":
+        return {
+            "title": "End-of-Day Wrap",
+            "items": [
+                f"Objectives: {dashboard.get('objectives_completed', 0)}/{dashboard.get('objectives_total', 0)} complete",
+                f"Workout: {today.get('day_type', 'rest').replace('_', ' ').title()}",
+                f"Food spend: ${finance_summary.get('weekly_food_budget', {}).get('total_actual_food_spend_this_week', 0):.2f} this week",
+                f"Tomorrow focus: {calendar.get('tomorrow', {}).get('spoken_response') or 'No calendar data'}",
+            ],
+            "recommendation": dashboard.get("debrief_recommendation") or dashboard.get("coaching_note") or "Close the day, log the win, and keep tomorrow simple.",
+            "primary_label": "Debrief recommendation",
+            "primary_value": dashboard.get("debrief_recommendation") or dashboard.get("coaching_note") or "Close the day cleanly.",
+            "secondary_label": "Tomorrow's focus",
+            "secondary_value": dashboard.get("tomorrow_focus") or priority,
+        }
+
+    return {
+        "title": "Recovery Mode",
+        "items": [
+            f"Tomorrow workout: {next_workout.get('lift_label') or 'Rest'}",
+            f"Tomorrow calendar: {calendar.get('tomorrow', {}).get('spoken_response') or 'No calendar data'}",
+            f"Meal prep: {len(meals)} meal{'' if len(meals) == 1 else 's'} planned",
+        ],
+        "recommendation": dashboard.get("recovery_recommendation") or "Protect sleep, hydrate, and clear tomorrow's first task.",
+        "primary_label": "Recovery recommendation",
+        "primary_value": dashboard.get("recovery_recommendation") or "Protect sleep, hydrate, and clear tomorrow's first task.",
+        "secondary_label": "Tomorrow's workout",
+        "secondary_value": next_workout.get("lift_label") or "Rest day",
+    }
 
 
 def _parse_week_from_notes(notes: str) -> int:
@@ -256,8 +475,15 @@ def build_daily_dashboard(user_id: str = "john") -> dict:
     meals = _get_today_meals(user_id, today)
     shopping = _get_latest_unchecked_shopping_items(user_id)
     calendar = _get_calendar_summary(now.date())
+    finance_summary = build_finance_ops_summary(user_id, today[:7])
+    goals = get_goal_overview(user_id)
+    mission_phase = _get_mission_phase(now)
+    today_workout = get_todays_workout_summary(user_id, now.date())
 
-    return {
+    mission = _mission_score(user_id, workout_logic, shopping, calendar, finance_summary)
+    highest_priority_remaining_task = _highest_priority_remaining_task(user_id, workout_logic, shopping, mission)
+
+    dashboard_base = {
         "status": "ok",
         "user_id": user_id,
         "date": today,
@@ -277,5 +503,44 @@ def build_daily_dashboard(user_id: str = "john") -> dict:
         "meals": meals,
         "shopping": shopping,
         "calendar": calendar,
+        "finance_summary": finance_summary,
+        "goals": goals,
+        "today_workout": today_workout,
+        "mission_phase": mission_phase,
+        "mission_status": {
+            "score": mission["score"],
+            "label": mission["label"],
+            "class": mission["class"],
+        },
+        "highest_priority_remaining_task": highest_priority_remaining_task,
         "coaching_note": _build_coaching_note(user_id, workout_logic, meals, shopping, today),
+    }
+
+    phase_content = _mission_phase_content(mission_phase, dashboard_base, mission)
+
+    return {
+        **dashboard_base,
+        "mission": {
+            "phase": mission_phase["label"],
+            "phase_key": mission_phase["key"],
+            "phase_window": mission_phase["window"],
+            "status": mission["label"],
+            "score": mission["score"],
+            "class": mission["class"],
+            "objectives_completed": sum(1 for goal in goals if goal.get("progress", {}).get("is_complete")),
+            "objectives_total": len(goals),
+            "workout_completed": workout_logic.get("day_type") == "completed" or workout_logic.get("day_type") == "rest",
+            "shopping_open": int(shopping.get("unchecked_count") or 0),
+            "budget_status": finance_summary.get("dashboard_cards", {}).get("spending_status", "WATCH"),
+            "calendar_today_status": calendar.get("today", {}).get("status"),
+            "calendar_tomorrow_status": calendar.get("tomorrow", {}).get("status"),
+            "title": phase_content["title"],
+            "items": phase_content["items"],
+            "recommendation": phase_content["recommendation"],
+            "primary_label": phase_content["primary_label"],
+            "primary_value": phase_content["primary_value"],
+            "secondary_label": phase_content["secondary_label"],
+            "secondary_value": phase_content["secondary_value"],
+        },
+        "coaching_note": phase_content["recommendation"] or dashboard_base["coaching_note"],
     }

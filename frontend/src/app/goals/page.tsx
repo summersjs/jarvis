@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 const API_KEY = process.env.NEXT_PUBLIC_JARVIS_API_KEY || "";
@@ -76,6 +77,14 @@ const emptyForm: GoalForm = {
 };
 
 export default function GoalsPage() {
+  return (
+    <Suspense fallback={<main className="min-h-screen bg-black px-6 py-10 text-green-400" />}>
+      <GoalsPageInner />
+    </Suspense>
+  );
+}
+
+function GoalsPageInner() {
   const [goals, setGoals] = useState<Goal[]>([]);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -83,6 +92,7 @@ export default function GoalsPage() {
   const [logValues, setLogValues] = useState<Record<string, string>>({});
   const [logNotes, setLogNotes] = useState<Record<string, string>>({});
   const [historyGoal, setHistoryGoal] = useState<Goal | null>(null);
+  const [focusedGoalId, setFocusedGoalId] = useState<string | null>(null);
 
   async function loadGoals() {
     try {
@@ -352,6 +362,7 @@ export default function GoalsPage() {
               <GoalCard
                 key={goal.id}
                 goal={goal}
+                focused={goal.id === focusedGoalId}
                 logValue={logValues[goal.id] || ""}
                 logNote={logNotes[goal.id] || ""}
                 onLogValueChange={(value) => setLogValues((prev) => ({ ...prev, [goal.id]: value }))}
@@ -365,11 +376,35 @@ export default function GoalsPage() {
         </div>
       </div>
 
+      <GoalsFocusTracker goals={goals} onFocusGoalId={setFocusedGoalId} />
+
       {historyGoal && (
         <GoalHistoryModal goal={historyGoal} onClose={() => setHistoryGoal(null)} />
       )}
     </main>
   );
+}
+
+function GoalsFocusTracker({
+  goals,
+  onFocusGoalId,
+}: {
+  goals: Goal[];
+  onFocusGoalId: (goalId: string | null) => void;
+}) {
+  const searchParams = useSearchParams();
+  const focusGoalId = searchParams.get("goal");
+
+  useEffect(() => {
+    onFocusGoalId(focusGoalId);
+    if (!focusGoalId || goals.length === 0) return;
+    const goal = goals.find((item) => item.id === focusGoalId);
+    if (!goal) return;
+    const element = document.getElementById(`goal-${goal.id}`);
+    element?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [focusGoalId, goals, onFocusGoalId]);
+
+  return null;
 }
 
 function GoalHistoryModal({ goal, onClose }: { goal: Goal; onClose: () => void }) {
@@ -441,6 +476,7 @@ function GoalHistoryModal({ goal, onClose }: { goal: Goal; onClose: () => void }
 
 function GoalCard({
   goal,
+  focused,
   logValue,
   logNote,
   onLogValueChange,
@@ -450,6 +486,7 @@ function GoalCard({
   onOpenHistory,
 }: {
   goal: Goal;
+  focused: boolean;
   logValue: string;
   logNote: string;
   onLogValueChange: (value: string) => void;
@@ -469,7 +506,8 @@ function GoalCard({
 
   return (
     <article
-      className={`${cardClass} ${goal.period ? "cursor-pointer transition hover:-translate-y-0.5 hover:shadow-[0_0_34px_rgba(34,211,238,0.22)]" : ""}`}
+      id={`goal-${goal.id}`}
+      className={`${cardClass} ${goal.period ? "cursor-pointer transition hover:-translate-y-0.5 hover:shadow-[0_0_34px_rgba(34,211,238,0.22)]" : ""} ${focused ? "ring-2 ring-cyan-300/60 shadow-[0_0_42px_rgba(34,211,238,0.25)]" : ""}`}
       onClick={goal.period ? onOpenHistory : undefined}
     >
       <div className="flex flex-wrap items-start justify-between gap-4">

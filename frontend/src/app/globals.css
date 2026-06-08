@@ -344,6 +344,21 @@ body {
   }
 }
 
+@keyframes debrief-objective-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px rgba(187, 247, 208, 0.06) inset,
+      0 0 24px rgba(34, 197, 94, 0.24);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(187, 247, 208, 0.12) inset,
+      0 0 32px rgba(34, 197, 94, 0.42),
+      0 0 42px rgba(45, 212, 191, 0.12);
+  }
+}
+
 @media (max-width: 640px) {
   .birthday-hud-card {
     grid-template-columns: 1fr;
@@ -568,6 +583,29 @@ body {
   border-color: rgba(250, 204, 21, 0.32);
   background: rgba(250, 204, 21, 0.08);
   color: rgba(253, 224, 71, 0.9);
+}
+
+.debrief-objective-complete {
+  border: 1px solid rgba(74, 222, 128, 0.4);
+  background:
+    linear-gradient(135deg, rgba(20, 83, 45, 0.34), rgba(0, 0, 0, 0.92)),
+    radial-gradient(circle at 18% 18%, rgba(34, 197, 94, 0.18), transparent 38%);
+  box-shadow:
+    0 0 0 1px rgba(187, 247, 208, 0.06) inset,
+    0 0 24px rgba(34, 197, 94, 0.24);
+  animation: debrief-objective-pulse 2.6s ease-in-out infinite;
+}
+
+.debrief-objective-complete .hud-row-icon {
+  color: rgb(220, 252, 231);
+  box-shadow:
+    inset 0 0 14px rgba(74, 222, 128, 0.18),
+    0 0 18px rgba(74, 222, 128, 0.28);
+}
+
+.debrief-objective-active {
+  border: 1px solid rgba(34, 197, 94, 0.18);
+  background: rgba(0, 0, 0, 0.35);
 }
 
 .system-status-card {

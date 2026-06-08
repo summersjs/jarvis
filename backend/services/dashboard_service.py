@@ -9,6 +9,7 @@ from backend.services.goal_service import list_goals
 from backend.services.meal_planner_service import list_meal_plan_entries
 from backend.services.workout_service import (
     estimate_one_rep_max,
+    get_latest_top_set,
     get_next_workout_logic,
     get_todays_workout_summary,
     get_scheduled_lift_for_date,
@@ -202,6 +203,8 @@ def _workout_score(workout_logic: dict) -> float:
 
 def _mission_score(user_id: str, workout_logic: dict, shopping: dict, calendar: dict, finance_summary: dict) -> dict:
     goals = get_goal_overview(user_id)
+    objectives_completed = sum(1 for goal in goals if goal.get("progress", {}).get("is_complete"))
+    objectives_total = len(goals)
     workout_score = _workout_score(workout_logic)
     goal_score = _objective_completion_ratio(goals)
     shopping_score = _shopping_score(shopping)
@@ -230,11 +233,33 @@ def _mission_score(user_id: str, workout_logic: dict, shopping: dict, calendar: 
         "budget_score": budget_score,
         "calendar_score": calendar_score,
         "goals": goals,
+        "objectives_completed": objectives_completed,
+        "objectives_total": objectives_total,
     }
 
 
 def get_goal_overview(user_id: str) -> list[dict]:
     return list_goals(user_id, active_only=True)
+
+
+def _get_lift_profile(user_id: str, lift: str | None) -> dict | None:
+    if not lift:
+        return None
+
+    response = (
+        supabase
+        .table("lift_profiles")
+        .select("*")
+        .eq("user_id", user_id)
+        .eq("lift", lift)
+        .limit(1)
+        .execute()
+    )
+
+    if not response.data:
+        return None
+
+    return response.data[0]
 
 
 def _highest_priority_remaining_task(user_id: str, workout_logic: dict, shopping: dict, mission: dict) -> str:
@@ -296,10 +321,12 @@ def _mission_phase_content(phase: dict, dashboard: dict, mission: dict) -> dict:
         }
 
     if phase["key"] == "execution":
+        objectives_completed = mission.get("objectives_completed", 0)
+        objectives_total = mission.get("objectives_total", 0)
         return {
             "title": "Mission Control",
             "items": [
-                f"Objectives: {dashboard.get('objectives_completed', 0)}/{dashboard.get('objectives_total', 0)} complete",
+                f"Objectives: {objectives_completed}/{objectives_total} complete",
                 f"Workout: {today.get('day_type', 'rest').replace('_', ' ').title()}",
                 f"Shopping: {shopping.get('unchecked_count', 0)} items open",
                 f"Budget: {finance_summary.get('dashboard_cards', {}).get('spending_status', 'WATCH')}",
@@ -316,10 +343,12 @@ def _mission_phase_content(phase: dict, dashboard: dict, mission: dict) -> dict:
         }
 
     if phase["key"] == "debrief":
+        objectives_completed = mission.get("objectives_completed", 0)
+        objectives_total = mission.get("objectives_total", 0)
         return {
             "title": "End-of-Day Wrap",
             "items": [
-                f"Objectives: {dashboard.get('objectives_completed', 0)}/{dashboard.get('objectives_total', 0)} complete",
+                f"Objectives: {objectives_completed}/{objectives_total} complete",
                 f"Workout: {today.get('day_type', 'rest').replace('_', ' ').title()}",
                 f"Food spend: ${finance_summary.get('weekly_food_budget', {}).get('total_actual_food_spend_this_week', 0):.2f} this week",
                 f"Tomorrow focus: {calendar.get('tomorrow', {}).get('spoken_response') or 'No calendar data'}",
@@ -479,6 +508,8 @@ def build_daily_dashboard(user_id: str = "john") -> dict:
     goals = get_goal_overview(user_id)
     mission_phase = _get_mission_phase(now)
     today_workout = get_todays_workout_summary(user_id, now.date())
+    workout_profile = _get_lift_profile(user_id, scheduled_today)
+    latest_top_set = get_latest_top_set(user_id, scheduled_today) if scheduled_today else None
 
     mission = _mission_score(user_id, workout_logic, shopping, calendar, finance_summary)
     highest_priority_remaining_task = _highest_priority_remaining_task(user_id, workout_logic, shopping, mission)
@@ -506,6 +537,14 @@ def build_daily_dashboard(user_id: str = "john") -> dict:
         "finance_summary": finance_summary,
         "goals": goals,
         "today_workout": today_workout,
+        "workout_metadata": {
+            "lift": scheduled_today,
+            "lift_label": format_lift_name(scheduled_today) if scheduled_today else None,
+            "training_max": round(float(workout_profile.get("training_max", 0))) if workout_profile and workout_profile.get("training_max") else None,
+            "cycle": int(workout_profile.get("cycle", 1)) if workout_profile and workout_profile.get("cycle") else None,
+            "week": int(workout_profile.get("week", 1)) if workout_profile and workout_profile.get("week") else None,
+            "latest_top_set": latest_top_set,
+        },
         "mission_phase": mission_phase,
         "mission_status": {
             "score": mission["score"],

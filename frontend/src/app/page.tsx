@@ -71,6 +71,21 @@ type DashboardResponse = {
     } | null;
     spoken_response?: string | null;
   };
+  workout_metadata?: {
+    lift?: string | null;
+    lift_label?: string | null;
+    training_max?: number | null;
+    cycle?: number | null;
+    week?: number | null;
+    latest_top_set?: {
+      id?: number | string | null;
+      lift?: string | null;
+      weight?: number | null;
+      reps?: number | null;
+      notes?: string | null;
+      created_at?: string | null;
+    } | null;
+  };
   meals: MealEntry[];
   shopping: {
     list?: {
@@ -453,8 +468,7 @@ export default function CommandCenterPage() {
               <DailyBriefing dashboard={dashboard} />
             </section>
 
-            <section className="grid gap-6 lg:grid-cols-2">
-              <NextWorkoutPanel dashboard={dashboard} />
+            <section className="grid gap-6 lg:grid-cols-3">
               <CalendarPanel dashboard={dashboard} />
               <MealPlanPanel meals={dashboard.meals} />
               <ShoppingPanel shopping={dashboard.shopping} />
@@ -504,14 +518,18 @@ function WorkoutMissionCard({ dashboard }: { dashboard: DashboardResponse }) {
       : dashboard.today.day_type === "rest"
         ? "Recovery"
         : "Active";
+  const nextLift = dashboard.next_workout.next_scheduled?.lift || dashboard.next_workout.lift;
+  const nextConfig = getWorkoutConfig(nextLift);
+  const NextIcon = nextConfig.Icon;
+  const workoutMetadata = dashboard.workout_metadata;
 
   return (
     <Link href="/workouts" className={`mission-card group ${config.accentClass}`}>
       <div className="mission-scan" />
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
+        <div className="min-w-0 flex-1">
           <p className="hud-kicker">Today&apos;s Training Objective</p>
-          <h2 className="mt-2 text-4xl font-black leading-none text-green-100 md:text-5xl">
+          <h2 className="mt-2 text-3xl font-black leading-none text-green-100 md:text-[2.5rem]">
             {title}
           </h2>
           <p className="mt-3 text-sm font-bold uppercase tracking-[0.24em] text-green-300">
@@ -523,16 +541,67 @@ function WorkoutMissionCard({ dashboard }: { dashboard: DashboardResponse }) {
         </div>
       </div>
 
-      <div className="mt-7 grid gap-3 text-sm sm:grid-cols-3">
+      <div className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
         <MissionMetric label="Status" value={statusLabel} />
         <MissionMetric label="Focus" value={config.focus} />
         <MissionMetric label="Action" value="Open Protocol" />
       </div>
 
+      <div className="mt-5 rounded-lg border border-green-500/18 bg-black/28 p-3">
+        <p className="hud-kicker">Next Training Protocol</p>
+        <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <h3 className="text-2xl font-black leading-none text-green-100 md:text-[2rem]">
+              {dashboard.next_workout.lift_label || formatDayType(nextLift)}
+            </h3>
+            <p className="mt-2 text-sm font-bold uppercase tracking-[0.24em] text-green-300">
+              {nextConfig.label}
+            </p>
+          </div>
+          <div className="mission-icon-shell mission-icon-shell-compact">
+            <NextIcon className="h-10 w-10" />
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
+          <MissionMetric label="Status" value="Scheduled" />
+          <MissionMetric label="Focus" value={nextConfig.focus} />
+          <MissionMetric label="Action" value="Review Plan" />
+        </div>
+      </div>
+
+      {workoutMetadata && (
+        <div className="mt-5 grid gap-3 rounded-lg border border-green-500/18 bg-black/24 p-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+          {workoutMetadata.training_max ? (
+            <MiniInfo label="Training Max" value={`${workoutMetadata.training_max} lbs`} />
+          ) : null}
+          {workoutMetadata.cycle ? <MiniInfo label="Cycle" value={`Cycle ${workoutMetadata.cycle}`} /> : null}
+          {workoutMetadata.week ? <MiniInfo label="Week" value={`Week ${workoutMetadata.week}`} /> : null}
+          {workoutMetadata.latest_top_set ? (
+            <MiniInfo
+              label="Latest Top Set"
+              value={`${workoutMetadata.latest_top_set.weight || 0} x ${workoutMetadata.latest_top_set.reps || 0}`}
+              note={workoutMetadata.latest_top_set.notes || ""}
+            />
+          ) : null}
+        </div>
+      )}
+
       <p className="mt-5 inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.18em] text-green-200/80 transition group-hover:text-green-100">
         Open Workout Protocol <ChevronRight className="h-4 w-4" />
       </p>
     </Link>
+  );
+}
+
+function MiniInfo({ label, value, note }: { label: string; value: string; note?: string }) {
+  return (
+    <div className="rounded-lg border border-green-500/16 bg-black/28 p-3">
+      <p className="text-[0.62rem] font-extrabold uppercase tracking-[0.22em] text-green-500/65">
+        {label}
+      </p>
+      <p className="mt-2 text-sm font-semibold text-green-100">{value}</p>
+      {note && <p className="mt-1 text-xs text-green-300/65">{note}</p>}
+    </div>
   );
 }
 
@@ -737,35 +806,6 @@ function BriefingBlock({ label, lines }: { label: string; lines: string[] }) {
         ))}
       </div>
     </div>
-  );
-}
-
-function NextWorkoutPanel({ dashboard }: { dashboard: DashboardResponse }) {
-  const lift = dashboard.next_workout.lift || dashboard.today.scheduled_lift || dashboard.today.day_type;
-  const config = getWorkoutConfig(lift);
-  const Icon = config.Icon;
-
-  return (
-    <HudPanel title="Next Training Protocol" Icon={ClipboardList}>
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-3xl font-black uppercase text-green-100">
-            {dashboard.next_workout.lift_label || formatDayType(lift)}
-          </p>
-          <p className="mt-2 text-sm font-bold uppercase tracking-[0.2em] text-green-300/75">
-            {config.label}
-          </p>
-        </div>
-        <div className="hud-panel-icon h-12 w-12">
-          <Icon className="h-7 w-7" />
-        </div>
-      </div>
-      <div className="mt-5 grid gap-3 sm:grid-cols-3">
-        <MissionMetric label="Status" value="Scheduled" />
-        <MissionMetric label="Focus" value={config.focus} />
-        <MissionMetric label="Action" value="Review Plan" />
-      </div>
-    </HudPanel>
   );
 }
 

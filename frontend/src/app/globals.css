@@ -502,7 +502,7 @@ body {
   box-shadow:
     0 0 0 1px rgba(187, 247, 208, 0.06) inset,
     0 0 24px rgba(34, 197, 94, 0.16);
-  padding: 1.45rem;
+  padding: 1.15rem;
   text-decoration: none;
   transition:
     transform 260ms,
@@ -535,9 +535,14 @@ body {
 }
 
 .mission-icon-shell {
-  width: 5.25rem;
-  height: 5.25rem;
+  width: 4.4rem;
+  height: 4.4rem;
   border-radius: 0.55rem;
+}
+
+.mission-icon-shell-compact {
+  width: 3.8rem;
+  height: 3.8rem;
 }
 
 .workout-accent-squat {

@@ -506,35 +506,35 @@ export default function CommandCenterPage() {
         </header>
 
         <nav className="tactical-nav-grid mb-6">
-          <button className="tactical-nav-link" onClick={toggleStatus}>
+          <button className="command-nav-link tactical-nav-link" onClick={toggleStatus}>
             <Zap className="h-4 w-4" />
             <span>{status ? "Hide Status" : "Ping Jarvis"}</span>
           </button>
-          <Link className="tactical-nav-link" href="/meal-planner">
+          <Link className="command-nav-link tactical-nav-link" href="/meal-planner">
             <Utensils className="h-4 w-4" />
             <span>Meal Planner</span>
           </Link>
-          <Link className="tactical-nav-link" href="/shopping">
+          <Link className="command-nav-link tactical-nav-link" href="/shopping">
             <ShoppingCart className="h-4 w-4" />
             <span>Shopping</span>
           </Link>
-          <Link className="tactical-nav-link" href="/recipes">
+          <Link className="command-nav-link tactical-nav-link" href="/recipes">
             <BookOpen className="h-4 w-4" />
             <span>Recipes</span>
           </Link>
-          <Link className="tactical-nav-link" href="/preferences">
+          <Link className="command-nav-link tactical-nav-link" href="/preferences">
             <Settings2 className="h-4 w-4" />
             <span>Preferences</span>
           </Link>
-          <Link className="tactical-nav-link" href="/goals">
+          <Link className="command-nav-link tactical-nav-link" href="/goals">
             <Target className="h-4 w-4" />
             <span>Goals</span>
           </Link>
-          <Link className="tactical-nav-link" href="/daily-debrief">
+          <Link className="command-nav-link tactical-nav-link" href="/daily-debrief">
             <ClipboardList className="h-4 w-4" />
             <span>Daily Debrief</span>
           </Link>
-          <Link className="tactical-nav-link" href="/finance-ops">
+          <Link className="command-nav-link tactical-nav-link" href="/finance-ops">
             <DollarSign className="h-4 w-4" />
             <span>Finance Ops</span>
           </Link>

@@ -539,40 +539,11 @@ body {
 }
 
 .tactical-nav-link {
-  display: inline-flex;
-  align-items: center;
   gap: 0.55rem;
-  justify-content: center;
   min-height: 2.7rem;
-  border: 1px solid rgba(74, 222, 128, 0.28);
-  border-radius: 0.6rem;
-  background:
-    linear-gradient(145deg, rgba(9, 21, 15, 0.98), rgba(0, 0, 0, 0.92));
-  color: rgb(187, 247, 208);
   padding: 0.6rem 0.85rem;
-  text-decoration: none;
   font-size: 0.72rem;
-  font-weight: 900;
   letter-spacing: 0.14em;
-  line-height: 1;
-  text-transform: uppercase;
-  transition:
-    transform 220ms,
-    border-color 220ms,
-    box-shadow 220ms,
-    color 220ms,
-    background-color 220ms;
-}
-
-.tactical-nav-link:hover {
-  transform: translateY(-1px);
-  border-color: rgba(187, 247, 208, 0.72);
-  color: rgb(240, 253, 244);
-  background:
-    linear-gradient(145deg, rgba(16, 46, 26, 0.98), rgba(0, 0, 0, 0.92));
-  box-shadow:
-    0 0 0 1px rgba(187, 247, 208, 0.08) inset,
-    0 0 18px rgba(34, 197, 94, 0.14);
 }
 
 .tactical-nav-link svg {

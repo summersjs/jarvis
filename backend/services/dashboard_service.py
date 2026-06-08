@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from backend.core.config import LOCAL_TZ
 from backend.db.supabase_client import supabase
 from backend.services.calendar_service import get_birthday_note_for_date, get_calendar_summary_for_date
-from backend.services.debrief_service import build_finance_ops_summary
+from backend.services.debrief_service import build_finance_ops_summary, get_previous_mission_score
 from backend.services.goal_service import list_goals
 from backend.services.meal_planner_service import list_meal_plan_entries
 from backend.services.workout_service import (
@@ -513,6 +513,8 @@ def build_daily_dashboard(user_id: str = "john") -> dict:
 
     mission = _mission_score(user_id, workout_logic, shopping, calendar, finance_summary)
     highest_priority_remaining_task = _highest_priority_remaining_task(user_id, workout_logic, shopping, mission)
+    previous_mission_score = get_previous_mission_score(user_id)
+    mission_delta = mission["score"] - previous_mission_score if previous_mission_score is not None else None
 
     dashboard_base = {
         "status": "ok",
@@ -550,6 +552,7 @@ def build_daily_dashboard(user_id: str = "john") -> dict:
             "score": mission["score"],
             "label": mission["label"],
             "class": mission["class"],
+            "delta": mission_delta,
         },
         "highest_priority_remaining_task": highest_priority_remaining_task,
         "coaching_note": _build_coaching_note(user_id, workout_logic, meals, shopping, today),

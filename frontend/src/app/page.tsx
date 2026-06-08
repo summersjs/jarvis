@@ -132,6 +132,7 @@ type DashboardResponse = {
     score: number;
     label: string;
     class: "online" | "pending" | "offline";
+    delta?: number | null;
   };
   mission?: {
     phase: string;
@@ -330,6 +331,7 @@ export default function CommandCenterPage() {
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [scoreDelta, setScoreDelta] = useState<number | null>(null);
 
   async function loadDashboard() {
     setError("");
@@ -347,6 +349,17 @@ export default function CommandCenterPage() {
       }
 
       const data = await res.json();
+      const currentScore = Number(data?.mission_status?.score);
+      if (typeof window !== "undefined" && Number.isFinite(currentScore)) {
+        const previousScoreRaw = window.localStorage.getItem("jarvis_mission_score");
+        const previousScore = previousScoreRaw === null ? null : Number(previousScoreRaw);
+        if (previousScore !== null && Number.isFinite(previousScore)) {
+          setScoreDelta(currentScore - previousScore);
+        } else {
+          setScoreDelta(null);
+        }
+        window.localStorage.setItem("jarvis_mission_score", String(currentScore));
+      }
       setDashboard(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load command center.");
@@ -385,6 +398,8 @@ export default function CommandCenterPage() {
     }
   }
 
+  const missionDelta = dashboard?.mission_status?.delta ?? scoreDelta;
+
   return (
     <main className="min-h-screen bg-black px-6 py-10 text-green-400">
       <div className="mx-auto max-w-7xl">
@@ -414,9 +429,6 @@ export default function CommandCenterPage() {
                   >
                     Mission Status: {dashboard.mission_status?.label || "ON TRACK"}
                   </span>
-                  <span className="mission-badge mission-badge-score">
-                    Mission Score: {dashboard.mission_status?.score ?? 0}
-                  </span>
                 </div>
               )}
             </div>
@@ -424,16 +436,41 @@ export default function CommandCenterPage() {
 
           <div className="tactical-score-panel">
             <p className="text-xs uppercase tracking-[0.28em] text-green-500/60">Mission Score</p>
-            <div
-              className={`mt-2 text-[3.2rem] font-black leading-none ${
-                dashboard?.mission_status?.class === "offline"
-                  ? "text-red-300 drop-shadow-[0_0_14px_rgba(248,113,113,0.55)]"
-                  : dashboard?.mission_status?.class === "pending"
-                    ? "text-amber-200 drop-shadow-[0_0_14px_rgba(250,204,21,0.45)]"
-                    : "text-cyan-200 drop-shadow-[0_0_14px_rgba(34,211,238,0.45)]"
-              }`}
-            >
-              {dashboard?.mission_status?.score ?? 0}
+            <div className="mt-2 flex items-end gap-3">
+              <div
+                className={`text-[3.2rem] font-black leading-none ${
+                  dashboard?.mission_status?.class === "offline"
+                    ? "text-red-300 drop-shadow-[0_0_14px_rgba(248,113,113,0.55)]"
+                    : dashboard?.mission_status?.class === "pending"
+                      ? "text-amber-200 drop-shadow-[0_0_14px_rgba(250,204,21,0.45)]"
+                      : "text-cyan-200 drop-shadow-[0_0_14px_rgba(34,211,238,0.45)]"
+                }`}
+              >
+                {dashboard?.mission_status?.score ?? 0}
+              </div>
+              {typeof missionDelta === "number" && (
+                <div
+                  className={`mission-delta ${
+                    missionDelta > 0
+                      ? "mission-delta-up"
+                      : missionDelta < 0
+                        ? "mission-delta-down"
+                        : "mission-delta-flat"
+                  }`}
+                >
+                  <span aria-hidden="true">
+                    {missionDelta > 0
+                      ? "▲"
+                      : missionDelta < 0
+                        ? "▼"
+                        : "•"}
+                  </span>
+                  <span>
+                    {missionDelta > 0 ? "+" : ""}
+                    {missionDelta ?? 0}
+                  </span>
+                </div>
+              )}
             </div>
             <p
               className={`mt-1 text-sm font-bold uppercase tracking-[0.26em] ${
@@ -460,6 +497,9 @@ export default function CommandCenterPage() {
                 }`}
               >
                 Mission Status: {dashboard?.mission_status?.label || "ON TRACK"}
+              </span>
+              <span className="mission-badge mission-badge-score">
+                Mission Score: {dashboard?.mission_status?.score ?? 0}
               </span>
             </div>
           </div>

@@ -61,6 +61,7 @@ class DailyDebriefEntryCreate(BaseModel):
     user_id: str
     date: str
     overall_status: str
+    mission_score: Optional[int] = None
     summary: Optional[str] = None
     objectives: list[DebriefObjective] = Field(default_factory=list)
     training: TrainingDebrief = Field(default_factory=TrainingDebrief)

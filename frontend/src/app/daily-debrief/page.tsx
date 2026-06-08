@@ -30,6 +30,7 @@ type Objective = {
 type DailyDebriefSummary = {
   status: string;
   date: string;
+  mission_score?: number | null;
   overall_status?: string | null;
   day_type?: string | null;
   scheduled_lift?: string | null;
@@ -109,6 +110,7 @@ type DailyDebriefSummary = {
 
 type SavedDebriefEntry = {
   date?: string;
+  mission_score?: number | null;
   overall_status?: string;
   summary?: string;
   objectives?: Objective[];
@@ -165,6 +167,7 @@ type DebriefHistoryEntry = {
 
 type DebriefForm = {
   date: string;
+  mission_score: number | null;
   overall_status: string;
   summary: string;
   objectives: Objective[];
@@ -211,6 +214,7 @@ type DebriefForm = {
 const defaultForm: DebriefForm = {
   date: "",
   overall_status: "PARTIAL",
+  mission_score: null,
   summary: "",
   objectives: [],
   training: {
@@ -298,7 +302,7 @@ export default function DailyDebriefPage() {
           "Content-Type": "application/json",
           "x-api-key": API_KEY,
         },
-        body: JSON.stringify(toPayload(form)),
+        body: JSON.stringify(toPayload(form, summary)),
       });
 
       const data = await res.json();
@@ -926,6 +930,7 @@ function fromSummary(summary: DailyDebriefSummary): DebriefForm {
   return {
     date: saved.date || summary.date || new Date().toISOString().slice(0, 10),
     overall_status: summary.status || saved.overall_status || "PARTIAL",
+    mission_score: summary.mission_score ?? saved.mission_score ?? null,
     summary: saved.summary || summary.spoken_response || "",
     objectives: objectives.length > 0 ? objectives : [],
     training: {
@@ -971,11 +976,12 @@ function fromSummary(summary: DailyDebriefSummary): DebriefForm {
   };
 }
 
-function toPayload(form: DebriefForm) {
+function toPayload(form: DebriefForm, summary: DailyDebriefSummary | null) {
   return {
     user_id: USER_ID,
     date: form.date || new Date().toISOString().slice(0, 10),
     overall_status: form.overall_status,
+    mission_score: form.mission_score ?? summary?.mission_score ?? null,
     summary: form.summary,
     objectives: form.objectives,
     training: {

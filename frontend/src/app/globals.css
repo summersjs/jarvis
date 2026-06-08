@@ -491,6 +491,38 @@ body {
   color: rgb(165, 243, 252);
 }
 
+.mission-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid rgba(134, 239, 172, 0.24);
+  border-radius: 999px;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.82rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.mission-delta-up {
+  border-color: rgba(74, 222, 128, 0.36);
+  background: rgba(20, 83, 45, 0.26);
+  color: rgb(187, 247, 208);
+}
+
+.mission-delta-down {
+  border-color: rgba(248, 113, 113, 0.42);
+  background: rgba(127, 29, 29, 0.24);
+  color: rgb(254, 202, 202);
+}
+
+.mission-delta-flat {
+  border-color: rgba(148, 163, 184, 0.28);
+  background: rgba(15, 23, 42, 0.28);
+  color: rgb(226, 232, 240);
+}
+
 .section-label {
   color: rgba(134, 239, 172, 0.66);
   font-size: 0.68rem;

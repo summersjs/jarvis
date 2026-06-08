@@ -70,6 +70,113 @@ def _lookup_latest_debrief(user_id: str, date_str: str) -> dict | None:
     return sorted(matches, key=lambda entry: entry.get("updated_at") or entry.get("created_at") or "", reverse=True)[0]
 
 
+def get_previous_mission_score(user_id: str, before_date: str | None = None) -> int | None:
+    entries = [
+        entry
+        for entry in _debrief_entries()
+        if entry.get("user_id") == user_id and (before_date is None or (entry.get("date") or "") < before_date)
+    ]
+    if not entries:
+        return None
+
+    latest = sorted(entries, key=lambda entry: entry.get("updated_at") or entry.get("created_at") or "", reverse=True)[0]
+    score = latest.get("mission_score")
+    if score is None:
+        return None
+
+    try:
+        return int(score)
+    except (TypeError, ValueError):
+        return None
+
+
+def _latest_unchecked_shopping_items(user_id: str) -> dict:
+    lists_response = (
+        supabase
+        .table("shopping_lists")
+        .select("*")
+        .eq("user_id", user_id)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+
+    if not lists_response.data:
+        return {
+            "unchecked_count": 0,
+        }
+
+    shopping_list = lists_response.data[0]
+    items_response = (
+        supabase
+        .table("shopping_list_items")
+        .select("*")
+        .eq("shopping_list_id", shopping_list["id"])
+        .eq("is_checked", False)
+        .order("created_at")
+        .execute()
+    )
+
+    return {
+        "unchecked_count": len(items_response.data or []),
+    }
+
+
+def _objective_completion_ratio(goals: list[dict]) -> float:
+    if not goals:
+        return 1.0
+    completed = sum(1 for goal in goals if goal.get("progress", {}).get("is_complete"))
+    return completed / len(goals)
+
+
+def _budget_score(finance_summary: dict) -> float:
+    status = finance_summary.get("dashboard_cards", {}).get("spending_status", "WATCH")
+    if status == "ON TRACK":
+        return 1.0
+    if status == "WATCH":
+        return 0.65
+    return 0.15
+
+
+def _calendar_score(calendar: dict) -> float:
+    today_status = calendar.get("today", {}).get("status")
+    tomorrow_status = calendar.get("tomorrow", {}).get("status")
+    today_score = 1.0 if today_status == "ok" else 0.65
+    tomorrow_score = 1.0 if tomorrow_status == "ok" else 0.65
+    return round((today_score + tomorrow_score) / 2, 2)
+
+
+def _workout_score(workout_context: dict) -> float:
+    if workout_context.get("today_day_type") == "rest":
+        return 1.0
+    if workout_context.get("workout_completed"):
+        return 1.0
+    if workout_context.get("next_protocol"):
+        return 0.15
+    return 0.6
+
+
+def _mission_score(user_id: str, workout_context: dict, finance_summary: dict, calendar: dict) -> int:
+    goals = list_goals(user_id, active_only=True)
+    shopping = _latest_unchecked_shopping_items(user_id)
+    workout_score = _workout_score(workout_context)
+    goal_score = _objective_completion_ratio(goals)
+    shopping_score = 1.0 if int(shopping.get("unchecked_count") or 0) == 0 else 0.65
+    budget_score = _budget_score(finance_summary)
+    calendar_score = _calendar_score(calendar)
+
+    return round(
+        100
+        * (
+            workout_score * 0.3
+            + goal_score * 0.25
+            + shopping_score * 0.15
+            + budget_score * 0.15
+            + calendar_score * 0.15
+        )
+    )
+
+
 def _goals_as_objectives(user_id: str) -> list[dict]:
     goals = list_goals(user_id, active_only=True)
     objectives = []
@@ -360,6 +467,15 @@ def build_daily_debrief_summary(user_id: str = "john") -> dict:
     objectives_completed = sum(1 for objective in objectives if objective.get("completed"))
     objectives_total = len(objectives)
     daily_status = _food_budget_status(food_spend_today, budget, now)
+    mission_score = _mission_score(
+        user_id,
+        workout_context,
+        build_finance_ops_summary(user_id, month).get("dashboard_cards", {}),
+        {
+            "today": {"status": "ok" if workout_context["today_calendar_events"] is not None else "error"},
+            "tomorrow": {"status": "ok" if workout_context["tomorrow_calendar_events"] is not None else "error"},
+        },
+    )
     if not workout_context["today_day_type"] or workout_context["today_day_type"] == "rest":
         overall_status = "RECOVERY"
     elif not workout_completed:
@@ -483,6 +599,7 @@ def build_daily_debrief_summary(user_id: str = "john") -> dict:
         "status": "ok",
         "user_id": user_id,
         "date": today,
+        "mission_score": mission_score,
         "overall_status": overall_status,
         "day_type": workout_context["today_day_type"],
         "scheduled_lift": scheduled_lift,

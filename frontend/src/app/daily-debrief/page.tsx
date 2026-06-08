@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { type ComponentType, type ReactNode, useCallback, useEffect, useState } from "react";
+import { type ComponentType, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import {
+  Activity,
   BrainCircuit,
   CalendarDays,
   CheckCircle2,
@@ -25,12 +26,36 @@ type Objective = {
   completed: boolean;
   notes: string;
   blocker: string;
+  state?: string;
+  detail?: string;
 };
 
 type DailyDebriefSummary = {
   status: string;
   date: string;
   mission_score?: number | null;
+  daily_score?: number | null;
+  weekly_score?: number | null;
+  lifetime_score?: number | null;
+  lifetime_rank?: string | null;
+  mission_scores?: {
+    daily?: {
+      score?: number;
+      label?: string;
+      class?: "online" | "pending" | "offline";
+      goals_completed_today?: number;
+      goals_impacted_today?: number;
+    };
+    weekly?: {
+      score?: number;
+      label?: string;
+      class?: "online" | "pending" | "offline";
+    };
+    lifetime?: {
+      score?: number;
+      rank?: string;
+    };
+  };
   overall_status?: string | null;
   day_type?: string | null;
   scheduled_lift?: string | null;
@@ -63,6 +88,7 @@ type DailyDebriefSummary = {
     workout_completed: boolean;
     scheduled_lift?: string | null;
     lift_completed?: string | null;
+    workout_status?: string | null;
     top_set_weight?: number | null;
     top_set_reps?: number | null;
     sets_completed?: number | null;
@@ -86,6 +112,19 @@ type DailyDebriefSummary = {
     spending_status?: string | null;
   };
   saved_entry?: SavedDebriefEntry | null;
+  tomorrow?: {
+    top_priorities?: string[];
+    calendar?: string[];
+    priorities?: string[];
+    workout?: {
+      lift?: string | null;
+      label?: string | null;
+      weekday?: string | null;
+    } | null;
+    shopping_items?: string[];
+    meal_prep?: string | null;
+    reminder?: string | null;
+  };
   calendar?: {
     today?: {
       summary?: string;
@@ -111,12 +150,19 @@ type DailyDebriefSummary = {
 type SavedDebriefEntry = {
   date?: string;
   mission_score?: number | null;
+  daily_score?: number | null;
+  weekly_score?: number | null;
+  lifetime_score?: number | null;
+  lifetime_rank?: string | null;
+  is_finalized?: boolean | null;
+  completed_at?: string | null;
   overall_status?: string;
   summary?: string;
   objectives?: Objective[];
   training?: {
     workout_completed?: boolean;
     lift_completed?: string | null;
+    workout_status?: string | null;
     top_set_weight?: number | null;
     top_set_reps?: number | null;
     energy_level?: number | null;
@@ -148,6 +194,13 @@ type SavedDebriefEntry = {
   };
   tomorrow?: {
     top_priorities?: string[];
+    calendar?: string[];
+    priorities?: string[];
+    workout?: {
+      lift?: string | null;
+      label?: string | null;
+      weekday?: string | null;
+    } | null;
     shopping_items?: string[];
     meal_prep?: string | null;
     reminder?: string | null;
@@ -157,6 +210,7 @@ type SavedDebriefEntry = {
 type DebriefHistoryEntry = {
   date: string;
   overall_status: string;
+  mission_score?: number | null;
   summary?: string | null;
   victory?: {
     win: string;
@@ -174,6 +228,7 @@ type DebriefForm = {
   training: {
     workout_completed: boolean;
     lift_completed: string;
+    workout_status: string;
     top_set_weight: string;
     top_set_reps: string;
     energy_level: string;
@@ -204,7 +259,9 @@ type DebriefForm = {
     adjust_tomorrow: string;
   };
   tomorrow: {
-    top_priorities: string[];
+    calendar: string[];
+    priorities: string[];
+    workout: string;
     shopping_items: string[];
     meal_prep: string;
     reminder: string;
@@ -220,6 +277,7 @@ const defaultForm: DebriefForm = {
   training: {
     workout_completed: false,
     lift_completed: "",
+    workout_status: "Scheduled",
     top_set_weight: "",
     top_set_reps: "",
     energy_level: "",
@@ -250,7 +308,9 @@ const defaultForm: DebriefForm = {
     adjust_tomorrow: "",
   },
   tomorrow: {
-    top_priorities: ["", "", ""],
+    calendar: [""],
+    priorities: ["", "", ""],
+    workout: "",
     shopping_items: [""],
     meal_prep: "",
     reminder: "",
@@ -263,7 +323,12 @@ export default function DailyDebriefPage() {
   const [form, setForm] = useState<DebriefForm>(defaultForm);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const [isSaving, setIsSaving] = useState(false);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const [isFinalizing, setIsFinalizing] = useState(false);
+  const loadedRef = useRef(false);
+  const autosaveTimerRef = useRef<number | null>(null);
+  const lastSavedSignatureRef = useRef("");
+  const isLocked = !!summary?.saved_entry?.is_finalized;
 
   const loadData = useCallback(async () => {
     try {
@@ -284,38 +349,106 @@ export default function DailyDebriefPage() {
 
       setSummary(summaryData);
       setHistory(historyData.entries || []);
-      setForm(fromSummary(summaryData));
+      const nextForm = fromSummary(summaryData);
+      setForm(nextForm);
+      lastSavedSignatureRef.current = JSON.stringify(toPayload(nextForm, summaryData, false));
+      loadedRef.current = true;
+      setSaveState("saved");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load debrief data.");
     }
   }, []);
 
-  async function saveEntry() {
+  const saveEntry = useCallback(
+    async (options?: { finalize?: boolean; quiet?: boolean }) => {
+      const finalize = !!options?.finalize;
+      const quiet = !!options?.quiet;
+      const payload = toPayload(form, summary, finalize);
+      const signature = JSON.stringify(payload);
+
+      if (!finalize && summary?.saved_entry?.is_finalized) {
+        setSaveState("saved");
+        return;
+      }
+
+      if (!finalize && signature === lastSavedSignatureRef.current) {
+        setSaveState("saved");
+        return;
+      }
+
+      setError("");
+      setMessage("");
+      if (!quiet) {
+        setSaveState("saving");
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/debrief/daily`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": API_KEY,
+          },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Failed to save debrief.");
+
+        lastSavedSignatureRef.current = signature;
+        setSummary(data.summary || summary);
+        if (finalize) {
+          setMessage(
+            `Mission Logged. Daily Score: ${data.entry?.daily_score ?? payload.daily_score ?? payload.mission_score ?? 0}.`
+          );
+        }
+        setSaveState("saved");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to save debrief.");
+      } finally {
+        if (!finalize && !quiet) {
+          setTimeout(() => setSaveState("saved"), 250);
+        }
+      }
+    },
+    [form, summary]
+  );
+
+  async function completeDebrief() {
+    setIsFinalizing(true);
     setError("");
     setMessage("");
-    setIsSaving(true);
+    if (autosaveTimerRef.current) {
+      window.clearTimeout(autosaveTimerRef.current);
+    }
 
     try {
-      const res = await fetch(`${API_BASE}/debrief/daily`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": API_KEY,
-        },
-        body: JSON.stringify(toPayload(form, summary)),
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Failed to save debrief.");
-
-      setMessage("Daily debrief saved.");
+      await saveEntry({ finalize: true, quiet: true });
       await loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save debrief.");
     } finally {
-      setIsSaving(false);
+      setIsFinalizing(false);
     }
   }
+
+  useEffect(() => {
+    if (!loadedRef.current || isLocked) return;
+    if (autosaveTimerRef.current) {
+      window.clearTimeout(autosaveTimerRef.current);
+    }
+
+    setSaveState("saving");
+    autosaveTimerRef.current = window.setTimeout(() => {
+      saveEntry({ quiet: true });
+    }, 800);
+
+    return () => {
+      if (autosaveTimerRef.current) {
+        window.clearTimeout(autosaveTimerRef.current);
+      }
+    };
+  }, [form, saveEntry, isLocked]);
 
   useEffect(() => {
     loadData();
@@ -387,10 +520,10 @@ export default function DailyDebriefPage() {
         )}
 
         <section className="mb-6 grid gap-4 md:grid-cols-4">
-          <StatCard icon={ClipboardList} label="Objectives" value={`${summary?.objectives_completed ?? 0}/${summary?.objectives_total ?? 0}`} />
-          <StatCard icon={CheckCircle2} label="Workout" value={summary?.workout_completed ? "Logged" : "Missing"} />
-          <StatCard icon={Utensils} label="Food Spend" value={`$${formatMoney(summary?.food_spend_today ?? 0)}`} />
-          <StatCard icon={DollarSign} label="Spend Status" value={summary?.daily_spending_status || "WATCH"} />
+          <StatCard icon={Activity} label="Daily Score" value={`${summary?.daily_score ?? summary?.mission_scores?.daily?.score ?? summary?.mission_score ?? 0}`} />
+          <StatCard icon={ClipboardList} label="Weekly Score" value={`${summary?.weekly_score ?? summary?.mission_scores?.weekly?.score ?? 0}`} />
+          <StatCard icon={Trophy} label="Mission Rank" value={summary?.lifetime_rank || summary?.mission_scores?.lifetime?.rank || "Recruit"} />
+          <StatCard icon={CheckCircle2} label="Workout" value={summary?.training?.workout_status || (summary?.day_type === "rest" ? "Rest Day" : summary?.workout_completed ? "Logged" : "Scheduled")} />
         </section>
 
         <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
@@ -398,6 +531,18 @@ export default function DailyDebriefPage() {
             <Panel title="Mission Summary" icon={CalendarDays}>
               <div className="mb-4 grid gap-3 md:grid-cols-3">
                 <SummaryChip label="Today" value={formatLabel(summary?.day_type || "rest")} />
+                <SummaryChip
+                  label="Daily Score"
+                  value={`${summary?.daily_score ?? summary?.mission_scores?.daily?.score ?? summary?.mission_score ?? 0}`}
+                />
+                <SummaryChip
+                  label="Weekly Score"
+                  value={`${summary?.weekly_score ?? summary?.mission_scores?.weekly?.score ?? 0}`}
+                />
+                <SummaryChip
+                  label="Lifetime Rank"
+                  value={summary?.lifetime_rank || summary?.mission_scores?.lifetime?.rank || "Recruit"}
+                />
                 <SummaryChip
                   label="Next Protocol"
                   value={
@@ -450,10 +595,10 @@ export default function DailyDebriefPage() {
               </div>
             </Panel>
 
-            <Panel title="Objectives Review" icon={Target}>
+            <Panel title="Goal Impact" icon={Target}>
               <div className="space-y-3">
                 {form.objectives.length === 0 && (
-                  <p className="text-sm text-green-300/60">No objectives loaded.</p>
+                  <p className="text-sm text-green-300/60">No goals were impacted today.</p>
                 )}
                 {form.objectives.map((objective, index) => (
                   <Link
@@ -477,7 +622,7 @@ export default function DailyDebriefPage() {
                         <div>
                           <p className="font-semibold text-green-100">{objective.title}</p>
                           <p className="text-xs uppercase tracking-[0.16em] text-green-300/60">
-                            {objective.completed ? "Cleared" : "In progress"}
+                            {objective.state || (objective.completed ? "Cleared" : "In progress")}
                           </p>
                         </div>
                         <span
@@ -488,7 +633,7 @@ export default function DailyDebriefPage() {
                           {objective.completed ? "CLEARED" : "OPEN"}
                         </span>
                       </div>
-                      <p className="mt-2 text-sm text-green-300/80">{objective.notes}</p>
+                      <p className="mt-2 text-sm text-green-300/80">{objective.detail || objective.notes}</p>
                       {!objective.completed && objective.blocker && (
                         <p className="mt-2 text-sm text-amber-200/80">Blocker: {objective.blocker}</p>
                       )}
@@ -505,10 +650,10 @@ export default function DailyDebriefPage() {
 
             <Panel title="Training Debrief" icon={ShieldCheck}>
               <div className="mb-4 grid gap-3 md:grid-cols-3">
-                <SummaryChip label="Workout" value={summary?.workout_completed ? "Logged" : "Missing"} />
+                <SummaryChip label="Workout" value={summary?.training?.workout_status || (summary?.day_type === "rest" ? "Rest Day" : summary?.workout_completed ? "Logged" : "Scheduled")} />
                 <SummaryChip
                   label="Lift"
-                  value={summary?.training?.lift_completed || summary?.scheduled_lift_label || "None"}
+                  value={summary?.training?.lift_completed || summary?.scheduled_lift_label || (summary?.day_type === "rest" ? "None" : "Pending")}
                 />
                 <SummaryChip
                   label="Goal impact"
@@ -800,42 +945,70 @@ export default function DailyDebriefPage() {
 
             <Panel title="Tomorrow Prep" icon={Zap}>
               <div className="space-y-4">
-                <div className="rounded-xl border border-green-500/20 bg-black p-4">
-                  <p className="text-xs uppercase tracking-[0.18em] text-green-500/70">Tomorrow Calendar</p>
-                  <p className="mt-2 text-sm text-green-300/80">
-                    {summary?.calendar?.tomorrow?.summary || "No calendar summary loaded."}
-                  </p>
-                  <div className="mt-3 space-y-2">
-                    {(summary?.calendar?.tomorrow?.events || []).length === 0 && (
-                      <p className="text-sm text-green-300/60">No calendar events detected.</p>
-                    )}
-                    {(summary?.calendar?.tomorrow?.events || []).map((event, index) => (
-                      <div key={`${event.summary}-${index}`} className="hud-row">
-                        <CalendarDays className="h-4 w-4" />
-                        <div>
-                          <p className="font-semibold text-green-100">{event.summary}</p>
+                <div className="grid gap-4 lg:grid-cols-3">
+                  <div className="rounded-xl border border-green-500/20 bg-black p-4">
+                    <p className="text-xs uppercase tracking-[0.18em] text-green-500/70">Tomorrow Calendar</p>
+                    <p className="mt-2 text-sm text-green-300/80">
+                      {summary?.tomorrow?.calendar?.length
+                        ? summary.tomorrow.calendar.join(" · ")
+                        : summary?.calendar?.tomorrow?.summary || "No calendar summary loaded."}
+                    </p>
+                    <div className="mt-3 space-y-2">
+                      {(summary?.calendar?.tomorrow?.events || []).length === 0 && (
+                        <p className="text-sm text-green-300/60">No calendar events detected.</p>
+                      )}
+                      {(summary?.calendar?.tomorrow?.events || []).map((event, index) => (
+                        <div key={`${event.summary}-${index}`} className="hud-row">
+                          <CalendarDays className="h-4 w-4" />
+                          <div>
+                            <p className="font-semibold text-green-100">{event.summary}</p>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
-                </div>
 
-                <div className="grid gap-3">
-                  {form.tomorrow.top_priorities.map((priority, index) => (
-                    <Field key={`priority-${index}`} label={`Top priority ${index + 1}`}>
-                      <input
-                        value={priority}
-                        onChange={(e) =>
-                          setForm((prev) => {
-                            const next = [...prev.tomorrow.top_priorities];
-                            next[index] = e.target.value;
-                            return { ...prev, tomorrow: { ...prev.tomorrow, top_priorities: next } };
-                          })
-                        }
-                        className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
-                      />
-                    </Field>
-                  ))}
+                  <div className="rounded-xl border border-green-500/20 bg-black p-4">
+                    <p className="text-xs uppercase tracking-[0.18em] text-green-500/70">Tomorrow Workout</p>
+                    <p className="mt-2 text-lg font-semibold text-green-100">
+                      {summary?.tomorrow?.workout?.label || summary?.next_protocol?.lift || "Rest Day"}
+                    </p>
+                    <p className="mt-2 text-sm text-green-300/80">
+                      {summary?.tomorrow?.workout?.weekday
+                        ? `Scheduled for ${summary.tomorrow.workout.weekday}`
+                        : summary?.tomorrow_day_type === "rest"
+                          ? "Recovery day"
+                          : summary?.next_protocol
+                            ? `Next protocol: ${summary.next_protocol.lift}`
+                            : "No workout planned"}
+                    </p>
+                    <div className="mt-3 rounded-lg border border-green-500/15 bg-black/30 p-3 text-sm text-green-300/80">
+                      {summary?.tomorrow?.workout?.label || summary?.next_protocol
+                        ? "This is the next lift on deck."
+                        : "The calendar is clear enough for recovery."}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-green-500/20 bg-black p-4">
+                    <p className="text-xs uppercase tracking-[0.18em] text-green-500/70">Tomorrow Priorities</p>
+                    <div className="mt-3 grid gap-3">
+                      {form.tomorrow.priorities.map((priority, index) => (
+                        <Field key={`priority-${index}`} label={`Priority ${index + 1}`}>
+                          <input
+                            value={priority}
+                            onChange={(e) =>
+                              setForm((prev) => {
+                                const next = [...prev.tomorrow.priorities];
+                                next[index] = e.target.value;
+                                return { ...prev, tomorrow: { ...prev.tomorrow, priorities: next } };
+                              })
+                            }
+                            className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
+                          />
+                        </Field>
+                      ))}
+                    </div>
+                  </div>
                 </div>
 
                 <Field label="Shopping items needed">
@@ -886,13 +1059,22 @@ export default function DailyDebriefPage() {
               </div>
             </Panel>
 
-            <button
-              onClick={saveEntry}
-              disabled={isSaving}
-              className="w-full rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-4 text-lg font-semibold transition hover:bg-green-500/20 disabled:opacity-50"
-            >
-              {isSaving ? "Saving Debrief..." : "Save Daily Debrief"}
-            </button>
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-green-500/20 bg-black p-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.18em] text-green-500/70">Autosave</p>
+                <p className="mt-1 text-sm text-green-100">
+                  {isLocked ? "Locked" : saveState === "saving" ? "Saving..." : "Saved"}
+                </p>
+              </div>
+
+              <button
+                onClick={completeDebrief}
+                disabled={isFinalizing || isLocked}
+                className="rounded-xl border border-cyan-300/40 bg-cyan-400/10 px-4 py-4 text-sm font-semibold uppercase tracking-[0.18em] text-cyan-100 transition hover:bg-cyan-400/20 disabled:opacity-50"
+              >
+                {isLocked ? "Mission Logged" : isFinalizing ? "Logging Mission..." : "Complete Daily Debrief"}
+              </button>
+            </div>
 
             <Panel title="Recent Entries" icon={ClipboardList}>
               <div className="space-y-3">
@@ -902,7 +1084,10 @@ export default function DailyDebriefPage() {
                 {history.slice(0, 5).map((entry) => (
                   <div key={entry.date} className="rounded-xl border border-green-500/20 bg-black p-4">
                     <p className="font-semibold text-green-100">{entry.date}</p>
-                    <p className="mt-1 text-sm text-green-300/70">{entry.overall_status}</p>
+                    <p className="mt-1 text-sm text-green-300/70">
+                      {entry.overall_status}
+                      {entry.mission_score != null ? ` · Score ${entry.mission_score}` : ""}
+                    </p>
                     <p className="mt-2 text-sm text-green-300/80">
                       {entry.victory?.win || entry.summary || "No summary provided."}
                     </p>
@@ -919,7 +1104,7 @@ export default function DailyDebriefPage() {
 
 function fromSummary(summary: DailyDebriefSummary): DebriefForm {
   const saved = summary.saved_entry || {};
-  const objectives = (saved.objectives || summary.objectives || []).map((objective: Objective) => ({
+  const objectives = (summary.objectives || saved.objectives || []).map((objective: Objective) => ({
     id: objective.id || undefined,
     title: objective.title || "",
     completed: !!objective.completed,
@@ -930,12 +1115,19 @@ function fromSummary(summary: DailyDebriefSummary): DebriefForm {
   return {
     date: saved.date || summary.date || new Date().toISOString().slice(0, 10),
     overall_status: summary.status || saved.overall_status || "PARTIAL",
-    mission_score: summary.mission_score ?? saved.mission_score ?? null,
+    mission_score:
+      summary.daily_score ??
+      summary.mission_scores?.daily?.score ??
+      summary.mission_score ??
+      saved.daily_score ??
+      saved.mission_score ??
+      null,
     summary: saved.summary || summary.spoken_response || "",
     objectives: objectives.length > 0 ? objectives : [],
     training: {
       workout_completed: saved.training?.workout_completed ?? summary.workout_completed ?? false,
-      lift_completed: saved.training?.lift_completed || summary.training?.lift_completed || "",
+      lift_completed: saved.training?.lift_completed || summary.training?.lift_completed || summary.scheduled_lift_label || "",
+      workout_status: saved.training?.workout_status || summary.training?.workout_status || (summary.day_type === "rest" ? "Rest Day" : summary.workout_completed ? "Completed" : "Scheduled"),
       top_set_weight: toInputValue(saved.training?.top_set_weight ?? summary.training?.top_set_weight ?? ""),
       top_set_reps: toInputValue(saved.training?.top_set_reps ?? summary.training?.top_set_reps ?? ""),
       energy_level: toInputValue(saved.training?.energy_level ?? summary.training?.energy_level ?? ""),
@@ -966,7 +1158,16 @@ function fromSummary(summary: DailyDebriefSummary): DebriefForm {
       adjust_tomorrow: saved.lessons?.adjust_tomorrow || summary.lessons?.adjust_tomorrow || "",
     },
     tomorrow: {
-      top_priorities: normalizeLines(saved.tomorrow?.top_priorities || summary.tomorrow_priorities || []),
+      calendar: normalizeLines(saved.tomorrow?.calendar || summary.tomorrow?.calendar || summary.calendar?.tomorrow?.events?.map((event) => event.summary || "") || []),
+      priorities: normalizeLines(saved.tomorrow?.priorities || saved.tomorrow?.top_priorities || summary.tomorrow?.priorities || summary.tomorrow_priorities || []),
+      workout: (() => {
+        if (saved.tomorrow?.workout?.label) return saved.tomorrow.workout.label;
+        if (summary.tomorrow?.workout?.label) return summary.tomorrow.workout.label;
+        if (summary.next_protocol?.lift) {
+          return `${formatLabel(summary.next_protocol.lift)}${summary.next_protocol.weekday ? ` · ${summary.next_protocol.weekday}` : ""}`;
+        }
+        return "";
+      })(),
       shopping_items: normalizeLines(saved.tomorrow?.shopping_items || []),
       meal_prep: saved.tomorrow?.meal_prep || summary.calendar?.tomorrow?.summary || "",
       reminder:
@@ -976,12 +1177,18 @@ function fromSummary(summary: DailyDebriefSummary): DebriefForm {
   };
 }
 
-function toPayload(form: DebriefForm, summary: DailyDebriefSummary | null) {
+function toPayload(form: DebriefForm, summary: DailyDebriefSummary | null, finalize = false) {
   return {
     user_id: USER_ID,
     date: form.date || new Date().toISOString().slice(0, 10),
     overall_status: form.overall_status,
     mission_score: form.mission_score ?? summary?.mission_score ?? null,
+    daily_score: form.mission_score ?? summary?.daily_score ?? summary?.mission_scores?.daily?.score ?? null,
+    weekly_score: summary?.weekly_score ?? summary?.mission_scores?.weekly?.score ?? null,
+    lifetime_score: summary?.lifetime_score ?? summary?.mission_scores?.lifetime?.score ?? null,
+    lifetime_rank: summary?.lifetime_rank ?? summary?.mission_scores?.lifetime?.rank ?? null,
+    is_finalized: finalize,
+    completed_at: finalize ? new Date().toISOString() : null,
     summary: form.summary,
     objectives: form.objectives,
     training: {
@@ -1010,7 +1217,17 @@ function toPayload(form: DebriefForm, summary: DailyDebriefSummary | null) {
     victory: form.victory,
     lessons: form.lessons,
     tomorrow: {
-      top_priorities: form.tomorrow.top_priorities.filter(Boolean),
+      top_priorities: form.tomorrow.priorities.filter(Boolean),
+      calendar: form.tomorrow.calendar.filter(Boolean),
+      priorities: form.tomorrow.priorities.filter(Boolean),
+      workout:
+        form.tomorrow.workout || summary?.tomorrow?.workout?.label || summary?.next_protocol?.lift
+          ? {
+              lift: summary?.next_protocol?.lift || summary?.tomorrow?.workout?.lift || null,
+              label: form.tomorrow.workout || summary?.tomorrow?.workout?.label || summary?.next_protocol?.lift || null,
+              weekday: summary?.next_protocol?.weekday || summary?.tomorrow?.workout?.weekday || null,
+            }
+          : null,
       shopping_items: form.tomorrow.shopping_items.filter(Boolean),
       meal_prep: form.tomorrow.meal_prep || null,
       reminder: form.tomorrow.reminder || null,

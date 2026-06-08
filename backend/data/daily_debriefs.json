@@ -1,0 +1,92 @@
+[
+  {
+    "completed_at": null,
+    "created_at": "2026-06-08T16:42:24.765967-04:00",
+    "daily_score": 78,
+    "date": "2026-06-08",
+    "finance": {
+      "category": "None",
+      "money_spent_today": 0.0,
+      "notes": null,
+      "spending_status": "UNDER CONTROL",
+      "unexpected_expense": false
+    },
+    "is_finalized": false,
+    "lessons": {
+      "adjust_tomorrow": "Keep rest day simple and stay on plan.",
+      "did_not_work": "Nothing significant blocked the session.",
+      "worked": "deadlift was logged and the session moved your goals forward."
+    },
+    "lifetime_rank": "Commander",
+    "lifetime_score": 83,
+    "mission_score": 78,
+    "notes": null,
+    "nutrition": {
+      "ate_out_today": false,
+      "estimated_food_spend": 0.0,
+      "meals_completed": 0,
+      "meals_planned_today": 0,
+      "notes": null
+    },
+    "objectives": [
+      {
+        "blocker": "",
+        "completed": true,
+        "id": "36fe3d37-1ff9-45d7-9e70-01cecbeda893",
+        "notes": "Auto-updated from deadlift top set: 275.0 x 5.",
+        "title": "Deadlift 400"
+      },
+      {
+        "blocker": "",
+        "completed": true,
+        "id": "f79cc1ef-de5a-41ac-98e2-d07a44ebb797",
+        "notes": "Finished todays module",
+        "title": "Finish 1 training module a day"
+      },
+      {
+        "blocker": "",
+        "completed": true,
+        "id": "4c49d748-15e0-462e-8811-ba12f2345e81",
+        "notes": "Changed the daily brief on the command center page. Now its dynamic and updates throughout the day. To include a debrief at the end of day",
+        "title": "Ship 3 Features Weekly"
+      }
+    ],
+    "overall_status": "ok",
+    "summary": "Evening debrief, John. Today was complete. Daily score 78. Weekly score 97. Lifetime rank Commander. deadlift was scheduled today. You completed 3 of 3 goal impacts today. Workout logged: deadlift. That session moved Deadlift 400 moved today: Completed. Stayed under control on spending. Next protocol is bench on Thursday. Tomorrow looks like a rest day. Main lesson: Keep rest day simple and stay on plan. Top priority tomorrow is Prepare for bench.",
+    "tomorrow": {
+      "calendar": [
+        "Allied payday"
+      ],
+      "meal_prep": "You have 1 events tomorrow. Allied payday from 8:00 AM to 9:00 AM.",
+      "priorities": [
+        "Prepare for bench"
+      ],
+      "reminder": "Next protocol: bench",
+      "shopping_items": [],
+      "top_priorities": [
+        "Prepare for bench"
+      ],
+      "workout": {
+        "label": "bench",
+        "lift": "bench",
+        "weekday": "Thursday"
+      }
+    },
+    "training": {
+      "energy_level": 5,
+      "lift_completed": "deadlift",
+      "pain_notes": "no pain",
+      "top_set_reps": 5,
+      "top_set_weight": 275.0,
+      "training_notes": "I felt like i could do more weight and more reps. Maybe next jump I'll go up 15 instead of 10lbs. ",
+      "workout_completed": true
+    },
+    "updated_at": "2026-06-08T16:42:24.765967-04:00",
+    "user_id": "john",
+    "victory": {
+      "category": "Training",
+      "win": "Finished deadlift and pushed the training chain forward."
+    },
+    "weekly_score": 97
+  }
+]

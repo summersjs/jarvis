@@ -21,6 +21,7 @@ import {
   ShoppingCart,
   Settings2,
   Target,
+  Trophy,
   Utensils,
   UserRound,
   Wifi,
@@ -128,6 +129,30 @@ type DashboardResponse = {
     label: string;
     window: string;
   };
+  mission_scores?: {
+    daily: {
+      score: number;
+      label: string;
+      class: "online" | "pending" | "offline";
+      workout_score?: number;
+      goal_score?: number;
+      shopping_score?: number;
+      budget_score?: number;
+      calendar_score?: number;
+      debrief_score?: number;
+      goals_completed_today?: number;
+      goals_impacted_today?: number;
+    };
+    weekly: {
+      score: number;
+      label: string;
+      class: "online" | "pending" | "offline";
+    };
+    lifetime: {
+      score: number;
+      rank: string;
+    };
+  };
   mission_status?: {
     score: number;
     label: string;
@@ -141,6 +166,10 @@ type DashboardResponse = {
     status: string;
     score: number;
     class: "online" | "pending" | "offline";
+    daily_score?: number;
+    weekly_score?: number;
+    lifetime_score?: number;
+    lifetime_rank?: string;
     objectives_completed: number;
     objectives_total: number;
     workout_completed: boolean;
@@ -399,6 +428,12 @@ export default function CommandCenterPage() {
   }
 
   const missionDelta = dashboard?.mission_status?.delta ?? scoreDelta;
+  const dailyMission = dashboard?.mission_scores?.daily;
+  const weeklyMission = dashboard?.mission_scores?.weekly;
+  const lifetimeMission = dashboard?.mission_scores?.lifetime;
+  const missionScore = dailyMission?.score ?? dashboard?.mission_status?.score ?? 0;
+  const missionLabel = dailyMission?.label ?? dashboard?.mission_status?.label ?? "ON TRACK";
+  const missionClass = dailyMission?.class ?? dashboard?.mission_status?.class ?? "online";
 
   return (
     <main className="min-h-screen bg-black px-6 py-10 text-green-400">
@@ -434,19 +469,19 @@ export default function CommandCenterPage() {
             </div>
           </div>
 
-          <div className="tactical-score-panel">
-            <p className="text-xs uppercase tracking-[0.28em] text-green-500/60">Mission Score</p>
+          <div className="tactical-score-panel group/mission-score">
+            <p className="text-xs uppercase tracking-[0.28em] text-green-500/60">Daily Mission Score</p>
             <div className="mt-2 flex items-end gap-3">
               <div
                 className={`text-[3.2rem] font-black leading-none ${
-                  dashboard?.mission_status?.class === "offline"
+                  missionClass === "offline"
                     ? "text-red-300 drop-shadow-[0_0_14px_rgba(248,113,113,0.55)]"
-                    : dashboard?.mission_status?.class === "pending"
+                    : missionClass === "pending"
                       ? "text-amber-200 drop-shadow-[0_0_14px_rgba(250,204,21,0.45)]"
                       : "text-cyan-200 drop-shadow-[0_0_14px_rgba(34,211,238,0.45)]"
                 }`}
               >
-                {dashboard?.mission_status?.score ?? 0}
+                {missionScore}
               </div>
               {typeof missionDelta === "number" && (
                 <div
@@ -474,33 +509,64 @@ export default function CommandCenterPage() {
             </div>
             <p
               className={`mt-1 text-sm font-bold uppercase tracking-[0.26em] ${
-                dashboard?.mission_status?.class === "offline"
+                missionClass === "offline"
                   ? "text-red-300"
-                  : dashboard?.mission_status?.class === "pending"
+                  : missionClass === "pending"
                     ? "text-amber-200"
                     : "text-green-200"
               }`}
             >
-              {dashboard?.mission_status?.label || "ON TRACK"}
+              {missionLabel}
             </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {dashboard?.mission_phase && (
-                <span className="mission-badge">{dashboard.mission_phase.label}</span>
-              )}
-              <span
-                className={`mission-badge ${
-                  dashboard?.mission_status?.class === "offline"
-                    ? "mission-badge-danger"
-                    : dashboard?.mission_status?.class === "pending"
-                      ? "mission-badge-warning"
-                      : ""
-                }`}
-              >
-                Mission Status: {dashboard?.mission_status?.label || "ON TRACK"}
-              </span>
-              <span className="mission-badge mission-badge-score">
-                Mission Score: {dashboard?.mission_status?.score ?? 0}
-              </span>
+            <div className="mission-score-breakdown">
+              <p className="text-xs uppercase tracking-[0.24em] text-green-500/60">Score Breakdown</p>
+              <div className="mt-2 grid gap-2 text-[0.7rem] uppercase tracking-[0.18em] text-green-200/80 sm:grid-cols-2">
+                <div className="rounded-lg border border-green-500/15 bg-black/30 px-3 py-2">
+                  Workout <span className="ml-2 text-green-100">{Math.round((dashboard?.mission_scores?.daily?.workout_score ?? 0) * 100)}</span>
+                </div>
+                <div className="rounded-lg border border-green-500/15 bg-black/30 px-3 py-2">
+                  Goals <span className="ml-2 text-green-100">{Math.round((dashboard?.mission_scores?.daily?.goal_score ?? 0) * 100)}</span>
+                </div>
+                <div className="rounded-lg border border-green-500/15 bg-black/30 px-3 py-2">
+                  Shopping <span className="ml-2 text-green-100">{Math.round((dashboard?.mission_scores?.daily?.shopping_score ?? 0) * 100)}</span>
+                </div>
+                <div className="rounded-lg border border-green-500/15 bg-black/30 px-3 py-2">
+                  Budget <span className="ml-2 text-green-100">{Math.round((dashboard?.mission_scores?.daily?.budget_score ?? 0) * 100)}</span>
+                </div>
+                <div className="rounded-lg border border-green-500/15 bg-black/30 px-3 py-2">
+                  Calendar <span className="ml-2 text-green-100">{Math.round((dashboard?.mission_scores?.daily?.calendar_score ?? 0) * 100)}</span>
+                </div>
+                <div className="rounded-lg border border-green-500/15 bg-black/30 px-3 py-2">
+                  Debrief <span className="ml-2 text-green-100">{Math.round((dashboard?.mission_scores?.daily?.debrief_score ?? 0) * 100)}</span>
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 grid gap-2">
+              <div className="flex flex-wrap gap-2">
+                {dashboard?.mission_phase && (
+                  <span className="mission-badge">{dashboard.mission_phase.label}</span>
+                )}
+                <span
+                  className={`mission-badge ${
+                    missionClass === "offline"
+                      ? "mission-badge-danger"
+                      : missionClass === "pending"
+                        ? "mission-badge-warning"
+                        : ""
+                  }`}
+                >
+                  Mission Status: {missionLabel}
+                </span>
+                <span className="mission-badge mission-badge-score">Daily Score: {missionScore}</span>
+              </div>
+              <div className="grid gap-2 text-xs uppercase tracking-[0.24em] text-green-300/75 sm:grid-cols-2">
+                <div className="rounded-lg border border-green-500/15 bg-black/30 px-3 py-2">
+                  Weekly Mission Score <span className="ml-2 text-green-100">{weeklyMission?.score ?? 0}</span>
+                </div>
+                <div className="rounded-lg border border-green-500/15 bg-black/30 px-3 py-2">
+                  Mission Rank <span className="ml-2 text-green-100">{lifetimeMission?.rank || "Recruit"}</span>
+                </div>
+              </div>
             </div>
           </div>
         </header>
@@ -575,6 +641,33 @@ export default function CommandCenterPage() {
               </div>
             </section>
 
+            <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <StatCard
+                icon={Activity}
+                label="Daily Score"
+                value={`${dashboard.mission_scores?.daily?.score ?? dashboard.mission_status?.score ?? 0}`}
+              />
+              <StatCard
+                icon={ClipboardList}
+                label="Weekly Score"
+                value={`${dashboard.mission_scores?.weekly?.score ?? 0}`}
+              />
+              <StatCard
+                icon={Trophy}
+                label="Lifetime Rank"
+                value={dashboard.mission_scores?.lifetime?.rank || "Recruit"}
+              />
+              <StatCard
+                icon={ShieldCheck}
+                label="Workout"
+                value={
+                  dashboard.today.day_type === "rest"
+                    ? "Rest Day"
+                    : dashboard.today.scheduled_lift_label || "Pending"
+                }
+              />
+            </section>
+
             <section className="grid gap-6 lg:grid-cols-3">
               <CalendarPanel dashboard={dashboard} />
               <MealPlanPanel meals={dashboard.meals} />
@@ -615,6 +708,9 @@ function WorkoutMissionCard({ dashboard }: { dashboard: DashboardResponse }) {
   const lift = getLiftForConfig(dashboard);
   const config = getWorkoutConfig(lift);
   const Icon = config.Icon;
+  const workoutComplete = dashboard.today.day_type === "completed";
+  const latestTopSetNotes = dashboard.workout_metadata?.latest_top_set?.notes?.toLowerCase() || "";
+  const hasPrSignal = /pr|voice log|new estimated one rep max pr|new weight pr/i.test(latestTopSetNotes);
   const title =
     dashboard.today.day_type === "rest"
       ? "Rest Day"
@@ -631,8 +727,25 @@ function WorkoutMissionCard({ dashboard }: { dashboard: DashboardResponse }) {
   const workoutMetadata = dashboard.workout_metadata;
 
   return (
-    <Link href="/workouts" className={`mission-card group ${config.accentClass}`}>
+    <Link
+      href="/workouts"
+      className={`mission-card group ${config.accentClass} ${workoutComplete ? "mission-card-complete" : ""} ${hasPrSignal ? "mission-card-pr" : ""}`}
+    >
       <div className="mission-scan" />
+      {(workoutComplete || hasPrSignal) && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <span className="workout-victory-badge">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            Workout Complete
+          </span>
+          {hasPrSignal && (
+            <span className="workout-victory-badge workout-victory-badge-pr">
+              <Trophy className="h-3.5 w-3.5" />
+              PR Detected
+            </span>
+          )}
+        </div>
+      )}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <p className="hud-kicker">Today&apos;s Training Objective</p>
@@ -717,6 +830,22 @@ function MissionMetric({ label, value }: { label: string; value: string }) {
     <div className="hud-metric">
       <p>{label}</p>
       <strong>{value}</strong>
+    </div>
+  );
+}
+
+function StatCard({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
+  return (
+    <div className="hud-panel">
+      <div className="flex items-center gap-3">
+        <div className="hud-panel-icon">
+          <Icon className="h-5 w-5" />
+        </div>
+        <div>
+          <p className="hud-kicker">{label}</p>
+          <p className="mt-2 text-2xl font-black leading-none text-green-100">{value}</p>
+        </div>
+      </div>
     </div>
   );
 }

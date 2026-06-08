@@ -447,6 +447,7 @@ body {
 .tactical-score-panel {
   min-width: 15rem;
   flex: 0 0 auto;
+  position: relative;
   border: 1px solid rgba(74, 222, 128, 0.2);
   border-radius: 0.75rem;
   background:
@@ -455,6 +456,24 @@ body {
     0 0 0 1px rgba(187, 247, 208, 0.06) inset,
     0 0 24px rgba(34, 197, 94, 0.14);
   padding: 0.95rem 1rem;
+}
+
+.mission-score-breakdown {
+  margin-top: 0.85rem;
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(-0.25rem);
+  transition:
+    max-height 220ms ease,
+    opacity 220ms ease,
+    transform 220ms ease;
+}
+
+.group\/mission-score:hover .mission-score-breakdown {
+  max-height: 14rem;
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .mission-badge {
@@ -654,6 +673,23 @@ body {
     0 0 42px rgba(34, 197, 94, 0.28);
 }
 
+.mission-card-complete {
+  border-color: rgba(74, 222, 128, 0.82);
+  box-shadow:
+    0 0 0 1px rgba(187, 247, 208, 0.16) inset,
+    0 0 34px rgba(34, 197, 94, 0.32),
+    0 0 42px rgba(34, 197, 94, 0.18);
+  animation: mission-complete-pulse 2s ease-in-out infinite;
+}
+
+.mission-card-pr {
+  border-color: rgba(250, 204, 21, 0.84);
+  box-shadow:
+    0 0 0 1px rgba(254, 240, 138, 0.12) inset,
+    0 0 38px rgba(250, 204, 21, 0.26),
+    0 0 54px rgba(250, 204, 21, 0.16);
+}
+
 .mission-scan {
   position: absolute;
   inset: 0;
@@ -667,6 +703,34 @@ body {
 .mission-card:hover .mission-scan {
   opacity: 1;
   animation: mission-card-scan 900ms linear;
+}
+
+.workout-victory-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid rgba(74, 222, 128, 0.5);
+  border-radius: 999px;
+  background: rgba(34, 197, 94, 0.14);
+  padding: 0.35rem 0.7rem;
+  color: rgb(220, 252, 231);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+  line-height: 1;
+  text-transform: uppercase;
+  box-shadow:
+    0 0 0 1px rgba(187, 247, 208, 0.08) inset,
+    0 0 16px rgba(34, 197, 94, 0.22);
+  animation: workout-victory-pulse 1.9s ease-in-out infinite;
+}
+
+.workout-victory-badge-pr {
+  border-color: rgba(250, 204, 21, 0.64);
+  background: rgba(250, 204, 21, 0.14);
+  box-shadow:
+    0 0 0 1px rgba(254, 240, 138, 0.08) inset,
+    0 0 18px rgba(250, 204, 21, 0.28);
 }
 
 .mission-icon-shell {
@@ -958,6 +1022,40 @@ body {
 @keyframes mission-card-scan {
   to {
     transform: translateX(120%) skewX(-18deg);
+  }
+}
+
+@keyframes workout-victory-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow:
+      0 0 0 1px rgba(187, 247, 208, 0.08) inset,
+      0 0 16px rgba(34, 197, 94, 0.22);
+  }
+  50% {
+    transform: scale(1.02);
+    box-shadow:
+      0 0 0 1px rgba(187, 247, 208, 0.14) inset,
+      0 0 24px rgba(34, 197, 94, 0.34);
+  }
+}
+
+@keyframes mission-complete-pulse {
+  0%,
+  100% {
+    transform: translateY(0);
+    box-shadow:
+      0 0 0 1px rgba(187, 247, 208, 0.16) inset,
+      0 0 34px rgba(34, 197, 94, 0.32),
+      0 0 42px rgba(34, 197, 94, 0.18);
+  }
+  50% {
+    transform: translateY(-1px);
+    box-shadow:
+      0 0 0 1px rgba(187, 247, 208, 0.22) inset,
+      0 0 46px rgba(34, 197, 94, 0.44),
+      0 0 58px rgba(34, 197, 94, 0.24);
   }
 }
 

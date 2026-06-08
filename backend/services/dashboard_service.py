@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from backend.core.config import LOCAL_TZ
 from backend.db.supabase_client import supabase
 from backend.services.calendar_service import get_birthday_note_for_date, get_calendar_summary_for_date
-from backend.services.debrief_service import build_finance_ops_summary, get_previous_mission_score
+from backend.services.debrief_service import build_finance_ops_summary, build_mission_score_snapshot, get_previous_mission_score
 from backend.services.goal_service import list_goals
 from backend.services.meal_planner_service import list_meal_plan_entries
 from backend.services.workout_service import (
@@ -141,17 +141,21 @@ def _get_birthday_note(today_date) -> str | None:
 
 
 def _mission_status_label(score: int) -> str:
+    if score >= 90:
+        return "ON MISSION"
     if score >= 75:
         return "ON TRACK"
-    if score >= 45:
+    if score >= 50:
+        return "WATCH"
+    if score >= 25:
         return "AT RISK"
     return "OFF MISSION"
 
 
 def _mission_status_class(label: str) -> str:
-    if label == "ON TRACK":
+    if label in {"ON MISSION", "ON TRACK"}:
         return "online"
-    if label == "AT RISK":
+    if label in {"WATCH", "AT RISK"}:
         return "pending"
     return "offline"
 
@@ -505,14 +509,27 @@ def build_daily_dashboard(user_id: str = "john") -> dict:
     shopping = _get_latest_unchecked_shopping_items(user_id)
     calendar = _get_calendar_summary(now.date())
     finance_summary = build_finance_ops_summary(user_id, today[:7])
-    goals = get_goal_overview(user_id)
+    goals = list_goals(user_id, active_only=False)
     mission_phase = _get_mission_phase(now)
     today_workout = get_todays_workout_summary(user_id, now.date())
     workout_profile = _get_lift_profile(user_id, scheduled_today)
     latest_top_set = get_latest_top_set(user_id, scheduled_today) if scheduled_today else None
-
-    mission = _mission_score(user_id, workout_logic, shopping, calendar, finance_summary)
-    highest_priority_remaining_task = _highest_priority_remaining_task(user_id, workout_logic, shopping, mission)
+    workout_context = {
+        "today_day_type": workout_logic.get("day_type") or ("rest" if not scheduled_today else scheduled_today),
+        "workout_completed": bool(today_workout) or workout_logic.get("day_type") == "completed",
+        "next_protocol": workout_logic.get("next_scheduled"),
+    }
+    mission_scores = build_mission_score_snapshot(
+        user_id,
+        now.date(),
+        workout_context,
+        shopping,
+        calendar,
+        finance_summary,
+        goals=goals,
+    )
+    mission = mission_scores["daily"]
+    highest_priority_remaining_task = _highest_priority_remaining_task(user_id, workout_logic, shopping, {"goals": goals})
     previous_mission_score = get_previous_mission_score(user_id)
     mission_delta = mission["score"] - previous_mission_score if previous_mission_score is not None else None
 
@@ -548,6 +565,7 @@ def build_daily_dashboard(user_id: str = "john") -> dict:
             "latest_top_set": latest_top_set,
         },
         "mission_phase": mission_phase,
+        "mission_scores": mission_scores,
         "mission_status": {
             "score": mission["score"],
             "label": mission["label"],
@@ -569,9 +587,13 @@ def build_daily_dashboard(user_id: str = "john") -> dict:
             "status": mission["label"],
             "score": mission["score"],
             "class": mission["class"],
-            "objectives_completed": sum(1 for goal in goals if goal.get("progress", {}).get("is_complete")),
-            "objectives_total": len(goals),
-            "workout_completed": workout_logic.get("day_type") == "completed" or workout_logic.get("day_type") == "rest",
+            "daily_score": mission_scores["daily"]["score"],
+            "weekly_score": mission_scores["weekly"]["score"],
+            "lifetime_score": mission_scores["lifetime"]["score"],
+            "lifetime_rank": mission_scores["lifetime"]["rank"],
+            "objectives_completed": mission["goals_completed_today"],
+            "objectives_total": mission["goals_impacted_today"],
+            "workout_completed": mission["workout_score"] >= 1.0,
             "shopping_open": int(shopping.get("unchecked_count") or 0),
             "budget_status": finance_summary.get("dashboard_cards", {}).get("spending_status", "WATCH"),
             "calendar_today_status": calendar.get("today", {}).get("status"),

@@ -52,6 +52,9 @@ class LessonsLearned(BaseModel):
 
 class TomorrowPrep(BaseModel):
     top_priorities: list[str] = Field(default_factory=list)
+    calendar: list[str] = Field(default_factory=list)
+    priorities: list[str] = Field(default_factory=list)
+    workout: Optional[dict[str, Any]] = None
     shopping_items: list[str] = Field(default_factory=list)
     meal_prep: Optional[str] = None
     reminder: Optional[str] = None
@@ -62,6 +65,12 @@ class DailyDebriefEntryCreate(BaseModel):
     date: str
     overall_status: str
     mission_score: Optional[int] = None
+    daily_score: Optional[int] = None
+    weekly_score: Optional[int] = None
+    lifetime_score: Optional[int] = None
+    lifetime_rank: Optional[str] = None
+    is_finalized: Optional[bool] = False
+    completed_at: Optional[str] = None
     summary: Optional[str] = None
     objectives: list[DebriefObjective] = Field(default_factory=list)
     training: TrainingDebrief = Field(default_factory=TrainingDebrief)

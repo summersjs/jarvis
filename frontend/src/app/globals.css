@@ -369,6 +369,14 @@ body {
     width: 3.25rem;
     height: 3.25rem;
   }
+
+  .tactical-nav-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tactical-score-panel {
+    width: 100%;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -424,6 +432,130 @@ body {
   width: 2.25rem;
   height: 2.25rem;
   border-radius: 0.45rem;
+}
+
+.tactical-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid rgba(74, 222, 128, 0.18);
+  padding-bottom: 1rem;
+}
+
+.tactical-score-panel {
+  min-width: 15rem;
+  flex: 0 0 auto;
+  border: 1px solid rgba(74, 222, 128, 0.2);
+  border-radius: 0.75rem;
+  background:
+    linear-gradient(145deg, rgba(9, 21, 15, 0.98), rgba(0, 0, 0, 0.9));
+  box-shadow:
+    0 0 0 1px rgba(187, 247, 208, 0.06) inset,
+    0 0 24px rgba(34, 197, 94, 0.14);
+  padding: 0.95rem 1rem;
+}
+
+.mission-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid rgba(34, 197, 94, 0.24);
+  border-radius: 999px;
+  background: rgba(34, 197, 94, 0.08);
+  padding: 0.34rem 0.6rem;
+  color: rgba(187, 247, 208, 0.86);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.mission-badge-warning {
+  border-color: rgba(250, 204, 21, 0.34);
+  background: rgba(250, 204, 21, 0.08);
+  color: rgb(253, 224, 71);
+}
+
+.mission-badge-danger {
+  border-color: rgba(248, 113, 113, 0.4);
+  background: rgba(127, 29, 29, 0.28);
+  color: rgb(252, 165, 165);
+}
+
+.mission-badge-score {
+  border-color: rgba(34, 211, 238, 0.34);
+  background: rgba(8, 47, 73, 0.22);
+  color: rgb(165, 243, 252);
+}
+
+.section-label {
+  color: rgba(134, 239, 172, 0.66);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.28em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.tactical-nav-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.tactical-nav-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  justify-content: center;
+  min-height: 2.7rem;
+  border: 1px solid rgba(74, 222, 128, 0.28);
+  border-radius: 0.6rem;
+  background:
+    linear-gradient(145deg, rgba(9, 21, 15, 0.98), rgba(0, 0, 0, 0.92));
+  color: rgb(187, 247, 208);
+  padding: 0.6rem 0.85rem;
+  text-decoration: none;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  line-height: 1;
+  text-transform: uppercase;
+  transition:
+    transform 220ms,
+    border-color 220ms,
+    box-shadow 220ms,
+    color 220ms,
+    background-color 220ms;
+}
+
+.tactical-nav-link:hover {
+  transform: translateY(-1px);
+  border-color: rgba(187, 247, 208, 0.72);
+  color: rgb(240, 253, 244);
+  background:
+    linear-gradient(145deg, rgba(16, 46, 26, 0.98), rgba(0, 0, 0, 0.92));
+  box-shadow:
+    0 0 0 1px rgba(187, 247, 208, 0.08) inset,
+    0 0 18px rgba(34, 197, 94, 0.14);
+}
+
+.tactical-nav-link svg {
+  flex: 0 0 auto;
+}
+
+.tactical-nav-link span {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.status-pill-danger {
+  border-color: rgba(248, 113, 113, 0.38);
+  background: rgba(127, 29, 29, 0.24);
+  color: rgb(252, 165, 165);
 }
 
 .hud-panel-title,

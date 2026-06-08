@@ -12,12 +12,15 @@ import {
   CheckCircle2,
   ChevronRight,
   Circle,
-  ClipboardList,
   DatabaseZap,
   DollarSign,
+  BookOpen,
+  ClipboardList,
   Server,
   ShieldCheck,
   ShoppingCart,
+  Settings2,
+  Target,
   Utensils,
   UserRound,
   Wifi,
@@ -385,65 +388,123 @@ export default function CommandCenterPage() {
   return (
     <main className="min-h-screen bg-black px-6 py-10 text-green-400">
       <div className="mx-auto max-w-7xl">
-        <header className="mb-8 border-b border-green-500/20 pb-6">
-          <div className="flex flex-wrap items-start justify-between gap-6">
-            <div>
-              <p className="text-sm uppercase tracking-[0.3em] text-green-500/70">
+        <header className="tactical-header mb-6">
+          <div className="flex min-w-0 flex-1 flex-col gap-5">
+            <div className="space-y-3">
+              <p className="text-xs uppercase tracking-[0.32em] text-green-500/65">
                 Jarvis Systems
               </p>
-              <h1 className="mt-2 text-4xl font-bold">Daily Command Center</h1>
-              <p className="mt-3 text-green-300/80">
+              <h1 className="text-[2.6rem] font-black leading-none text-green-100 md:text-[3.3rem]">
+                COMMAND CENTER
+              </h1>
+              <p className="text-lg font-semibold text-green-200/80">
                 {dashboard ? formatDate(dashboard.date) : "Loading today..."}
               </p>
               {dashboard?.mission_phase && (
-                <div className="mt-4 flex flex-wrap items-center gap-2">
-                  <span className="status-pill">
-                    {dashboard.mission_phase.label} · {dashboard.mission_phase.window}
-                  </span>
-                  <span className={`status-pill ${dashboard.mission_status?.class === "pending" ? "status-pill-warning" : ""}`}>
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <span className="mission-badge">{dashboard.mission_phase.label}</span>
+                  <span
+                    className={`mission-badge ${
+                      dashboard?.mission_status?.class === "offline"
+                        ? "mission-badge-danger"
+                        : dashboard?.mission_status?.class === "pending"
+                          ? "mission-badge-warning"
+                          : ""
+                    }`}
+                  >
                     Mission Status: {dashboard.mission_status?.label || "ON TRACK"}
                   </span>
-                  <span className="text-xs uppercase tracking-[0.22em] text-green-500/55">
-                    Score {dashboard.mission_status?.score ?? 0}
+                  <span className="mission-badge mission-badge-score">
+                    Mission Score: {dashboard.mission_status?.score ?? 0}
                   </span>
                 </div>
               )}
             </div>
-
-            <nav className="flex flex-wrap gap-2">
-              <button className="command-nav-link" onClick={toggleStatus}>
-                {status ? "Hide Status" : "Ping Jarvis"}
-              </button>
-              <Link className="command-nav-link" href="/meal-planner">
-                Meal Planner
-              </Link>
-              <Link className="command-nav-link" href="/shopping">
-                Shopping
-              </Link>
-              <Link className="command-nav-link" href="/recipes">
-                Recipes
-              </Link>
-              <Link className="command-nav-link" href="/preferences">
-                Preferences
-              </Link>
-              <Link className="command-nav-link" href="/goals">
-                Goals
-              </Link>
-              <Link className="command-nav-link" href="/daily-debrief">
-                Daily Debrief
-              </Link>
-              <Link className="command-nav-link" href="/finance-ops">
-                Finance Ops
-              </Link>
-            </nav>
           </div>
 
-          {dashboard?.birthday_note && (
-            <div className="mt-6">
-              <BirthdayAlert note={dashboard.birthday_note} />
+          <div className="tactical-score-panel">
+            <p className="text-xs uppercase tracking-[0.28em] text-green-500/60">Mission Score</p>
+            <div
+              className={`mt-2 text-[3.2rem] font-black leading-none ${
+                dashboard?.mission_status?.class === "offline"
+                  ? "text-red-300 drop-shadow-[0_0_14px_rgba(248,113,113,0.55)]"
+                  : dashboard?.mission_status?.class === "pending"
+                    ? "text-amber-200 drop-shadow-[0_0_14px_rgba(250,204,21,0.45)]"
+                    : "text-cyan-200 drop-shadow-[0_0_14px_rgba(34,211,238,0.45)]"
+              }`}
+            >
+              {dashboard?.mission_status?.score ?? 0}
             </div>
-          )}
+            <p
+              className={`mt-1 text-sm font-bold uppercase tracking-[0.26em] ${
+                dashboard?.mission_status?.class === "offline"
+                  ? "text-red-300"
+                  : dashboard?.mission_status?.class === "pending"
+                    ? "text-amber-200"
+                    : "text-green-200"
+              }`}
+            >
+              {dashboard?.mission_status?.label || "ON TRACK"}
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {dashboard?.mission_phase && (
+                <span className="mission-badge">{dashboard.mission_phase.label}</span>
+              )}
+              <span
+                className={`mission-badge ${
+                  dashboard?.mission_status?.class === "offline"
+                    ? "mission-badge-danger"
+                    : dashboard?.mission_status?.class === "pending"
+                      ? "mission-badge-warning"
+                      : ""
+                }`}
+              >
+                Mission Status: {dashboard?.mission_status?.label || "ON TRACK"}
+              </span>
+            </div>
+          </div>
         </header>
+
+        <nav className="tactical-nav-grid mb-6">
+          <button className="tactical-nav-link" onClick={toggleStatus}>
+            <Zap className="h-4 w-4" />
+            <span>{status ? "Hide Status" : "Ping Jarvis"}</span>
+          </button>
+          <Link className="tactical-nav-link" href="/meal-planner">
+            <Utensils className="h-4 w-4" />
+            <span>Meal Planner</span>
+          </Link>
+          <Link className="tactical-nav-link" href="/shopping">
+            <ShoppingCart className="h-4 w-4" />
+            <span>Shopping</span>
+          </Link>
+          <Link className="tactical-nav-link" href="/recipes">
+            <BookOpen className="h-4 w-4" />
+            <span>Recipes</span>
+          </Link>
+          <Link className="tactical-nav-link" href="/preferences">
+            <Settings2 className="h-4 w-4" />
+            <span>Preferences</span>
+          </Link>
+          <Link className="tactical-nav-link" href="/goals">
+            <Target className="h-4 w-4" />
+            <span>Goals</span>
+          </Link>
+          <Link className="tactical-nav-link" href="/daily-debrief">
+            <ClipboardList className="h-4 w-4" />
+            <span>Daily Debrief</span>
+          </Link>
+          <Link className="tactical-nav-link" href="/finance-ops">
+            <DollarSign className="h-4 w-4" />
+            <span>Finance Ops</span>
+          </Link>
+        </nav>
+
+        {dashboard?.birthday_note && (
+          <div className="mt-6">
+            <BirthdayAlert note={dashboard.birthday_note} />
+          </div>
+        )}
 
         {status && (
           <SystemStatusPanel status={status} dashboard={dashboard} />
@@ -463,9 +524,15 @@ export default function CommandCenterPage() {
 
         {dashboard && (
           <>
-            <section className="mb-6 grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-              <WorkoutMissionCard dashboard={dashboard} />
-              <DailyBriefing dashboard={dashboard} />
+            <section className="mb-6 grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
+              <div className="space-y-3">
+                <p className="section-label">Training Operations</p>
+                <WorkoutMissionCard dashboard={dashboard} />
+              </div>
+              <div className="space-y-3">
+                <p className="section-label">Mission Control</p>
+                <DailyBriefing dashboard={dashboard} />
+              </div>
             </section>
 
             <section className="grid gap-6 lg:grid-cols-3">
@@ -552,7 +619,7 @@ function WorkoutMissionCard({ dashboard }: { dashboard: DashboardResponse }) {
         <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0 flex-1">
             <h3 className="text-2xl font-black leading-none text-green-100 md:text-[2rem]">
-              {dashboard.next_workout.lift_label || formatDayType(nextLift)}
+              {formatDayType(nextLift)}
             </h3>
             <p className="mt-2 text-sm font-bold uppercase tracking-[0.24em] text-green-300">
               {nextConfig.label}
@@ -629,6 +696,12 @@ function DailyBriefing({ dashboard }: { dashboard: DashboardResponse }) {
   const secondaryLabel = mission?.secondary_label || phaseCopy.secondaryLabel;
   const secondaryValue = mission?.secondary_value || phaseCopy.secondaryValue;
   const statusLabel = dashboard.mission_status?.label || "ON TRACK";
+  const statusToneClass =
+    dashboard.mission_status?.class === "offline"
+      ? "text-red-300"
+      : dashboard.mission_status?.class === "pending"
+        ? "text-amber-200"
+        : "text-green-200";
   const showSecondaryCard = normalizePhaseText(primaryValue) !== normalizePhaseText(secondaryValue);
 
   return (
@@ -638,7 +711,7 @@ function DailyBriefing({ dashboard }: { dashboard: DashboardResponse }) {
           <p className="text-2xl font-black uppercase text-green-100">
             {getMissionPhaseGreeting(phaseKey)}
           </p>
-          <p className="mt-1 text-sm uppercase tracking-[0.22em] text-green-300/70">
+          <p className={`mt-1 text-sm uppercase tracking-[0.22em] ${statusToneClass}`}>
             Mission Status: {statusLabel}
           </p>
         </div>

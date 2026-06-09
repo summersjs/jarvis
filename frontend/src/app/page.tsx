@@ -136,12 +136,14 @@ type DashboardResponse = {
       class: "online" | "pending" | "offline";
       workout_score?: number;
       goal_score?: number;
+      goal_bonus?: number;
       shopping_score?: number;
       budget_score?: number;
       calendar_score?: number;
       debrief_score?: number;
       goals_completed_today?: number;
       goals_impacted_today?: number;
+      goals_above_and_beyond_today?: number;
     };
     weekly: {
       score: number;
@@ -526,6 +528,12 @@ export default function CommandCenterPage() {
                 </div>
                 <div className="rounded-lg border border-green-500/15 bg-black/30 px-3 py-2">
                   Goals <span className="ml-2 text-green-100">{Math.round((dashboard?.mission_scores?.daily?.goal_score ?? 0) * 100)}</span>
+                </div>
+                <div className="rounded-lg border border-green-500/15 bg-black/30 px-3 py-2">
+                  Goal bonus <span className="ml-2 text-green-100">{dashboard?.mission_scores?.daily?.goal_bonus ?? 0}</span>
+                </div>
+                <div className="rounded-lg border border-green-500/15 bg-black/30 px-3 py-2">
+                  Above & beyond <span className="ml-2 text-green-100">{dashboard?.mission_scores?.daily?.goals_above_and_beyond_today ?? 0}</span>
                 </div>
                 <div className="rounded-lg border border-green-500/15 bg-black/30 px-3 py-2">
                   Shopping <span className="ml-2 text-green-100">{Math.round((dashboard?.mission_scores?.daily?.shopping_score ?? 0) * 100)}</span>

@@ -1,7 +1,7 @@
 [
   {
-    "completed_at": null,
-    "created_at": "2026-06-08T16:42:24.765967-04:00",
+    "completed_at": "2026-06-08T20:43:50.601Z",
+    "created_at": "2026-06-08T16:43:51.548417-04:00",
     "daily_score": 78,
     "date": "2026-06-08",
     "finance": {
@@ -11,7 +11,7 @@
       "spending_status": "UNDER CONTROL",
       "unexpected_expense": false
     },
-    "is_finalized": false,
+    "is_finalized": true,
     "lessons": {
       "adjust_tomorrow": "Keep rest day simple and stay on plan.",
       "did_not_work": "Nothing significant blocked the session.",
@@ -81,7 +81,7 @@
       "training_notes": "I felt like i could do more weight and more reps. Maybe next jump I'll go up 15 instead of 10lbs. ",
       "workout_completed": true
     },
-    "updated_at": "2026-06-08T16:42:24.765967-04:00",
+    "updated_at": "2026-06-08T16:43:51.548417-04:00",
     "user_id": "john",
     "victory": {
       "category": "Training",

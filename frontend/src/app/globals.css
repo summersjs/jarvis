@@ -359,6 +359,22 @@ body {
   }
 }
 
+@keyframes debrief-objective-beyond-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px rgba(254, 240, 138, 0.08) inset,
+      0 0 28px rgba(250, 204, 21, 0.28),
+      0 0 40px rgba(34, 197, 94, 0.16);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(254, 240, 138, 0.14) inset,
+      0 0 42px rgba(250, 204, 21, 0.44),
+      0 0 56px rgba(34, 197, 94, 0.22);
+  }
+}
+
 @media (max-width: 640px) {
   .birthday-hud-card {
     grid-template-columns: 1fr;
@@ -805,6 +821,25 @@ body {
   box-shadow:
     inset 0 0 14px rgba(74, 222, 128, 0.18),
     0 0 18px rgba(74, 222, 128, 0.28);
+}
+
+.debrief-objective-beyond {
+  border: 1px solid rgba(250, 204, 21, 0.62);
+  background:
+    linear-gradient(135deg, rgba(120, 53, 15, 0.42), rgba(0, 0, 0, 0.9)),
+    radial-gradient(circle at 18% 18%, rgba(250, 204, 21, 0.22), transparent 36%);
+  box-shadow:
+    0 0 0 1px rgba(254, 240, 138, 0.08) inset,
+    0 0 28px rgba(250, 204, 21, 0.28),
+    0 0 40px rgba(34, 197, 94, 0.16);
+  animation: debrief-objective-beyond-pulse 2.1s ease-in-out infinite;
+}
+
+.debrief-objective-beyond .hud-row-icon {
+  color: rgb(253, 224, 71);
+  box-shadow:
+    inset 0 0 14px rgba(250, 204, 21, 0.2),
+    0 0 20px rgba(250, 204, 21, 0.34);
 }
 
 .debrief-objective-active {

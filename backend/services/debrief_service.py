@@ -296,7 +296,12 @@ def _goal_impact_from_logs(goal: dict, logs_today: list[dict], workout_context: 
             return {
                 "id": goal.get("id"),
                 "title": goal.get("title", "Untitled goal"),
+                "goal_group": _goal_group(goal),
                 "completed": True,
+                "achievement_tier": "completed",
+                "achievement_label": "Completed",
+                "bonus_points": 0,
+                "over_target_amount": 0,
                 "notes": goal.get("description") or "Workout completed today.",
                 "blocker": None,
                 "current_value": float(goal.get("current_value") or 0),
@@ -312,8 +317,9 @@ def _goal_impact_from_logs(goal: dict, logs_today: list[dict], workout_context: 
 
     current = float(goal.get("current_value") or 0)
     target = float(goal.get("target_value") or 0)
-    completed = bool(goal.get("progress", {}).get("is_complete")) or (target > 0 and current >= target)
     total_value = sum(float(log.get("value") or 1) for log in logs_today)
+    tracked_current = max(current, total_value)
+    completed = bool(goal.get("progress", {}).get("is_complete")) or (target > 0 and tracked_current >= target)
     latest_note = next((log.get("notes") for log in logs_today if log.get("notes")), None)
     goal_type = (goal.get("goal_type") or "").lower()
     group = _goal_group(goal)
@@ -321,33 +327,46 @@ def _goal_impact_from_logs(goal: dict, logs_today: list[dict], workout_context: 
     title = (goal.get("title") or "").lower()
     strength_match = any(keyword in title for keyword in ("deadlift", "bench", "squat", "press", "ohp"))
     lift_match = bool(lift and lift in title)
+    above_and_beyond = bool(target > 0 and tracked_current > target)
+    over_target_amount = max(0.0, tracked_current - target) if target > 0 else 0.0
+    bonus_points = 0.0
+    if above_and_beyond:
+        bonus_points = round(min(5.0, over_target_amount * (1.5 if group == "daily" else 1.0)), 2)
 
     if workout_context.get("workout_completed") and (lift_match or strength_match or group == "daily"):
         completed = True
 
-    if completed:
+    if above_and_beyond:
+        state = "Above and Beyond"
+    elif completed:
         state = "Completed"
     elif total_value > 0:
         state = f"Progress +{format_number(total_value)}"
     else:
         state = "Impacted"
 
-    if group == "weekly" and current and target:
-        detail = f"Current: {format_number(current)}/{format_number(target)}"
-    elif group == "daily" and current and target:
-        detail = f"Current: {format_number(current)}/{format_number(target)}"
+    if above_and_beyond and target > 0:
+        unit_label = goal.get("unit") or "units"
+        detail = f"Completed {format_number(target)} {unit_label} and exceeded it by {format_number(over_target_amount)}."
+    elif completed and target > 0:
+        detail = f"Current: {format_number(tracked_current)}/{format_number(target)}"
     elif goal_type == "metric" and target > 0:
-        detail = f"Current: {format_number(current)}/{format_number(target)}"
+        detail = f"Current: {format_number(tracked_current)}/{format_number(target)}"
     else:
         detail = latest_note or goal.get("description") or "Today moved this goal forward."
 
     return {
         "id": goal.get("id"),
         "title": goal.get("title", "Untitled goal"),
+        "goal_group": group,
         "completed": completed,
+        "achievement_tier": "above_and_beyond" if above_and_beyond else ("completed" if completed else "progress"),
+        "achievement_label": "Above and Beyond" if above_and_beyond else ("Completed" if completed else "In Progress"),
+        "bonus_points": bonus_points,
+        "over_target_amount": over_target_amount,
         "notes": latest_note or goal.get("description") or "Progress logged today.",
-        "blocker": None if completed else _goal_blocker(goal, current, target),
-        "current_value": current,
+        "blocker": None if completed else _goal_blocker(goal, tracked_current, target),
+        "current_value": tracked_current,
         "target_value": target,
         "unit": goal.get("unit"),
         "category": goal.get("category"),
@@ -380,7 +399,12 @@ def _daily_goal_impacts(user_id: str, date_str: str, workout_context: dict) -> l
             impact = {
                 "id": goal.get("id"),
                 "title": goal.get("title", "Untitled goal"),
+                "goal_group": _goal_group(goal),
                 "completed": completed,
+                "achievement_tier": "completed" if completed else "progress",
+                "achievement_label": "Completed" if completed else "In Progress",
+                "bonus_points": 0,
+                "over_target_amount": 0,
                 "notes": goal.get("description") or "Goal updated today.",
                 "blocker": None if completed else _goal_blocker(goal, current, target),
                 "current_value": current,
@@ -411,6 +435,15 @@ def _daily_goal_score(goal_impacts: list[dict], daily_goals: list[dict]) -> floa
     completed_ratio = completed / len(daily_goals)
     progressed_ratio = min(1.0, progressed / len(daily_goals))
     return round(min(1.0, 0.35 + (completed_ratio * 0.45) + (progressed_ratio * 0.2)), 2)
+
+
+def _goal_bonus_points(goal_impacts: list[dict], goal_group: str | None = None) -> float:
+    bonus = 0.0
+    for impact in goal_impacts:
+        if goal_group and impact.get("goal_group") != goal_group:
+            continue
+        bonus += float(impact.get("bonus_points") or 0)
+    return round(min(5.0, bonus), 2)
 
 
 def _weekly_goal_score(goals: list[dict], today_date: date) -> float:
@@ -517,6 +550,7 @@ def build_mission_score_snapshot(
 
     workout_score = _workout_score(workout_context)
     daily_goal_score = _daily_goal_score(goal_impacts, daily_goals)
+    daily_goal_bonus = _goal_bonus_points(goal_impacts)
 
     shopping_items = shopping.get("items", []) or shopping.get("unchecked_items", [])
     shopping_touched_today = any(
@@ -550,9 +584,12 @@ def build_mission_score_snapshot(
             + debrief_score * 0.05
         )
     )
+    daily_score = min(100, daily_score + round(daily_goal_bonus))
 
     daily_label = _mission_status_label(daily_score)
-    weekly_score = round(100 * _weekly_goal_score(goals, today_date))
+    weekly_score_base = round(100 * _weekly_goal_score(goals, today_date))
+    weekly_goal_bonus = _goal_bonus_points(goal_impacts, "weekly")
+    weekly_score = min(100, weekly_score_base + round(weekly_goal_bonus))
     weekly_label = _mission_status_label(weekly_score)
     lifetime = _lifetime_mission_score(user_id, daily_score)
 
@@ -567,8 +604,10 @@ def build_mission_score_snapshot(
             "budget_score": budget_score,
             "calendar_score": calendar_score,
             "debrief_score": debrief_score,
+            "goal_bonus": daily_goal_bonus,
             "goal_impacts": goal_impacts,
             "goals_completed_today": sum(1 for item in goal_impacts if item.get("completed")),
+            "goals_above_and_beyond_today": sum(1 for item in goal_impacts if item.get("achievement_tier") == "above_and_beyond"),
             "goals_impacted_today": len(goal_impacts),
         },
         "weekly": {
@@ -576,6 +615,7 @@ def build_mission_score_snapshot(
             "label": weekly_label,
             "class": _mission_status_class(weekly_label),
             "goals": weekly_goals,
+            "goal_bonus": weekly_goal_bonus,
         },
         "lifetime": lifetime,
         "goal_impacts": goal_impacts,
@@ -916,6 +956,12 @@ def build_daily_debrief_summary(user_id: str = "john") -> dict:
     objectives = _daily_goal_impacts(user_id, today, workout_context)
     objectives_completed = sum(1 for objective in objectives if objective.get("completed"))
     objectives_total = len(objectives)
+    daily_goal_impacts = [objective for objective in objectives if objective.get("goal_group") == "daily"]
+    weekly_goal_impacts = [objective for objective in objectives if objective.get("goal_group") == "weekly"]
+    daily_goals_completed = sum(1 for objective in daily_goal_impacts if objective.get("completed"))
+    daily_goals_above = sum(1 for objective in daily_goal_impacts if objective.get("achievement_tier") == "above_and_beyond")
+    weekly_goals_completed = sum(1 for objective in weekly_goal_impacts if objective.get("completed"))
+    weekly_goals_above = sum(1 for objective in weekly_goal_impacts if objective.get("achievement_tier") == "above_and_beyond")
     daily_status = _food_budget_status(food_spend_today, budget, now)
     finance_summary = build_finance_ops_summary(user_id, month)
     mission_scores = build_mission_score_snapshot(
@@ -1048,6 +1094,8 @@ def build_daily_debrief_summary(user_id: str = "john") -> dict:
         f"Daily score {daily_score}. Weekly score {weekly_score}. Lifetime rank {lifetime_rank}.",
         f"{_safe_lift_label(scheduled_lift)} was scheduled today." if scheduled_lift else "Today was a recovery day.",
         f"You completed {objectives_completed} of {objectives_total} goal impacts today." if objectives_total else "No goal impacts were logged today.",
+        f"Daily goals moved: {daily_goals_completed} completed{f', {daily_goals_above} above and beyond' if daily_goals_above else ''}." if daily_goal_impacts else None,
+        f"Weekly goals moved: {weekly_goals_completed} completed{f', {weekly_goals_above} above and beyond' if weekly_goals_above else ''}." if weekly_goal_impacts else None,
         f"Workout logged: {training['lift_completed']}." if workout_completed and training.get("lift_completed") else "No workout log was found today.",
         f"That session moved {training['goal_impact']}" if training.get("goal_impact") else None,
         f"Stayed {daily_status.lower()} on spending." if daily_status else None,
@@ -1077,6 +1125,12 @@ def build_daily_debrief_summary(user_id: str = "john") -> dict:
         "tomorrow_scheduled_lift": workout_context["tomorrow_scheduled_lift"],
         "objectives_completed": objectives_completed,
         "objectives_total": objectives_total,
+        "goal_summary": {
+            "daily_completed": daily_goals_completed,
+            "daily_above_and_beyond": daily_goals_above,
+            "weekly_completed": weekly_goals_completed,
+            "weekly_above_and_beyond": weekly_goals_above,
+        },
         "workout_completed": workout_completed,
         "food_spend_today": food_spend_today,
         "daily_spending_status": daily_status,

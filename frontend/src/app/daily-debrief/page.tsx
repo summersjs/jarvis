@@ -28,6 +28,11 @@ type Objective = {
   blocker: string;
   state?: string;
   detail?: string;
+  goal_group?: string | null;
+  achievement_tier?: string | null;
+  achievement_label?: string | null;
+  bonus_points?: number | null;
+  over_target_amount?: number | null;
 };
 
 type DailyDebriefSummary = {
@@ -70,6 +75,12 @@ type DailyDebriefSummary = {
   spoken_response?: string;
   objectives_completed: number;
   objectives_total: number;
+  goal_summary?: {
+    daily_completed?: number;
+    daily_above_and_beyond?: number;
+    weekly_completed?: number;
+    weekly_above_and_beyond?: number;
+  };
   workout_completed: boolean;
   food_spend_today: number;
   daily_spending_status: string;
@@ -555,6 +566,22 @@ export default function DailyDebriefPage() {
                   label="Tomorrow"
                   value={formatLabel(summary?.tomorrow_day_type || "rest")}
                 />
+                <SummaryChip
+                  label="Daily goals"
+                  value={
+                    summary?.goal_summary
+                      ? `${summary.goal_summary.daily_completed ?? 0} completed${summary.goal_summary.daily_above_and_beyond ? `, ${summary.goal_summary.daily_above_and_beyond} above & beyond` : ""}`
+                      : "0 completed"
+                  }
+                />
+                <SummaryChip
+                  label="Weekly goals"
+                  value={
+                    summary?.goal_summary
+                      ? `${summary.goal_summary.weekly_completed ?? 0} completed${summary.goal_summary.weekly_above_and_beyond ? `, ${summary.goal_summary.weekly_above_and_beyond} above & beyond` : ""}`
+                      : "0 completed"
+                  }
+                />
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">
@@ -605,7 +632,9 @@ export default function DailyDebriefPage() {
                     key={`${objective.title}-${index}`}
                     href={objective.id ? `/goals?goal=${objective.id}` : "/goals"}
                     className={`hud-row items-start gap-4 transition hover:-translate-y-0.5 ${
-                      objective.completed
+                      objective.achievement_tier === "above_and_beyond"
+                        ? "debrief-objective-beyond"
+                        : objective.completed
                         ? "debrief-objective-complete"
                         : "debrief-objective-active"
                     }`}
@@ -622,18 +651,31 @@ export default function DailyDebriefPage() {
                         <div>
                           <p className="font-semibold text-green-100">{objective.title}</p>
                           <p className="text-xs uppercase tracking-[0.16em] text-green-300/60">
-                            {objective.state || (objective.completed ? "Cleared" : "In progress")}
+                            {objective.achievement_label || objective.state || (objective.completed ? "Cleared" : "In progress")}
                           </p>
                         </div>
                         <span
                           className={`status-pill ${
-                            objective.completed ? "border-cyan-300/40 bg-cyan-400/10 text-cyan-100" : ""
+                            objective.achievement_tier === "above_and_beyond"
+                              ? "border-yellow-300/45 bg-yellow-400/15 text-yellow-100"
+                              : objective.completed
+                                ? "border-cyan-300/40 bg-cyan-400/10 text-cyan-100"
+                                : ""
                           }`}
                         >
-                          {objective.completed ? "CLEARED" : "OPEN"}
+                          {objective.achievement_tier === "above_and_beyond"
+                            ? "ABOVE & BEYOND"
+                            : objective.completed
+                              ? "CLEARED"
+                              : "OPEN"}
                         </span>
                       </div>
                       <p className="mt-2 text-sm text-green-300/80">{objective.detail || objective.notes}</p>
+                      {objective.achievement_tier === "above_and_beyond" && (
+                        <p className="mt-2 text-sm font-semibold uppercase tracking-[0.16em] text-yellow-200">
+                          You beat the target. Keep stacking.
+                        </p>
+                      )}
                       {!objective.completed && objective.blocker && (
                         <p className="mt-2 text-sm text-amber-200/80">Blocker: {objective.blocker}</p>
                       )}
@@ -1110,6 +1152,13 @@ function fromSummary(summary: DailyDebriefSummary): DebriefForm {
     completed: !!objective.completed,
     notes: objective.notes || "",
     blocker: objective.blocker || "",
+    state: objective.state || undefined,
+    detail: objective.detail || undefined,
+    goal_group: objective.goal_group || undefined,
+    achievement_tier: objective.achievement_tier || undefined,
+    achievement_label: objective.achievement_label || undefined,
+    bonus_points: objective.bonus_points ?? undefined,
+    over_target_amount: objective.over_target_amount ?? undefined,
   }));
 
   return {

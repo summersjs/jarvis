@@ -197,7 +197,7 @@ def log_complete_workout(workout: CompleteWorkoutLog):
         spoken_response += f" New estimated one rep max PR. Estimated max {pr_result['current_est_1rm']} pounds."
 
     updated_goals = []
-    if pr_result["is_est_1rm_pr"]:
+    if pr_result["is_weight_pr"] or pr_result["is_est_1rm_pr"]:
         updated_goals = auto_update_strength_goals(
             user_id=workout.user_id,
             lift=workout.lift,

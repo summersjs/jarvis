@@ -16,9 +16,29 @@ import {
   Zap,
 } from "lucide-react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+const CONFIGURED_API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 const API_KEY = process.env.NEXT_PUBLIC_JARVIS_API_KEY || "";
 const USER_ID = "john";
+
+function getApiBase() {
+  if (typeof window === "undefined") return CONFIGURED_API_BASE;
+
+  const configuredUrl = new URL(CONFIGURED_API_BASE);
+  const isConfiguredLocal =
+    configuredUrl.hostname === "127.0.0.1" || configuredUrl.hostname === "localhost";
+  const isPageLocal =
+    window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost";
+
+  if (isConfiguredLocal && !isPageLocal) {
+    return `${configuredUrl.protocol}//${window.location.hostname}:${configuredUrl.port || "8000"}`;
+  }
+
+  return CONFIGURED_API_BASE;
+}
+
+function apiUrl(path: string) {
+  return `${getApiBase()}${path}`;
+}
 
 type Objective = {
   id?: string | null;
@@ -344,10 +364,10 @@ export default function DailyDebriefPage() {
   const loadData = useCallback(async () => {
     try {
       const [summaryRes, historyRes] = await Promise.all([
-        fetch(`${API_BASE}/debrief/daily?user_id=${USER_ID}`, {
+        fetch(apiUrl(`/debrief/daily?user_id=${USER_ID}`), {
           headers: { "x-api-key": API_KEY },
         }),
-        fetch(`${API_BASE}/debrief/daily/history?user_id=${USER_ID}`, {
+        fetch(apiUrl(`/debrief/daily/history?user_id=${USER_ID}`), {
           headers: { "x-api-key": API_KEY },
         }),
       ]);
@@ -394,7 +414,7 @@ export default function DailyDebriefPage() {
       }
 
       try {
-        const res = await fetch(`${API_BASE}/debrief/daily`, {
+        const res = await fetch(apiUrl("/debrief/daily"), {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

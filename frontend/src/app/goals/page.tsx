@@ -4,8 +4,28 @@ import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+const CONFIGURED_API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 const API_KEY = process.env.NEXT_PUBLIC_JARVIS_API_KEY || "";
+
+function getApiBase() {
+  if (typeof window === "undefined") return CONFIGURED_API_BASE;
+
+  const configuredUrl = new URL(CONFIGURED_API_BASE);
+  const isConfiguredLocal =
+    configuredUrl.hostname === "127.0.0.1" || configuredUrl.hostname === "localhost";
+  const isPageLocal =
+    window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost";
+
+  if (isConfiguredLocal && !isPageLocal) {
+    return `${configuredUrl.protocol}//${window.location.hostname}:${configuredUrl.port || "8000"}`;
+  }
+
+  return CONFIGURED_API_BASE;
+}
+
+function apiUrl(path: string) {
+  return `${getApiBase()}${path}`;
+}
 
 type GoalLog = {
   id: string;
@@ -96,7 +116,7 @@ function GoalsPageInner() {
 
   async function loadGoals() {
     try {
-      const res = await fetch(`${API_BASE}/goals?user_id=john`, {
+      const res = await fetch(apiUrl("/goals?user_id=john"), {
         headers: {
           "x-api-key": API_KEY,
         },
@@ -121,7 +141,7 @@ function GoalsPageInner() {
     }
 
     try {
-      const res = await fetch(`${API_BASE}/goals`, {
+      const res = await fetch(apiUrl("/goals"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -165,7 +185,7 @@ function GoalsPageInner() {
     }
 
     try {
-      const res = await fetch(`${API_BASE}/goals/${goal.id}/logs`, {
+      const res = await fetch(apiUrl(`/goals/${goal.id}/logs`), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -194,7 +214,7 @@ function GoalsPageInner() {
     setMessage("");
 
     try {
-      const res = await fetch(`${API_BASE}/goals/${goalId}`, {
+      const res = await fetch(apiUrl(`/goals/${goalId}`), {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",

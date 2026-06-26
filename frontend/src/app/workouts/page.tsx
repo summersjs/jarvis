@@ -518,6 +518,7 @@ export default function Home() {
       );
 
       await loadHistory(selectedLift);
+      await loadGoals();
       await loadLiftSummaries();
       await loadTodayWorkout(selectedLift);
     } catch (err) {

@@ -749,6 +749,22 @@ def format_number(value: float | int | None) -> str:
     return f"{round(float(value), 2):g}"
 
 
+def _safe_calendar_events_for_date(date_obj) -> list[dict]:
+    try:
+        return get_calendar_events_for_date(date_obj)
+    except Exception as exc:
+        print(f"Daily debrief calendar events unavailable for {date_obj}: {exc}")
+        return []
+
+
+def _safe_calendar_summary_for_date(date_obj, label: str) -> str:
+    try:
+        return get_calendar_summary_for_date(date_obj, label)
+    except Exception as exc:
+        print(f"Daily debrief calendar summary unavailable for {date_obj}: {exc}")
+        return f"Calendar sync unavailable for {label}."
+
+
 def _today_workout_context(user_id: str, today_date) -> dict:
     scheduled_lift = get_scheduled_lift_for_date(today_date)
     workout_summary = get_todays_workout_summary(user_id, today_date)
@@ -756,8 +772,8 @@ def _today_workout_context(user_id: str, today_date) -> dict:
     workout_logic = get_next_workout_logic(user_id)
     tomorrow_date = today_date + timedelta(days=1)
     tomorrow_lift = get_scheduled_lift_for_date(tomorrow_date)
-    today_events = get_calendar_events_for_date(today_date)
-    tomorrow_events = get_calendar_events_for_date(tomorrow_date)
+    today_events = _safe_calendar_events_for_date(today_date)
+    tomorrow_events = _safe_calendar_events_for_date(tomorrow_date)
 
     workout_completed = bool(workout_summary) or workout_logic.get("day_type") == "completed"
     lift_completed = None
@@ -784,8 +800,8 @@ def _today_workout_context(user_id: str, today_date) -> dict:
         "tomorrow_scheduled_lift": tomorrow_lift,
         "today_calendar_events": today_events,
         "tomorrow_calendar_events": tomorrow_events,
-        "today_calendar_summary": get_calendar_summary_for_date(today_date, "today"),
-        "tomorrow_calendar_summary": get_calendar_summary_for_date(tomorrow_date, "tomorrow"),
+        "today_calendar_summary": _safe_calendar_summary_for_date(today_date, "today"),
+        "tomorrow_calendar_summary": _safe_calendar_summary_for_date(tomorrow_date, "tomorrow"),
     }
 
 

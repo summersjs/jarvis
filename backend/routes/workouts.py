@@ -214,6 +214,13 @@ def log_complete_workout(workout: CompleteWorkoutLog):
 
     return {
         "message": "Workout logged successfully",
+        "lift": workout.lift,
+        "top_set": {
+            "set_name": top_set.set_name,
+            "weight": round_to_nearest_5(top_set.weight),
+            "reps": top_set.reps,
+            "estimated_1rm": pr_result["current_est_1rm"],
+        },
         "logged_sets": insert_response.data,
         "next_week": next_week,
         "next_cycle": next_cycle,

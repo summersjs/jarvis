@@ -4,10 +4,14 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   Activity,
+  Award,
   ChevronDown,
   ClipboardList,
+  Crown,
   LineChart,
+  Medal,
   Settings,
+  ShieldCheck,
   Target,
   TrendingDown,
   Trophy,
@@ -22,6 +26,7 @@ import {
   RecoveryIcon,
   SquatIcon,
 } from "@/components/WorkoutHudIcons";
+import { getStrengthClassification } from "@/lib/strengthStandards";
 
 const CONFIGURED_API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const API_KEY = process.env.NEXT_PUBLIC_JARVIS_API_KEY || "";
@@ -150,6 +155,13 @@ type WorkoutHistoryItem = {
 };
 
 type CompletionResult = {
+  lift?: string;
+  top_set?: {
+    set_name: string;
+    weight: number;
+    reps: number;
+    estimated_1rm: number;
+  };
   pr_result?: {
     is_weight_pr: boolean;
     is_est_1rm_pr: boolean;
@@ -595,6 +607,9 @@ export default function Home() {
             <Link href="/preferences" className="command-nav-link">
               Favorites
             </Link>
+            <Link href="/strength-standards" className="command-nav-link">
+              Strength Standards
+            </Link>
           </nav>
         </header>
 
@@ -829,6 +844,7 @@ function LiftCard({
   const estimatedPr = summary?.estimated_pr
     ? `${summary.estimated_pr.estimated_1rm} lbs`
     : "No PR";
+  const classification = getStrengthClassification(lift, summary?.estimated_pr?.estimated_1rm || 0);
 
   return (
     <button
@@ -862,6 +878,10 @@ function LiftCard({
           </span>
           <span className="block text-sm text-green-300/70">
             Training Max: {summary ? `${summary.training_max} lbs` : "Loading"}
+          </span>
+          <span className={`mt-2 inline-flex items-center gap-2 rounded-full px-2 py-1 text-[0.68rem] font-black uppercase tracking-[0.14em] ${getRankBadgeClass(summary?.estimated_pr ? classification.currentRank : "Novice")}`}>
+            <RankIcon rank={summary?.estimated_pr ? classification.currentRank : "Novice"} className="h-3.5 w-3.5" />
+            Strength Rank: {summary?.estimated_pr ? classification.currentRank : "Pending"}
           </span>
         </span>
       </span>
@@ -1450,8 +1470,16 @@ function CompletionOverlay({
   const pr = result.pr_result;
   const isPr = !!(pr?.is_est_1rm_pr || pr?.is_weight_pr);
   const previous = pr?.best_est_1rm || 0;
-  const current = pr?.current_est_1rm || 0;
+  const current = result.top_set?.estimated_1rm || pr?.current_est_1rm || 0;
   const improvement = current && previous ? current - previous : 0;
+  const lift = result.lift || "deadlift";
+  const currentRank = getStrengthClassification(lift, current);
+  const previousRank = getStrengthClassification(lift, previous);
+  const rankChanged = currentRank.currentRank !== previousRank.currentRank && current > 0;
+  const topSetText = result.top_set
+    ? `${result.top_set.weight} x ${result.top_set.reps}`
+    : "Logged";
+  const rankHeadline = rankChanged ? "New Strength Rank Achieved" : "Current Strength Rank";
 
   if (!isPr) {
     return (
@@ -1462,6 +1490,32 @@ function CompletionOverlay({
             Workout successfully logged.
           </h3>
           <p className="mt-3 text-green-300/80">Cycle progress updated.</p>
+          <div className="mt-5 rounded-xl border border-green-500/20 bg-black/45 p-4">
+            <p className="hud-panel-title">{rankHeadline}</p>
+            <div className={`mt-3 inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-black uppercase tracking-[0.18em] ${getRankBadgeClass(currentRank.currentRank)}`}>
+              <RankIcon rank={currentRank.currentRank} className="h-4 w-4" />
+              {currentRank.currentRank}
+            </div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <BriefMetric label="Top Set" value={topSetText} />
+              <BriefMetric label="Estimated 1RM" value={current ? `${current} lbs` : "Pending"} />
+              <BriefMetric label="Current Rank" value={currentRank.currentRank} />
+              <BriefMetric
+                label="Next Rank"
+                value={
+                  currentRank.nextRank
+                    ? `${currentRank.nextRank} at ${currentRank.nextRankMin} lbs`
+                    : "Max tier"
+                }
+              />
+            </div>
+            <p className="mt-3 text-sm text-green-300/70">
+              {currentRank.poundsToNextRank
+                ? `${currentRank.poundsToNextRank} lbs remaining. `
+                : "Top classification reached. "}
+              {currentRank.generalPopulationDescription}
+            </p>
+          </div>
           <div className="mt-6 flex flex-wrap gap-3">
             <button onClick={onClose} className="command-nav-link">Continue</button>
             <button onClick={onViewHistory} className="command-nav-link">View History</button>
@@ -1475,12 +1529,14 @@ function CompletionOverlay({
     <div className="achievement-overlay">
       <div className="achievement-particles" aria-hidden="true" />
       <div className="achievement-card">
-        <p className="hud-panel-title text-yellow-200">Personal Record Detected</p>
+        <p className="hud-panel-title text-yellow-200">
+          {rankChanged ? "New Strength Rank Achieved" : "Personal Record Detected"}
+        </p>
         <div className="achievement-trophy">
-          <Trophy className="h-16 w-16" />
+          <RankIcon rank={currentRank.currentRank} className="h-16 w-16" />
         </div>
         <h3 className="mt-4 text-4xl font-black uppercase text-yellow-100 md:text-6xl">
-          Personal Record Detected
+          {rankChanged ? currentRank.currentRank : "Personal Record Detected"}
         </h3>
         <div className="mt-6 grid gap-3 sm:grid-cols-3">
           <BriefMetric label="Previous" value={previous ? `${previous} lbs` : "Baseline"} />
@@ -1489,6 +1545,37 @@ function CompletionOverlay({
             label="Improvement"
             value={improvement > 0 ? `+${improvement} lbs` : "New mark"}
           />
+        </div>
+        <div className="mt-5 rounded-xl border border-yellow-300/25 bg-black/45 p-4 text-left">
+          <p className="hud-panel-title text-yellow-200">{formatLiftName(lift)} Complete</p>
+          <div className={`mt-3 inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-black uppercase tracking-[0.18em] ${getRankBadgeClass(currentRank.currentRank)}`}>
+            <RankIcon rank={currentRank.currentRank} className="h-4 w-4" />
+            {rankChanged ? "New Rank" : "Current Rank"}: {currentRank.currentRank}
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <BriefMetric label="Top Set" value={topSetText} />
+            <BriefMetric label="Estimated 1RM" value={current ? `${current} lbs` : "Pending"} />
+            <BriefMetric label="Current Rank" value={currentRank.currentRank} />
+            <BriefMetric
+              label="Next Rank"
+              value={
+                currentRank.nextRank
+                  ? `${currentRank.nextRank} at ${currentRank.nextRankMin} lbs`
+                  : "Max tier"
+              }
+            />
+          </div>
+          <p className="mt-3 text-sm text-green-300/80">
+            Powerlifting 200-220 lb class: {currentRank.powerliftingDescription}
+          </p>
+          <p className="mt-1 text-sm text-green-300/70">
+            General Population: {currentRank.generalPopulationDescription}
+          </p>
+          <p className="mt-1 text-sm text-yellow-100">
+            {currentRank.poundsToNextRank
+              ? `${currentRank.poundsToNextRank} lbs remaining.`
+              : "Legendary threshold secured."}
+          </p>
         </div>
         <p className="mt-6 text-xl font-black uppercase tracking-[0.2em] text-green-100">
           Mission Complete
@@ -1500,6 +1587,40 @@ function CompletionOverlay({
       </div>
     </div>
   );
+}
+
+function RankIcon({
+  rank,
+  className,
+}: {
+  rank: string;
+  className?: string;
+}) {
+  if (rank === "Novice") return <Medal className={className} />;
+  if (rank === "Beginner") return <Award className={className} />;
+  if (rank === "Intermediate") return <Trophy className={className} />;
+  if (rank === "Advanced") return <Trophy className={className} />;
+  if (rank === "Elite") return <Crown className={className} />;
+  return <ShieldCheck className={className} />;
+}
+
+function getRankBadgeClass(rank: string) {
+  if (rank === "Novice") {
+    return "border border-amber-700/70 bg-amber-900/30 text-amber-200 shadow-[0_0_12px_rgba(180,83,9,0.22)]";
+  }
+  if (rank === "Beginner") {
+    return "border border-slate-300/65 bg-slate-400/15 text-slate-100 shadow-[0_0_12px_rgba(203,213,225,0.22)]";
+  }
+  if (rank === "Intermediate") {
+    return "border border-yellow-300/70 bg-yellow-500/15 text-yellow-100 shadow-[0_0_16px_rgba(250,204,21,0.35)]";
+  }
+  if (rank === "Advanced") {
+    return "border border-blue-300/75 bg-blue-500/15 text-blue-100 shadow-[0_0_18px_rgba(59,130,246,0.42)]";
+  }
+  if (rank === "Elite") {
+    return "border border-purple-300/75 bg-purple-500/15 text-purple-100 shadow-[0_0_22px_rgba(168,85,247,0.48)]";
+  }
+  return "border border-red-400/80 bg-red-500/15 text-red-100 shadow-[0_0_24px_rgba(248,113,113,0.52)]";
 }
 
 function formatLiftName(lift: string) {

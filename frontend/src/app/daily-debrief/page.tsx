@@ -512,6 +512,9 @@ export default function DailyDebriefPage() {
             <Link href="/finance-ops" className="command-nav-link">
               Finance Ops
             </Link>
+            <Link href="/health-ops" className="command-nav-link">
+              Health Ops
+            </Link>
           </nav>
         </header>
 

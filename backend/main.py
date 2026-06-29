@@ -19,6 +19,7 @@ from backend.routes.dashboard import router as dashboard_router
 from backend.routes.goals import router as goals_router
 from backend.routes.debrief import router as debrief_router
 from backend.routes.finance import router as finance_router
+from backend.routes.health import router as health_router
 
 
 
@@ -53,3 +54,4 @@ app.include_router(dashboard_router)
 app.include_router(goals_router)
 app.include_router(debrief_router)
 app.include_router(finance_router)
+app.include_router(health_router)

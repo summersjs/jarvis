@@ -14,6 +14,7 @@ import {
   Circle,
   DatabaseZap,
   DollarSign,
+  HeartPulse,
   BookOpen,
   ClipboardList,
   Server,
@@ -611,6 +612,10 @@ export default function CommandCenterPage() {
           <Link className="command-nav-link tactical-nav-link" href="/finance-ops">
             <DollarSign className="h-4 w-4" />
             <span>Finance Ops</span>
+          </Link>
+          <Link className="command-nav-link tactical-nav-link" href="/health-ops">
+            <HeartPulse className="h-4 w-4" />
+            <span>Health Ops</span>
           </Link>
         </nav>
 

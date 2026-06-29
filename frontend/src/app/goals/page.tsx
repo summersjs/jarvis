@@ -335,6 +335,76 @@ function GoalsPageInner() {
     }
   }
 
+  async function completePlannedStandard(goal: Goal) {
+    setError("");
+    setMessage("");
+
+    const plannedFor = goal.standard?.planned_for || goal.planned_date;
+    if (!plannedFor) {
+      setError("No planned date found for this standard.");
+      return;
+    }
+
+    try {
+      const res = await fetch(apiUrl(`/goals/${goal.id}/logs`), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": API_KEY,
+        },
+        body: JSON.stringify({
+          value: goal.target_value || 1,
+          log_type: "completed",
+          planned_for: plannedFor,
+          notes: `Completed planned standard for ${formatPlannedDate(plannedFor, goal.standard?.planned_time || goal.planned_time)}`,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to complete planned standard.");
+
+      setMessage("Planned standard completed and logged.");
+      await loadGoals();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to complete planned standard.");
+    }
+  }
+
+  async function removePlannedStandard(goal: Goal) {
+    setError("");
+    setMessage("");
+
+    const plannedFor = goal.standard?.planned_for || goal.planned_date;
+    if (!plannedFor) {
+      setError("No planned date found for this standard.");
+      return;
+    }
+
+    try {
+      const res = await fetch(apiUrl(`/goals/${goal.id}/logs`), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": API_KEY,
+        },
+        body: JSON.stringify({
+          value: 0,
+          log_type: "missed",
+          planned_for: plannedFor,
+          notes: `Removed planned standard for ${formatPlannedDate(plannedFor, goal.standard?.planned_time || goal.planned_time)}`,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to remove planned standard.");
+
+      setMessage("Planned standard removed and logged as missed.");
+      await loadGoals();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to remove planned standard.");
+    }
+  }
+
   async function addMilestone(goal: Goal) {
     setError("");
     setMessage("");
@@ -704,6 +774,8 @@ function GoalsPageInner() {
                 onPlanTimeChange={(value) => setPlanTimes((prev) => ({ ...prev, [goal.id]: value }))}
                 onPlanNoteChange={(value) => setPlanNotes((prev) => ({ ...prev, [goal.id]: value }))}
                 onPlan={() => planGoal(goal)}
+                onCompletePlanned={() => completePlannedStandard(goal)}
+                onRemovePlanned={() => removePlannedStandard(goal)}
                 milestoneTitle={milestoneTitles[goal.id] || ""}
                 onMilestoneTitleChange={(value) => setMilestoneTitles((prev) => ({ ...prev, [goal.id]: value }))}
                 onAddMilestone={() => addMilestone(goal)}
@@ -835,6 +907,8 @@ function GoalCard({
   onPlanTimeChange,
   onPlanNoteChange,
   onPlan,
+  onCompletePlanned,
+  onRemovePlanned,
   milestoneTitle,
   onMilestoneTitleChange,
   onAddMilestone,
@@ -862,6 +936,8 @@ function GoalCard({
   onPlanTimeChange: (value: string) => void;
   onPlanNoteChange: (value: string) => void;
   onPlan: () => void;
+  onCompletePlanned: () => void;
+  onRemovePlanned: () => void;
   milestoneTitle: string;
   onMilestoneTitleChange: (value: string) => void;
   onAddMilestone: () => void;
@@ -893,6 +969,8 @@ function GoalCard({
         onPlanTimeChange={onPlanTimeChange}
         onPlanNoteChange={onPlanNoteChange}
         onPlan={onPlan}
+        onCompletePlanned={onCompletePlanned}
+        onRemovePlanned={onRemovePlanned}
         onArchive={onArchive}
         onOpenHistory={onOpenHistory}
       />
@@ -1061,7 +1139,7 @@ function ObjectiveCard({
         />
         <button
           onClick={onLog}
-          className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-3 transition hover:bg-green-500/20"
+          className="command-action-button command-action-green border border-green-500/40 bg-green-500/10 px-4 py-3 text-green-100"
         >
           Log
         </button>
@@ -1100,6 +1178,8 @@ function StandardCard({
   onPlanTimeChange,
   onPlanNoteChange,
   onPlan,
+  onCompletePlanned,
+  onRemovePlanned,
   onArchive,
   onOpenHistory,
 }: {
@@ -1117,12 +1197,17 @@ function StandardCard({
   onPlanTimeChange: (value: string) => void;
   onPlanNoteChange: (value: string) => void;
   onPlan: () => void;
+  onCompletePlanned: () => void;
+  onRemovePlanned: () => void;
   onArchive: () => void;
   onOpenHistory: () => void;
 }) {
   const standard = goal.standard;
   const period = goal.period;
   const percent = period?.percent ?? goal.progress?.percent ?? 0;
+  const plannedFor = standard?.planned_for || goal.planned_date;
+  const plannedTime = standard?.planned_time || goal.planned_time;
+  const hasActivePlan = Boolean(plannedFor && standard?.status === "PLANNED");
 
   return (
     <article
@@ -1157,6 +1242,41 @@ function StandardCard({
         <MetricPanel label="Streak" value={`${standard?.streak_count ?? 0}`} />
         <MetricPanel label="Success Rate" value={standard?.success_rate == null ? "Pending" : `${standard.success_rate}%`} />
       </div>
+
+      {hasActivePlan && (
+        <div
+          className="mt-5 rounded-xl border border-cyan-300/35 bg-cyan-300/5 p-4 shadow-[0_0_22px_rgba(34,211,238,0.1)]"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.22em] text-cyan-200/70">
+                Planned Standard
+              </p>
+              <p className="mt-1 text-lg font-semibold text-green-100">
+                {formatPlannedDate(plannedFor, plannedTime)}
+              </p>
+              <p className="mt-1 text-sm text-green-300/70">
+                Mark complete when it happens, even if you log it later.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={onCompletePlanned}
+                className="command-action-button command-action-green border border-green-400/40 bg-green-400/10 px-4 py-3 text-sm font-semibold uppercase tracking-[0.16em] text-green-100"
+              >
+                Complete Planned
+              </button>
+              <button
+                onClick={onRemovePlanned}
+                className="command-action-button border border-red-400/40 bg-red-500/10 px-4 py-3 text-sm font-semibold uppercase tracking-[0.16em] text-red-100"
+              >
+                Remove Plan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="mt-5 grid gap-3 md:grid-cols-[0.8fr_0.6fr_1fr_auto]" onClick={(e) => e.stopPropagation()}>
         <input

@@ -28,6 +28,7 @@ MISSION_TYPES = {"objective", "standard", "project"}
 PROJECT_MILESTONE_COMPLETE_STATUSES = {"complete", "purchased"}
 STANDARD_ACTION_LOG_TYPES = {"progress", "completed", "milestone"}
 STANDARD_PLAN_LOG_TYPES = {"planned"}
+STANDARD_MISS_LOG_TYPES = {"missed"}
 
 
 def create_goal(payload: GoalCreate):
@@ -194,6 +195,9 @@ def create_goal_log(goal_id: str, payload: GoalLogCreate):
         if payload.log_type == "planned":
             update_fields["status"] = "planned"
             update_fields["planned_date"] = payload.planned_for
+        elif payload.log_type == "missed":
+            update_fields["status"] = "active"
+            update_fields["planned_date"] = None
         elif float(goal.get("target_value") or 0) > 0 and next_value >= float(goal.get("target_value") or 0):
             update_fields["status"] = "complete"
         else:
@@ -590,8 +594,12 @@ def sum_log_values_for_period(logs: list[dict], period_start: datetime, period_e
         log_type = (log.get("log_type") or "progress").lower()
         if log_type not in STANDARD_ACTION_LOG_TYPES:
             continue
-        created_at = parse_datetime(log.get("created_at"))
-        if created_at and period_start <= created_at < period_end:
+        planned_for = parse_date(log.get("planned_for"))
+        if planned_for:
+            log_date = datetime.combine(planned_for, datetime.min.time(), tzinfo=LOCAL_TZ)
+        else:
+            log_date = parse_datetime(log.get("created_at"))
+        if log_date and period_start <= log_date < period_end:
             total += float(log.get("value") if log.get("value") is not None else 1)
     return total
 
@@ -627,13 +635,21 @@ def build_period_snapshot(
     hit_goal = target > 0 and value >= target
     inclusive_end = (period_end - timedelta(days=1)).date()
     planned_log = latest_planned_log_for_period(logs, period_start, period_end)
+    missed_log = latest_missed_log_for_period(logs, period_start, period_end)
     planned_for = planned_log.get("planned_for") if planned_log else goal.get("planned_date")
+    if missed_log and (
+        not planned_log
+        or (missed_log.get("created_at") or "") >= (planned_log.get("created_at") or "")
+    ):
+        planned_for = None
     today = datetime.now(LOCAL_TZ)
     period_closed = today >= period_end
     if hit_goal:
         period_status = "COMPLETED"
     elif value > 0:
         period_status = "IN PROGRESS"
+    elif missed_log:
+        period_status = "MISSED"
     elif planned_for and is_current:
         period_status = "PLANNED"
     elif not is_current and period_closed:
@@ -668,6 +684,21 @@ def latest_planned_log_for_period(logs: list[dict], period_start: datetime, peri
         if planned_for and period_start.date() <= planned_for < period_end.date():
             planned_logs.append(log)
     return sorted(planned_logs, key=lambda row: row.get("created_at") or "", reverse=True)[0] if planned_logs else None
+
+
+def latest_missed_log_for_period(logs: list[dict], period_start: datetime, period_end: datetime):
+    missed_logs = []
+    for log in logs:
+        if (log.get("log_type") or "").lower() not in STANDARD_MISS_LOG_TYPES:
+            continue
+        planned_for = parse_date(log.get("planned_for"))
+        if planned_for and period_start.date() <= planned_for < period_end.date():
+            missed_logs.append(log)
+            continue
+        created_at = parse_datetime(log.get("created_at"))
+        if created_at and period_start <= created_at < period_end:
+            missed_logs.append(log)
+    return sorted(missed_logs, key=lambda row: row.get("created_at") or "", reverse=True)[0] if missed_logs else None
 
 
 def build_standard_snapshot(goal: dict, logs: list[dict]) -> dict:

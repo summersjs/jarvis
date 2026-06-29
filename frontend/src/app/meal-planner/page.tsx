@@ -106,6 +106,23 @@ type MealMeta = {
   save_to_food_vault?: boolean;
 };
 
+const MEAL_TYPE_OPTIONS = [
+  { value: "breakfast", label: "Breakfast" },
+  { value: "dinner", label: "Dinner" },
+  { value: "lunch", label: "Lunch" },
+  { value: "snack", label: "Snack" },
+];
+
+const MEAL_SOURCE_OPTIONS = [
+  { value: "custom", label: "Custom Meal" },
+  { value: "eat_out", label: "Eat Out" },
+  { value: "event_family_meal", label: "Event / Family Meal" },
+  { value: "food_vault", label: "Food Vault Item" },
+  { value: "leftovers", label: "Leftovers" },
+  { value: "recipe", label: "Recipe Vault Meal" },
+  { value: "skip", label: "Skip" },
+];
+
 export default function MealPlannerPage() {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [foodItems, setFoodItems] = useState<FoodVaultItem[]>([]);
@@ -159,7 +176,7 @@ export default function MealPlannerPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Failed to load recipes.");
 
-      setRecipes(data.recipes || []);
+      setRecipes(sortRecipesByTitle(data.recipes || []));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load recipes.");
     }
@@ -175,7 +192,7 @@ export default function MealPlannerPage() {
       const targetsData = await targetsRes.json();
       if (!itemsRes.ok) throw new Error(itemsData.detail || "Failed to load Food Vault.");
       if (!targetsRes.ok) throw new Error(targetsData.detail || "Failed to load nutrition targets.");
-      setFoodItems(itemsData.items || []);
+      setFoodItems(sortFoodItemsByName(itemsData.items || []));
       setNutritionTargets(targetsData.targets || null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load Food Vault.");
@@ -602,10 +619,9 @@ export default function MealPlannerPage() {
                 onChange={(e) => setMealType(e.target.value)}
                 className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
               >
-                <option value="breakfast">Breakfast</option>
-                <option value="lunch">Lunch</option>
-                <option value="dinner">Dinner</option>
-                <option value="snack">Snack</option>
+                {MEAL_TYPE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
               </select>
             </div>
 
@@ -616,13 +632,9 @@ export default function MealPlannerPage() {
                 onChange={(e) => setMealSource(e.target.value)}
                 className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
               >
-                <option value="recipe">Recipe Vault Meal</option>
-                <option value="food_vault">Food Vault Item</option>
-                <option value="leftovers">Leftovers</option>
-                <option value="eat_out">Eat Out</option>
-                <option value="skip">Skip</option>
-                <option value="event_family_meal">Event / Family Meal</option>
-                <option value="custom">Custom Meal</option>
+                {MEAL_SOURCE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
               </select>
             </div>
 
@@ -635,7 +647,7 @@ export default function MealPlannerPage() {
                 disabled={mealSource !== "recipe"}
               >
                 <option value="">-- Choose Recipe --</option>
-                {recipes.map((recipe) => (
+                {sortRecipesByTitle(recipes).map((recipe) => (
                   <option key={recipe.id} value={recipe.id}>
                     {recipe.title}
                   </option>
@@ -653,7 +665,7 @@ export default function MealPlannerPage() {
                     className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
                   >
                     <option value="">-- Choose Food --</option>
-                    {foodItems.map((item) => (
+                    {sortFoodItemsByName(foodItems).map((item) => (
                       <option key={item.id} value={item.id}>
                         {foodDisplayName(item)} ({item.current_quantity ?? 0} left)
                       </option>
@@ -972,6 +984,14 @@ function numberOrNull(value: string) {
 
 function foodDisplayName(item: FoodVaultItem) {
   return [item.brand, item.name].filter(Boolean).join(" ");
+}
+
+function sortRecipesByTitle(items: Recipe[]) {
+  return [...items].sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }));
+}
+
+function sortFoodItemsByName(items: FoodVaultItem[]) {
+  return [...items].sort((a, b) => foodDisplayName(a).localeCompare(foodDisplayName(b), undefined, { sensitivity: "base" }));
 }
 
 function calculateFoodVaultUnitCost(item: FoodVaultItem, servings = 1) {

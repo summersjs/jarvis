@@ -95,7 +95,7 @@ export default function RecipesPage() {
         throw new Error(data.detail || "Failed to load recipes.");
       }
 
-      setRecipes(data.recipes || []);
+      setRecipes(sortRecipesByTitle(data.recipes || []));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load recipes.");
     }
@@ -108,7 +108,7 @@ export default function RecipesPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Failed to load Food Vault.");
-      setFoodItems(data.items || []);
+      setFoodItems(sortFoodItemsByName(data.items || []));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load Food Vault.");
     }
@@ -427,7 +427,7 @@ export default function RecipesPage() {
                   className="rounded-xl border border-green-500/30 bg-zinc-950 px-4 py-3"
                 >
                   <option value="">Add ingredient from Food Vault</option>
-                  {foodItems.map((item) => (
+                  {sortFoodItemsByName(foodItems).map((item) => (
                     <option key={item.id} value={item.id}>{foodDisplayName(item)}</option>
                   ))}
                 </select>
@@ -513,7 +513,7 @@ export default function RecipesPage() {
             </div>
           )}
 
-          {recipes.map((recipe) => {
+          {sortRecipesByTitle(recipes).map((recipe) => {
             const totals = calculateRecipeMacros(recipe.ingredients || [], foodItems);
             return (
             <Link
@@ -588,6 +588,14 @@ export default function RecipesPage() {
 
 function foodDisplayName(item: FoodVaultItem) {
   return [item.brand, item.name].filter(Boolean).join(" ");
+}
+
+function sortRecipesByTitle(items: Recipe[]) {
+  return [...items].sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }));
+}
+
+function sortFoodItemsByName(items: FoodVaultItem[]) {
+  return [...items].sort((a, b) => foodDisplayName(a).localeCompare(foodDisplayName(b), undefined, { sensitivity: "base" }));
 }
 
 function calculateRecipeMacros(ingredients: RecipeIngredient[], foodItems: FoodVaultItem[]) {

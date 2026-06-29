@@ -77,7 +77,7 @@ export default function FoodVaultPage() {
       const targetsData = await targetsRes.json();
       if (!itemsRes.ok) throw new Error(itemsData.detail || "Failed to load Food Vault.");
       if (!targetsRes.ok) throw new Error(targetsData.detail || "Failed to load nutrition targets.");
-      setItems(itemsData.items || []);
+      setItems(sortFoodItemsByName(itemsData.items || []));
       const loadedTargets = targetsData.targets || {};
       setTargets(loadedTargets);
       setTargetForm({
@@ -294,7 +294,7 @@ export default function FoodVaultPage() {
             <h2 className="text-sm font-bold uppercase tracking-[0.22em] text-green-200">Inventory</h2>
           </div>
           <div className="grid gap-3 lg:grid-cols-2">
-            {items.map((item) => (
+            {sortFoodItemsByName(items).map((item) => (
               <div
                 key={item.id}
                 role="button"
@@ -385,6 +385,14 @@ function Mini({ label, value, unit = "" }: { label: string; value?: number | nul
       <p className="mt-1 font-semibold text-green-100">{value || value === 0 ? `${value}${unit}` : "-"}</p>
     </div>
   );
+}
+
+function foodDisplayName(item: FoodItem) {
+  return [item.brand, item.name].filter(Boolean).join(" ");
+}
+
+function sortFoodItemsByName(items: FoodItem[]) {
+  return [...items].sort((a, b) => foodDisplayName(a).localeCompare(foodDisplayName(b), undefined, { sensitivity: "base" }));
 }
 
 function numberOrNull(value: string) {

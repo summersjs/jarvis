@@ -74,6 +74,7 @@ type EventSummary = {
   most_common_trigger?: string | null;
   most_common_relief?: string | null;
   most_common_time?: string | null;
+  common_observations?: string[] | null;
 };
 
 type DoctorSummary = {
@@ -100,7 +101,7 @@ type DoctorSummary = {
 type HealthDashboard = {
   status: string;
   date: string;
-  snapshot: Record<string, number | string | boolean | null>;
+  snapshot: Record<string, number | string | boolean | null | Record<string, number>>;
   event_types: EventType[];
   events_today: HealthEvent[];
   timeline: HealthEvent[];
@@ -446,7 +447,7 @@ export default function HealthOpsPage() {
           caffeine_mg: numberOrNull(checkin.caffeine_mg),
           workout_completed: Boolean(dashboard?.snapshot.workout_completed),
           meals_planned: Number(dashboard?.snapshot.meals_planned || 0),
-          meals_completed: numberOrNull(checkin.meals_completed),
+          meals_completed: Number(dashboard?.snapshot.meals_completed || 0),
           ate_out: checkin.ate_out,
           food_spend: numberOrNull(checkin.food_spend),
           supplements: checkin.supplements,
@@ -501,6 +502,8 @@ export default function HealthOpsPage() {
                   <SnapshotMetric icon={Dumbbell} label="Workout Completed" value={dashboard.snapshot.workout_completed ? "Yes" : "No"} />
                   <SnapshotMetric icon={Utensils} label="Meals" value={`${dashboard.snapshot.meals_completed || 0}/${dashboard.snapshot.meals_planned || 0}`} />
                   <SnapshotMetric icon={HeartPulse} label="Current Symptom Count" value={String(dashboard.snapshot.current_symptom_count || 0)} />
+                  <SnapshotMetric icon={Utensils} label="Protein" value={nutritionValue(dashboard.snapshot.nutrition_totals, "protein_g", "g")} />
+                  <SnapshotMetric icon={Activity} label="Calories" value={nutritionValue(dashboard.snapshot.nutrition_totals, "calories", "cal")} />
                 </div>
               </HudPanel>
 
@@ -532,7 +535,7 @@ export default function HealthOpsPage() {
 
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   <SnapshotMetric icon={Utensils} label="Meals Planned" value={String(dashboard.snapshot.meals_planned || 0)} />
-                  <TextField label="Meals Completed" value={checkin.meals_completed} onChange={(value) => setCheckin((prev) => ({ ...prev, meals_completed: value }))} />
+                  <SnapshotMetric icon={CheckCircle2} label="Meals Completed" value={`${dashboard.snapshot.meals_completed || 0} from Meal Planner`} />
                   <ToggleField label="Ate Out?" checked={checkin.ate_out} onChange={(value) => setCheckin((prev) => ({ ...prev, ate_out: value }))} />
                   <TextField label="Food Spend" value={checkin.food_spend} onChange={(value) => setCheckin((prev) => ({ ...prev, food_spend: value }))} />
                 </div>
@@ -873,6 +876,18 @@ function SummaryList({ summaries }: { summaries: EventSummary[] }) {
             <TimelineFact label="Most common relief" value={summary.most_common_relief} />
             <TimelineFact label="Most common time" value={summary.most_common_time} />
           </div>
+          {summary.common_observations && summary.common_observations.length > 0 && (
+            <div className="mt-3 rounded-lg border border-cyan-300/20 bg-cyan-300/5 p-3">
+              <p className="text-xs uppercase tracking-[0.16em] text-cyan-200/70">Observed notes</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {summary.common_observations.map((observation) => (
+                  <span key={observation} className="rounded-full border border-cyan-300/25 px-3 py-1 text-xs text-cyan-100">
+                    {observation}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       ))}
     </div>
@@ -929,6 +944,12 @@ function scoreValue(value: unknown) {
 
 function unitValue(value: unknown, unit: string) {
   return value || value === 0 ? `${value} ${unit}` : "Not logged";
+}
+
+function nutritionValue(value: unknown, key: string, unit: string) {
+  if (!value || typeof value !== "object") return "Not logged";
+  const amount = (value as Record<string, number>)[key];
+  return amount || amount === 0 ? `${amount} ${unit}` : "Not logged";
 }
 
 function sleepValue(snapshot: Record<string, unknown>) {

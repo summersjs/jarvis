@@ -58,6 +58,12 @@ type MealMeta = {
   vendor: string | null;
   note: string | null;
   count_toward_eating_out: boolean;
+  calories?: number | null;
+  protein_g?: number | null;
+  carbs_g?: number | null;
+  fat_g?: number | null;
+  completed?: boolean;
+  completed_at?: string | null;
 };
 
 export default function MealPlannerPage() {
@@ -75,6 +81,10 @@ export default function MealPlannerPage() {
   const [estimatedCost, setEstimatedCost] = useState("");
   const [vendor, setVendor] = useState("");
   const [notes, setNotes] = useState("");
+  const [calories, setCalories] = useState("");
+  const [protein, setProtein] = useState("");
+  const [carbs, setCarbs] = useState("");
+  const [fat, setFat] = useState("");
 
   function getWeekRange() {
     const today = new Date();
@@ -174,6 +184,12 @@ export default function MealPlannerPage() {
         vendor: vendor.trim() || null,
         note: notes.trim() || null,
         count_toward_eating_out: mealSource === "eat_out",
+        calories: numberOrNull(calories),
+        protein_g: numberOrNull(protein),
+        carbs_g: numberOrNull(carbs),
+        fat_g: numberOrNull(fat),
+        completed: false,
+        completed_at: null,
       };
 
       const res = await fetch(`${API_BASE}/meal-planner`, {
@@ -204,11 +220,85 @@ export default function MealPlannerPage() {
       setEstimatedCost("");
       setVendor("");
       setNotes("");
+      setCalories("");
+      setProtein("");
+      setCarbs("");
+      setFat("");
 
       await loadWeekPlan();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create entry.");
     }
+  }
+
+  async function markMealCompleted(entry: MealPlanEntry) {
+    setError("");
+    setMessage("");
+    const meta = getMealMeta(entry);
+    try {
+      const res = await fetch(`${API_BASE}/meal-planner/${entry.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": API_KEY,
+        },
+        body: JSON.stringify({
+          notes: buildMealNotes({
+            ...meta,
+            completed: true,
+            completed_at: new Date().toISOString(),
+          }),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to mark meal completed.");
+      setMessage("Meal marked eaten. Health Ops will pick this up automatically.");
+      await loadWeekPlan();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to mark meal completed.");
+    }
+  }
+
+  async function reopenMeal(entry: MealPlanEntry) {
+    setError("");
+    setMessage("");
+    const meta = getMealMeta(entry);
+    try {
+      const res = await fetch(`${API_BASE}/meal-planner/${entry.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": API_KEY,
+        },
+        body: JSON.stringify({
+          notes: buildMealNotes({
+            ...meta,
+            completed: false,
+            completed_at: null,
+          }),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to reopen meal.");
+      setMessage("Meal reopened.");
+      await loadWeekPlan();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to reopen meal.");
+    }
+  }
+
+  function useYogurtCorePowerPreset() {
+    const today = new Date().toISOString().split("T")[0];
+    setMealDate(today);
+    setMealType("snack");
+    setMealSource("leftovers");
+    setRecipeId("");
+    setCustomMealName("Yogurt + Core Power");
+    setCalories("320");
+    setProtein("42");
+    setCarbs("32");
+    setFat("4");
+    setNotes("Quick logged food. Macro estimates are editable.");
   }
 
   useEffect(() => {
@@ -299,7 +389,18 @@ export default function MealPlannerPage() {
         )}
 
         <section className="mb-8 rounded-2xl border border-green-500/30 bg-zinc-950 p-6">
-          <h2 className="mb-4 text-2xl font-semibold">Add Meal</h2>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-[0.22em] text-green-500/65">Food Intake</p>
+              <h2 className="mt-1 text-2xl font-semibold">Add Meal</h2>
+            </div>
+            <button
+              onClick={useYogurtCorePowerPreset}
+              className="command-action-button command-action-green border border-green-400/40 bg-green-400/10 px-4 py-3 text-green-100"
+            >
+              Yogurt + Core Power
+            </button>
+          </div>
 
           <div className="grid gap-4 md:grid-cols-2">
             <div>
@@ -400,11 +501,55 @@ export default function MealPlannerPage() {
                 placeholder="Prep ahead, post-workout meal, etc."
               />
             </div>
+
+            <div>
+              <label className="mb-2 block text-sm text-green-300/80">Calories</label>
+              <input
+                type="number"
+                value={calories}
+                onChange={(e) => setCalories(e.target.value)}
+                className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
+                placeholder="320"
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm text-green-300/80">Protein g</label>
+              <input
+                type="number"
+                value={protein}
+                onChange={(e) => setProtein(e.target.value)}
+                className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
+                placeholder="42"
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm text-green-300/80">Carbs g</label>
+              <input
+                type="number"
+                value={carbs}
+                onChange={(e) => setCarbs(e.target.value)}
+                className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
+                placeholder="32"
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm text-green-300/80">Fat g</label>
+              <input
+                type="number"
+                value={fat}
+                onChange={(e) => setFat(e.target.value)}
+                className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
+                placeholder="4"
+              />
+            </div>
           </div>
 
           <button
             onClick={createEntry}
-            className="mt-4 w-full rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-3 hover:bg-green-500/20 transition"
+            className="command-action-button command-action-green mt-4 w-full border border-green-500/40 bg-green-500/10 px-4 py-3 text-green-100"
           >
             Save Meal Plan Entry
           </button>
@@ -420,29 +565,70 @@ export default function MealPlannerPage() {
               </div>
             )}
 
-            {entries.map((entry) => (
+            {entries.map((entry) => {
+              const meta = getMealMeta(entry);
+              return (
               <div
                 key={entry.id}
-                className="rounded-xl border border-green-500/20 bg-black p-4"
+                className={`rounded-xl border p-4 transition ${
+                  meta.completed
+                    ? "border-green-300/45 bg-green-400/10 shadow-[0_0_18px_rgba(34,197,94,0.14)]"
+                    : "border-green-500/20 bg-black"
+                }`}
               >
-                <p className="font-semibold">
-                  {entry.meal_date} — {entry.meal_type} — {getMealSourceLabel(entry.meal_source || parseMealMeta(entry.notes)?.source || "recipe")}
-                </p>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold">
+                      {entry.meal_date} — {entry.meal_type} — {getMealSourceLabel(meta.source)}
+                    </p>
 
-                <p className="mt-2 text-green-300/80">
-                  {entry.recipes?.title || entry.custom_meal_name || "Unnamed meal"}
-                </p>
+                    <p className="mt-2 text-green-300/80">
+                      {entry.recipes?.title || entry.custom_meal_name || "Unnamed meal"}
+                    </p>
+                  </div>
+                  <span className={`rounded-full border px-3 py-1 text-xs uppercase tracking-[0.16em] ${
+                    meta.completed ? "border-green-300/45 bg-green-300/10 text-green-100" : "border-cyan-300/30 text-cyan-100"
+                  }`}>
+                    {meta.completed ? "Eaten" : "Planned"}
+                  </span>
+                </div>
 
                 <p className="mt-1 text-sm text-green-300/65">
-                  {entry.estimated_cost ? `$${formatMoney(entry.estimated_cost)}` : parseMealMeta(entry.notes)?.estimated_cost ? `$${formatMoney(parseMealMeta(entry.notes)?.estimated_cost || 0)}` : "No cost set"}
-                  {entry.vendor || parseMealMeta(entry.notes)?.vendor ? ` · ${entry.vendor || parseMealMeta(entry.notes)?.vendor}` : ""}
+                  {entry.estimated_cost ? `$${formatMoney(entry.estimated_cost)}` : meta.estimated_cost ? `$${formatMoney(meta.estimated_cost || 0)}` : "No cost set"}
+                  {entry.vendor || meta.vendor ? ` · ${entry.vendor || meta.vendor}` : ""}
                 </p>
+
+                <div className="mt-3 grid gap-2 sm:grid-cols-4">
+                  <MacroChip label="Calories" value={meta.calories} unit="cal" />
+                  <MacroChip label="Protein" value={meta.protein_g} unit="g" />
+                  <MacroChip label="Carbs" value={meta.carbs_g} unit="g" />
+                  <MacroChip label="Fat" value={meta.fat_g} unit="g" />
+                </div>
 
                 {entry.notes && (
                   <p className="mt-2 text-sm text-green-300/70">{parseMealNote(entry.notes)}</p>
                 )}
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {meta.completed ? (
+                    <button
+                      onClick={() => reopenMeal(entry)}
+                      className="command-action-button border border-cyan-300/35 px-4 py-2 text-sm text-cyan-100"
+                    >
+                      Reopen
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => markMealCompleted(entry)}
+                      className="command-action-button command-action-green border border-green-400/40 bg-green-400/10 px-4 py-2 text-sm text-green-100"
+                    >
+                      I Ate This
+                    </button>
+                  )}
+                </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </section>
       </div>
@@ -494,6 +680,31 @@ function parseMealNote(notes?: string | null) {
     .join(" ");
 }
 
+function getMealMeta(entry: MealPlanEntry): MealMeta {
+  return parseMealMeta(entry.notes) || {
+    source: entry.meal_source || "recipe",
+    estimated_cost: entry.estimated_cost ?? null,
+    vendor: entry.vendor ?? null,
+    note: entry.notes || null,
+    count_toward_eating_out: (entry.meal_source || "recipe") === "eat_out",
+    calories: null,
+    protein_g: null,
+    carbs_g: null,
+    fat_g: null,
+    completed: false,
+    completed_at: null,
+  };
+}
+
+function MacroChip({ label, value, unit }: { label: string; value?: number | null; unit: string }) {
+  return (
+    <div className="rounded-lg border border-green-500/20 bg-zinc-950 px-3 py-2">
+      <p className="text-[0.65rem] uppercase tracking-[0.16em] text-green-500/65">{label}</p>
+      <p className="mt-1 font-semibold text-green-100">{value || value === 0 ? `${value} ${unit}` : "Not set"}</p>
+    </div>
+  );
+}
+
 function getMealSourceLabel(source?: string) {
   if (source === "recipe") return "Recipe Vault Meal";
   if (source === "leftovers") return "Leftovers";
@@ -505,6 +716,12 @@ function getMealSourceLabel(source?: string) {
 
 function formatMoney(value: number) {
   return value.toFixed(2);
+}
+
+function numberOrNull(value: string) {
+  if (!value.trim()) return null;
+  const parsed = Number(value);
+  return Number.isNaN(parsed) ? null : parsed;
 }
 
 function calculateEstimatedFoodCosts(entries: MealPlanEntry[]) {

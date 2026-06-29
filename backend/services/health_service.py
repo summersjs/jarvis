@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -110,7 +111,8 @@ def _context_snapshot(user_id: str, target_date: date) -> dict:
         or (finance.get("dashboard_cards") or {}).get("food_spend_today")
         or 0
     )
-    completed_meals = int(checkin.get("meals_completed") or 0)
+    completed_meals = completed_meal_count(meals)
+    nutrition_totals = completed_meal_nutrition(meals)
     workout_completed = bool(workout_summary)
     training_notes = None
     if workout_summary:
@@ -123,6 +125,7 @@ def _context_snapshot(user_id: str, target_date: date) -> dict:
         "workout": workout_summary,
         "meals_planned": len(meals),
         "meals_completed": completed_meals,
+        "nutrition_totals": nutrition_totals,
         "meals": meals,
         "food_spend": food_spend,
         "training_notes": training_notes,
@@ -171,7 +174,8 @@ def build_health_dashboard(user_id: str = "john", date_str: str | None = None) -
             "caffeine_mg": checkin.get("caffeine_mg") if checkin else context.get("caffeine_mg"),
             "workout_completed": context.get("workout_completed"),
             "meals_planned": context.get("meals_planned"),
-            "meals_completed": (checkin or {}).get("meals_completed") or context.get("meals_completed"),
+            "meals_completed": context.get("meals_completed"),
+            "nutrition_totals": context.get("nutrition_totals"),
             "current_symptom_count": sum(1 for event in events_today if event.get("event_type") != "custom_event"),
         },
         "event_types": event_cards,
@@ -223,6 +227,11 @@ def upsert_daily_checkin(payload: HealthDailyCheckinUpsert) -> dict:
 
     existing = _daily_checkin(payload.user_id, payload.checkin_date)
     if existing:
+        data = {
+            key: existing.get(key) if value is None else value
+            for key, value in data.items()
+        }
+        data["source_data"] = {**(existing.get("source_data") or {}), **data.get("source_data", {})}
         response = (
             supabase.table("health_daily_checkins")
             .update(data)
@@ -247,6 +256,7 @@ def summarize_health_events(events: list[dict], days: int) -> dict:
         activity = Counter(item.get("activity") for item in items if item.get("activity")).most_common(1)
         trigger = Counter(item.get("trigger") for item in items if item.get("trigger")).most_common(1)
         relief = Counter(item.get("relief") for item in items if item.get("relief")).most_common(1)
+        notes = Counter(item.get("notes") for item in items if item.get("notes")).most_common(3)
         dates = Counter(item.get("event_date") for item in items if item.get("event_date"))
         highest_day = dates.most_common(1)[0] if dates else None
         summaries.append({
@@ -259,6 +269,7 @@ def summarize_health_events(events: list[dict], days: int) -> dict:
             "most_common_trigger": trigger[0][0] if trigger else None,
             "most_common_relief": relief[0][0] if relief else None,
             "most_common_time": most_common_hour(items),
+            "common_observations": [note for note, _count in notes],
         })
 
     return {
@@ -331,3 +342,35 @@ def most_common_hour(events: list[dict]) -> str | None:
     if not hours:
         return None
     return Counter(hours).most_common(1)[0][0]
+
+
+def meal_meta(entry: dict) -> dict:
+    notes = entry.get("notes") or ""
+    if not notes.startswith("JARVIS_META:"):
+        return {}
+    try:
+        return json.loads(notes.replace("JARVIS_META:", "", 1))
+    except json.JSONDecodeError:
+        return {}
+
+
+def completed_meal_count(meals: list[dict]) -> int:
+    return sum(1 for meal in meals if meal_meta(meal).get("completed"))
+
+
+def completed_meal_nutrition(meals: list[dict]) -> dict:
+    totals = {
+        "calories": 0.0,
+        "protein_g": 0.0,
+        "carbs_g": 0.0,
+        "fat_g": 0.0,
+    }
+    for meal in meals:
+        meta = meal_meta(meal)
+        if not meta.get("completed"):
+            continue
+        for key in totals:
+            value = meta.get(key)
+            if value is not None:
+                totals[key] += float(value or 0)
+    return {key: round(value, 1) for key, value in totals.items()}

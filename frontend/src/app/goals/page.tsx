@@ -31,6 +31,8 @@ type GoalLog = {
   id: string;
   value?: number | null;
   notes?: string | null;
+  log_type?: string | null;
+  planned_for?: string | null;
   created_at: string;
 };
 
@@ -45,6 +47,23 @@ type GoalPeriod = {
   hit_goal: boolean;
   missed_goal: boolean;
   is_current: boolean;
+  status?: string;
+  planned_for?: string | null;
+  planned_time?: string | null;
+  remaining?: number | null;
+};
+
+type GoalMilestone = {
+  id: string;
+  title: string;
+  description?: string | null;
+  status: string;
+  target_date?: string | null;
+  completed_at?: string | null;
+  cost?: number | null;
+  notes?: string | null;
+  sort_order?: number | null;
+  created_at: string;
 };
 
 type Goal = {
@@ -57,11 +76,41 @@ type Goal = {
   current_value?: number | null;
   unit?: string | null;
   frequency?: string | null;
+  mission_type?: "objective" | "standard" | "project";
+  status?: string | null;
+  start_date?: string | null;
+  due_date?: string | null;
+  planned_date?: string | null;
+  planned_time?: string | null;
+  metadata?: Record<string, unknown> | null;
   is_active: boolean;
   created_at: string;
   logs?: GoalLog[];
   period?: GoalPeriod;
   period_history?: GoalPeriod[];
+  standard?: {
+    status: string;
+    period_start?: string | null;
+    period_end?: string | null;
+    planned_for?: string | null;
+    planned_time?: string | null;
+    remaining?: number | null;
+    streak_count: number;
+    success_count: number;
+    miss_count: number;
+    success_rate?: number | null;
+  };
+  milestones?: GoalMilestone[];
+  project?: {
+    status: string;
+    completed_count: number;
+    total_count: number;
+    remaining_count: number;
+    percent: number;
+    next_milestone?: GoalMilestone | null;
+    monthly_cadence?: string | null;
+    recent_milestone_log?: GoalLog | null;
+  };
   progress?: {
     percent?: number | null;
     remaining?: number | null;
@@ -75,6 +124,7 @@ type Goal = {
 };
 
 type GoalForm = {
+  mission_type: "objective" | "standard" | "project";
   title: string;
   description: string;
   category: string;
@@ -83,9 +133,15 @@ type GoalForm = {
   current_value: string;
   unit: string;
   frequency: string;
+  due_date: string;
+  planned_date: string;
+  planned_time: string;
+  monthly_cadence: string;
+  milestones: string;
 };
 
 const emptyForm: GoalForm = {
+  mission_type: "objective",
   title: "",
   description: "",
   category: "fitness",
@@ -94,6 +150,11 @@ const emptyForm: GoalForm = {
   current_value: "0",
   unit: "lbs",
   frequency: "",
+  due_date: "",
+  planned_date: "",
+  planned_time: "",
+  monthly_cadence: "",
+  milestones: "",
 };
 
 export default function GoalsPage() {
@@ -111,6 +172,10 @@ function GoalsPageInner() {
   const [form, setForm] = useState<GoalForm>(emptyForm);
   const [logValues, setLogValues] = useState<Record<string, string>>({});
   const [logNotes, setLogNotes] = useState<Record<string, string>>({});
+  const [planDates, setPlanDates] = useState<Record<string, string>>({});
+  const [planTimes, setPlanTimes] = useState<Record<string, string>>({});
+  const [planNotes, setPlanNotes] = useState<Record<string, string>>({});
+  const [milestoneTitles, setMilestoneTitles] = useState<Record<string, string>>({});
   const [historyGoal, setHistoryGoal] = useState<Goal | null>(null);
   const [focusedGoalId, setFocusedGoalId] = useState<string | null>(null);
 
@@ -141,6 +206,15 @@ function GoalsPageInner() {
     }
 
     try {
+      const milestones = form.milestones
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((title, index) => ({
+          title,
+          status: "open",
+          sort_order: index,
+        }));
       const res = await fetch(apiUrl("/goals"), {
         method: "POST",
         headers: {
@@ -153,10 +227,19 @@ function GoalsPageInner() {
           description: form.description.trim() || null,
           category: form.category,
           goal_type: form.goal_type,
+          mission_type: form.mission_type,
+          status: "active",
           target_value: form.target_value ? Number(form.target_value) : null,
           current_value: form.current_value ? Number(form.current_value) : 0,
           unit: form.unit.trim() || null,
           frequency: form.frequency || null,
+          due_date: form.due_date || null,
+          planned_date: form.planned_date || null,
+          planned_time: form.planned_time || null,
+          metadata: form.monthly_cadence
+            ? { monthly_cadence: form.monthly_cadence }
+            : {},
+          milestones,
           is_active: true,
         }),
       });
@@ -206,6 +289,105 @@ function GoalsPageInner() {
       await loadGoals();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to log goal progress.");
+    }
+  }
+
+  async function planGoal(goal: Goal) {
+    setError("");
+    setMessage("");
+
+    const plannedFor = planDates[goal.id];
+    if (!plannedFor) {
+      setError("Choose a planned date first.");
+      return;
+    }
+
+    try {
+      const res = await fetch(apiUrl(`/goals/${goal.id}/plan`), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": API_KEY,
+        },
+        body: JSON.stringify({
+          value: 0,
+          planned_for: plannedFor,
+          notes: planNotes[goal.id]?.trim() || null,
+          metadata: {
+            planned_time: planTimes[goal.id] || null,
+          },
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to plan standard.");
+
+      setMessage("Standard planned.");
+      setPlanDates((prev) => ({ ...prev, [goal.id]: "" }));
+      setPlanTimes((prev) => ({ ...prev, [goal.id]: "" }));
+      setPlanNotes((prev) => ({ ...prev, [goal.id]: "" }));
+      await loadGoals();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to plan standard.");
+    }
+  }
+
+  async function addMilestone(goal: Goal) {
+    setError("");
+    setMessage("");
+
+    const title = milestoneTitles[goal.id]?.trim();
+    if (!title) {
+      setError("Milestone title is required.");
+      return;
+    }
+
+    try {
+      const res = await fetch(apiUrl(`/goals/${goal.id}/milestones`), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": API_KEY,
+        },
+        body: JSON.stringify({
+          title,
+          status: "open",
+          sort_order: goal.milestones?.length || 0,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to add milestone.");
+
+      setMessage("Milestone added.");
+      setMilestoneTitles((prev) => ({ ...prev, [goal.id]: "" }));
+      await loadGoals();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to add milestone.");
+    }
+  }
+
+  async function updateMilestone(milestoneId: string, status: string) {
+    setError("");
+    setMessage("");
+
+    try {
+      const res = await fetch(apiUrl(`/goals/milestones/${milestoneId}`), {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": API_KEY,
+        },
+        body: JSON.stringify({ status }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to update milestone.");
+
+      setMessage("Milestone updated.");
+      await loadGoals();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update milestone.");
     }
   }
 
@@ -283,14 +465,65 @@ function GoalsPageInner() {
 
         <div className="grid gap-6 lg:grid-cols-[0.85fr_1.15fr]">
           <section className="rounded-2xl border border-green-500/30 bg-zinc-950 p-6">
-            <h2 className="mb-4 text-2xl font-semibold">Add Goal</h2>
+            <h2 className="mb-4 text-2xl font-semibold">Add Mission</h2>
 
             <div className="space-y-4">
+              <label className="block">
+                <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-green-500/70">
+                  Mission Type
+                </span>
+                <select
+                  value={form.mission_type}
+                  onChange={(e) =>
+                    setForm((prev) => {
+                      const missionType = e.target.value as GoalForm["mission_type"];
+                      if (missionType === "standard") {
+                        return {
+                          ...prev,
+                          mission_type: missionType,
+                          goal_type: "count",
+                          frequency: prev.frequency || "weekly",
+                          current_value: "0",
+                        };
+                      }
+                      if (missionType === "project") {
+                        return {
+                          ...prev,
+                          mission_type: missionType,
+                          goal_type: "milestone",
+                          target_value: "",
+                          current_value: "0",
+                          unit: "milestone",
+                          frequency: "monthly",
+                        };
+                      }
+                      return {
+                        ...prev,
+                        mission_type: missionType,
+                        goal_type: "metric",
+                        frequency: "",
+                      };
+                    })
+                  }
+                  className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
+                >
+                  <option value="objective">Objective</option>
+                  <option value="standard">Standard</option>
+                  <option value="project">Project</option>
+                </select>
+              </label>
+
               <input
                 value={form.title}
                 onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))}
                 className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
-                placeholder="Bench 315"
+                placeholder={
+                  form.mission_type === "project"
+                    ? "Build the Jarvis Workstation"
+                    : form.mission_type === "standard"
+                      ? "1 Date Weekly"
+                      : "Bench 315"
+                }
               />
 
               <textarea
@@ -310,63 +543,122 @@ function GoalsPageInner() {
                   <option value="fitness">Fitness</option>
                   <option value="career">Career</option>
                   <option value="business">Business</option>
+                  <option value="jarvis">Jarvis</option>
                   <option value="personal">Personal</option>
                   <option value="finance">Finance</option>
                 </select>
 
-                <select
-                  value={form.goal_type}
-                  onChange={(e) => setForm((prev) => ({ ...prev, goal_type: e.target.value }))}
-                  className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
-                >
-                  <option value="metric">Metric</option>
-                  <option value="habit">Habit</option>
-                  <option value="count">Count</option>
-                  <option value="binary">Binary</option>
-                </select>
+                {form.mission_type !== "project" && (
+                  <select
+                    value={form.goal_type}
+                    onChange={(e) => setForm((prev) => ({ ...prev, goal_type: e.target.value }))}
+                    className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
+                  >
+                    <option value="metric">Metric</option>
+                    <option value="habit">Habit</option>
+                    <option value="count">Count</option>
+                    <option value="binary">Binary</option>
+                  </select>
+                )}
               </div>
 
-              <div className="grid gap-4 md:grid-cols-3">
-                <input
-                  type="number"
-                  value={form.current_value}
-                  onChange={(e) => setForm((prev) => ({ ...prev, current_value: e.target.value }))}
-                  className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
-                  placeholder="Current"
-                />
+              {form.mission_type === "objective" && (
+                <>
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <input
+                      type="number"
+                      value={form.current_value}
+                      onChange={(e) => setForm((prev) => ({ ...prev, current_value: e.target.value }))}
+                      className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
+                      placeholder="Current"
+                    />
 
-                <input
-                  type="number"
-                  value={form.target_value}
-                  onChange={(e) => setForm((prev) => ({ ...prev, target_value: e.target.value }))}
-                  className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
-                  placeholder="Target"
-                />
+                    <input
+                      type="number"
+                      value={form.target_value}
+                      onChange={(e) => setForm((prev) => ({ ...prev, target_value: e.target.value }))}
+                      className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
+                      placeholder="Target"
+                    />
 
-                <input
-                  value={form.unit}
-                  onChange={(e) => setForm((prev) => ({ ...prev, unit: e.target.value }))}
-                  className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
-                  placeholder="lbs"
-                />
-              </div>
+                    <input
+                      value={form.unit}
+                      onChange={(e) => setForm((prev) => ({ ...prev, unit: e.target.value }))}
+                      className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
+                      placeholder="lbs"
+                    />
+                  </div>
 
-              <select
-                value={form.frequency}
-                onChange={(e) => setForm((prev) => ({ ...prev, frequency: e.target.value }))}
-                className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
-              >
-                <option value="">No frequency</option>
-                <option value="daily">Daily</option>
-                <option value="weekly">Weekly</option>
-                <option value="monthly">Monthly</option>
-              </select>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <input
+                      type="date"
+                      value={form.due_date}
+                      onChange={(e) => setForm((prev) => ({ ...prev, due_date: e.target.value }))}
+                      className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
+                    />
+                    <FrequencySelect value={form.frequency} onChange={(frequency) => setForm((prev) => ({ ...prev, frequency }))} optional />
+                  </div>
+                </>
+              )}
+
+              {form.mission_type === "standard" && (
+                <>
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <FrequencySelect value={form.frequency} onChange={(frequency) => setForm((prev) => ({ ...prev, frequency }))} />
+                    <input
+                      type="number"
+                      value={form.target_value}
+                      onChange={(e) => setForm((prev) => ({ ...prev, target_value: e.target.value }))}
+                      className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
+                      placeholder="Target per period"
+                    />
+                    <input
+                      value={form.unit}
+                      onChange={(e) => setForm((prev) => ({ ...prev, unit: e.target.value }))}
+                      className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
+                      placeholder="module, feature, date"
+                    />
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <input
+                      type="date"
+                      value={form.planned_date}
+                      onChange={(e) => setForm((prev) => ({ ...prev, planned_date: e.target.value }))}
+                      className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
+                    />
+                    <input
+                      type="time"
+                      value={form.planned_time}
+                      onChange={(e) => setForm((prev) => ({ ...prev, planned_time: e.target.value }))}
+                      className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
+                    />
+                  </div>
+                </>
+              )}
+
+              {form.mission_type === "project" && (
+                <>
+                  <input
+                    value={form.monthly_cadence}
+                    onChange={(e) => setForm((prev) => ({ ...prev, monthly_cadence: e.target.value }))}
+                    className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
+                    placeholder="Buy approximately 1 part or upgrade per month"
+                  />
+                  <textarea
+                    value={form.milestones}
+                    onChange={(e) => setForm((prev) => ({ ...prev, milestones: e.target.value }))}
+                    className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
+                    rows={7}
+                    placeholder={"GPU\nCPU\nMotherboard\nRAM"}
+                  />
+                </>
+              )}
 
               <button
                 onClick={createGoal}
                 className="w-full rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-3 transition hover:bg-green-500/20"
               >
-                Save Goal
+                Save Mission
               </button>
             </div>
           </section>
@@ -388,6 +680,17 @@ function GoalsPageInner() {
                 onLogValueChange={(value) => setLogValues((prev) => ({ ...prev, [goal.id]: value }))}
                 onLogNoteChange={(value) => setLogNotes((prev) => ({ ...prev, [goal.id]: value }))}
                 onLog={() => logGoal(goal)}
+                planDate={planDates[goal.id] || ""}
+                planTime={planTimes[goal.id] || ""}
+                planNote={planNotes[goal.id] || ""}
+                onPlanDateChange={(value) => setPlanDates((prev) => ({ ...prev, [goal.id]: value }))}
+                onPlanTimeChange={(value) => setPlanTimes((prev) => ({ ...prev, [goal.id]: value }))}
+                onPlanNoteChange={(value) => setPlanNotes((prev) => ({ ...prev, [goal.id]: value }))}
+                onPlan={() => planGoal(goal)}
+                milestoneTitle={milestoneTitles[goal.id] || ""}
+                onMilestoneTitleChange={(value) => setMilestoneTitles((prev) => ({ ...prev, [goal.id]: value }))}
+                onAddMilestone={() => addMilestone(goal)}
+                onUpdateMilestone={updateMilestone}
                 onArchive={() => archiveGoal(goal.id)}
                 onOpenHistory={() => setHistoryGoal(goal)}
               />
@@ -502,6 +805,102 @@ function GoalCard({
   onLogValueChange,
   onLogNoteChange,
   onLog,
+  planDate,
+  planTime,
+  planNote,
+  onPlanDateChange,
+  onPlanTimeChange,
+  onPlanNoteChange,
+  onPlan,
+  milestoneTitle,
+  onMilestoneTitleChange,
+  onAddMilestone,
+  onUpdateMilestone,
+  onArchive,
+  onOpenHistory,
+}: {
+  goal: Goal;
+  focused: boolean;
+  logValue: string;
+  logNote: string;
+  onLogValueChange: (value: string) => void;
+  onLogNoteChange: (value: string) => void;
+  onLog: () => void;
+  planDate: string;
+  planTime: string;
+  planNote: string;
+  onPlanDateChange: (value: string) => void;
+  onPlanTimeChange: (value: string) => void;
+  onPlanNoteChange: (value: string) => void;
+  onPlan: () => void;
+  milestoneTitle: string;
+  onMilestoneTitleChange: (value: string) => void;
+  onAddMilestone: () => void;
+  onUpdateMilestone: (milestoneId: string, status: string) => void;
+  onArchive: () => void;
+  onOpenHistory: () => void;
+}) {
+  const missionType = goal.mission_type || (goal.period ? "standard" : "objective");
+  if (missionType === "standard") {
+    return (
+      <StandardCard
+        goal={goal}
+        focused={focused}
+        logValue={logValue}
+        logNote={logNote}
+        onLogValueChange={onLogValueChange}
+        onLogNoteChange={onLogNoteChange}
+        onLog={onLog}
+        planDate={planDate}
+        planTime={planTime}
+        planNote={planNote}
+        onPlanDateChange={onPlanDateChange}
+        onPlanTimeChange={onPlanTimeChange}
+        onPlanNoteChange={onPlanNoteChange}
+        onPlan={onPlan}
+        onArchive={onArchive}
+        onOpenHistory={onOpenHistory}
+      />
+    );
+  }
+
+  if (missionType === "project") {
+    return (
+      <ProjectCard
+        goal={goal}
+        focused={focused}
+        milestoneTitle={milestoneTitle}
+        onMilestoneTitleChange={onMilestoneTitleChange}
+        onAddMilestone={onAddMilestone}
+        onUpdateMilestone={onUpdateMilestone}
+        onArchive={onArchive}
+      />
+    );
+  }
+
+  return (
+    <ObjectiveCard
+      goal={goal}
+      focused={focused}
+      logValue={logValue}
+      logNote={logNote}
+      onLogValueChange={onLogValueChange}
+      onLogNoteChange={onLogNoteChange}
+      onLog={onLog}
+      onArchive={onArchive}
+      onOpenHistory={onOpenHistory}
+    />
+  );
+}
+
+function ObjectiveCard({
+  goal,
+  focused,
+  logValue,
+  logNote,
+  onLogValueChange,
+  onLogNoteChange,
+  onLog,
   onArchive,
   onOpenHistory,
 }: {
@@ -533,7 +932,7 @@ function GoalCard({
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-sm uppercase tracking-wide text-green-500/60">
-            {goal.category} / {goal.goal_type}
+            Objective / {goal.category} / {goal.goal_type}
           </p>
           <h2 className="mt-1 text-2xl font-semibold">{goal.title}</h2>
           {goal.description && (
@@ -643,6 +1042,366 @@ function GoalCard({
       )}
     </article>
   );
+}
+
+function StandardCard({
+  goal,
+  focused,
+  logValue,
+  logNote,
+  onLogValueChange,
+  onLogNoteChange,
+  onLog,
+  planDate,
+  planTime,
+  planNote,
+  onPlanDateChange,
+  onPlanTimeChange,
+  onPlanNoteChange,
+  onPlan,
+  onArchive,
+  onOpenHistory,
+}: {
+  goal: Goal;
+  focused: boolean;
+  logValue: string;
+  logNote: string;
+  onLogValueChange: (value: string) => void;
+  onLogNoteChange: (value: string) => void;
+  onLog: () => void;
+  planDate: string;
+  planTime: string;
+  planNote: string;
+  onPlanDateChange: (value: string) => void;
+  onPlanTimeChange: (value: string) => void;
+  onPlanNoteChange: (value: string) => void;
+  onPlan: () => void;
+  onArchive: () => void;
+  onOpenHistory: () => void;
+}) {
+  const standard = goal.standard;
+  const period = goal.period;
+  const percent = period?.percent ?? goal.progress?.percent ?? 0;
+
+  return (
+    <article
+      id={`goal-${goal.id}`}
+      className={`rounded-2xl border border-cyan-300/35 bg-zinc-950 p-6 shadow-[0_0_24px_rgba(34,211,238,0.12)] transition hover:-translate-y-0.5 hover:shadow-[0_0_34px_rgba(34,211,238,0.22)] ${focused ? "ring-2 ring-cyan-300/60 shadow-[0_0_42px_rgba(34,211,238,0.25)]" : ""}`}
+      onClick={onOpenHistory}
+    >
+      <CardHeader goal={goal} label={`Standard / ${goal.category}`} onArchive={onArchive} />
+
+      <div className="mt-5 grid gap-3 md:grid-cols-3">
+        <MetricPanel label="Current Period" value={period?.label || "Unknown"} />
+        <MetricPanel label="Status" value={standard?.status || "NOT PLANNED"} tone={getStandardTone(standard?.status)} />
+        <MetricPanel
+          label="Remaining"
+          value={`${formatNumber(standard?.remaining)}${goal.unit ? ` ${goal.unit}` : ""}`}
+        />
+      </div>
+
+      <div className="mt-5">
+        <div className="mb-2 flex items-center justify-between gap-3 text-sm text-green-300/75">
+          <span>
+            {formatNumber(period?.value || 0)}{goal.unit ? ` ${goal.unit}` : ""} /{" "}
+            {goal.target_value ? `${formatNumber(goal.target_value)}${goal.unit ? ` ${goal.unit}` : ""}` : "No target"}
+          </span>
+          <span>{percent ?? 0}%</span>
+        </div>
+        <GoalProgressBar goal={goal} />
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <MetricPanel label="Planned" value={formatPlannedDate(standard?.planned_for, standard?.planned_time)} />
+        <MetricPanel label="Streak" value={`${standard?.streak_count ?? 0}`} />
+        <MetricPanel label="Success Rate" value={standard?.success_rate == null ? "Pending" : `${standard.success_rate}%`} />
+      </div>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-[0.8fr_0.6fr_1fr_auto]" onClick={(e) => e.stopPropagation()}>
+        <input
+          type="date"
+          value={planDate}
+          onChange={(e) => onPlanDateChange(e.target.value)}
+          className="rounded-xl border border-cyan-300/30 bg-black px-4 py-3"
+        />
+        <input
+          type="time"
+          value={planTime}
+          onChange={(e) => onPlanTimeChange(e.target.value)}
+          className="rounded-xl border border-cyan-300/30 bg-black px-4 py-3"
+        />
+        <input
+          value={planNote}
+          onChange={(e) => onPlanNoteChange(e.target.value)}
+          className="rounded-xl border border-cyan-300/30 bg-black px-4 py-3"
+          placeholder="Friday date night"
+        />
+        <button
+          onClick={onPlan}
+          className="rounded-xl border border-cyan-300/40 bg-cyan-300/10 px-4 py-3 text-cyan-100 transition hover:bg-cyan-300/20"
+        >
+          Plan
+        </button>
+      </div>
+
+      <LogInputs
+        goal={goal}
+        logValue={logValue}
+        logNote={logNote}
+        onLogValueChange={onLogValueChange}
+        onLogNoteChange={onLogNoteChange}
+        onLog={onLog}
+      />
+      <RecentLogs goal={goal} />
+    </article>
+  );
+}
+
+function ProjectCard({
+  goal,
+  focused,
+  milestoneTitle,
+  onMilestoneTitleChange,
+  onAddMilestone,
+  onUpdateMilestone,
+  onArchive,
+}: {
+  goal: Goal;
+  focused: boolean;
+  milestoneTitle: string;
+  onMilestoneTitleChange: (value: string) => void;
+  onAddMilestone: () => void;
+  onUpdateMilestone: (milestoneId: string, status: string) => void;
+  onArchive: () => void;
+}) {
+  const project = goal.project;
+  const milestones = goal.milestones || [];
+
+  return (
+    <article
+      id={`goal-${goal.id}`}
+      className={`rounded-2xl border border-purple-300/35 bg-zinc-950 p-6 shadow-[0_0_24px_rgba(168,85,247,0.14)] ${focused ? "ring-2 ring-purple-300/60 shadow-[0_0_42px_rgba(168,85,247,0.25)]" : ""}`}
+    >
+      <CardHeader goal={goal} label={`Project / ${goal.category}`} onArchive={onArchive} />
+
+      <div className="mt-5 grid gap-3 md:grid-cols-4">
+        <MetricPanel label="Status" value={project?.status || "NOT STARTED"} tone="purple" />
+        <MetricPanel label="Milestones" value={`${project?.completed_count ?? 0} / ${project?.total_count ?? 0}`} />
+        <MetricPanel label="Remaining" value={`${project?.remaining_count ?? 0}`} />
+        <MetricPanel label="Next" value={project?.next_milestone?.title || "No milestone planned"} />
+      </div>
+
+      <div className="mt-5">
+        <div className="mb-2 flex items-center justify-between gap-3 text-sm text-green-300/75">
+          <span>{project?.monthly_cadence || "Monthly cadence not set"}</span>
+          <span>{project?.percent ?? 0}%</span>
+        </div>
+        <div className="goal-progress-track">
+          <div
+            className="goal-progress-fill goal-progress-fill-green"
+            style={{ width: `${Math.min(100, Math.max(0, project?.percent || 0))}%` }}
+          />
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-2">
+        {milestones.map((milestone) => (
+          <div key={milestone.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-purple-300/20 bg-black px-3 py-2">
+            <div>
+              <p className="font-semibold text-green-100">{milestone.title}</p>
+              <p className="text-xs uppercase tracking-[0.14em] text-purple-200/70">{milestone.status}</p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => onUpdateMilestone(milestone.id, "planned")}
+                className="rounded-lg border border-cyan-300/30 px-3 py-2 text-sm text-cyan-100 hover:bg-cyan-300/10"
+              >
+                Plan
+              </button>
+              <button
+                onClick={() => onUpdateMilestone(milestone.id, "complete")}
+                className="rounded-lg border border-green-400/30 px-3 py-2 text-sm text-green-100 hover:bg-green-400/10"
+              >
+                Complete
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-[1fr_auto]">
+        <input
+          value={milestoneTitle}
+          onChange={(e) => onMilestoneTitleChange(e.target.value)}
+          className="rounded-xl border border-purple-300/30 bg-black px-4 py-3"
+          placeholder="Add workstation milestone"
+        />
+        <button
+          onClick={onAddMilestone}
+          className="rounded-xl border border-purple-300/40 bg-purple-300/10 px-4 py-3 text-purple-100 transition hover:bg-purple-300/20"
+        >
+          Add Milestone
+        </button>
+      </div>
+
+      <RecentLogs goal={goal} />
+    </article>
+  );
+}
+
+function CardHeader({
+  goal,
+  label,
+  onArchive,
+}: {
+  goal: Goal;
+  label: string;
+  onArchive: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <p className="text-sm uppercase tracking-wide text-green-500/60">{label}</p>
+        <h2 className="mt-1 text-2xl font-semibold text-green-100">{goal.title}</h2>
+        {goal.description && (
+          <p className="mt-2 text-green-300/75">{goal.description}</p>
+        )}
+      </div>
+
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onArchive();
+        }}
+        className="rounded-xl border border-red-500/30 px-3 py-2 text-sm text-red-300 transition hover:bg-red-500/10"
+      >
+        Archive
+      </button>
+    </div>
+  );
+}
+
+function MetricPanel({
+  label,
+  value,
+  tone = "green",
+}: {
+  label: string;
+  value: string;
+  tone?: "green" | "cyan" | "purple" | "amber" | "red";
+}) {
+  const toneClass = {
+    green: "border-green-500/20 text-green-300",
+    cyan: "border-cyan-300/25 text-cyan-100",
+    purple: "border-purple-300/25 text-purple-100",
+    amber: "border-amber-300/25 text-amber-100",
+    red: "border-red-400/25 text-red-100",
+  }[tone];
+
+  return (
+    <div className={`rounded-xl border bg-black p-4 ${toneClass}`}>
+      <p className="text-xs uppercase tracking-wide opacity-65">{label}</p>
+      <p className="mt-2 font-semibold">{value}</p>
+    </div>
+  );
+}
+
+function LogInputs({
+  goal,
+  logValue,
+  logNote,
+  onLogValueChange,
+  onLogNoteChange,
+  onLog,
+}: {
+  goal: Goal;
+  logValue: string;
+  logNote: string;
+  onLogValueChange: (value: string) => void;
+  onLogNoteChange: (value: string) => void;
+  onLog: () => void;
+}) {
+  return (
+    <div className="mt-5 grid gap-3 md:grid-cols-[0.45fr_1fr_auto]" onClick={(e) => e.stopPropagation()}>
+      <input
+        type="number"
+        value={logValue}
+        onChange={(e) => onLogValueChange(e.target.value)}
+        className="rounded-xl border border-green-500/30 bg-black px-4 py-3"
+        placeholder={goal.goal_type === "metric" || goal.goal_type === "binary" ? "New value" : "Add amount"}
+      />
+      <input
+        value={logNote}
+        onChange={(e) => onLogNoteChange(e.target.value)}
+        className="rounded-xl border border-green-500/30 bg-black px-4 py-3"
+        placeholder="Progress note"
+      />
+      <button
+        onClick={onLog}
+        className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-3 transition hover:bg-green-500/20"
+      >
+        Log
+      </button>
+    </div>
+  );
+}
+
+function RecentLogs({ goal }: { goal: Goal }) {
+  if (!goal.logs || goal.logs.length === 0) return null;
+
+  return (
+    <div className="mt-5">
+      <p className="mb-2 text-sm uppercase tracking-wide text-green-500/60">Recent Logs</p>
+      <div className="space-y-2">
+        {goal.logs.map((log) => (
+          <div key={log.id} className="rounded-lg border border-green-500/20 bg-black px-3 py-2 text-sm">
+            <span className="font-semibold uppercase tracking-[0.12em] text-green-300">
+              {log.log_type || "progress"}
+            </span>
+            {log.value != null && <span className="text-green-300/75"> · {formatNumber(log.value)}</span>}
+            <span className="text-green-300/60"> · {new Date(log.created_at).toLocaleString()}</span>
+            {log.notes && <span className="text-green-300/75"> · {log.notes}</span>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FrequencySelect({
+  value,
+  onChange,
+  optional = false,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  optional?: boolean;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
+    >
+      {optional && <option value="">No frequency</option>}
+      <option value="daily">Daily</option>
+      <option value="weekly">Weekly</option>
+      <option value="monthly">Monthly</option>
+    </select>
+  );
+}
+
+function formatPlannedDate(dateValue?: string | null, timeValue?: string | null) {
+  if (!dateValue) return "Not planned";
+  return `${new Date(`${dateValue}T12:00:00`).toLocaleDateString()}${timeValue ? ` at ${timeValue}` : ""}`;
+}
+
+function getStandardTone(status?: string | null): "green" | "cyan" | "purple" | "amber" | "red" {
+  if (status === "COMPLETED") return "green";
+  if (status === "PLANNED") return "cyan";
+  if (status === "IN PROGRESS") return "amber";
+  if (status === "MISSED") return "red";
+  return "purple";
 }
 
 function GoalProgressBar({ goal }: { goal: Goal }) {

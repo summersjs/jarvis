@@ -245,7 +245,19 @@ def _goal_group(goal: dict) -> str:
             return "monthly"
         return value
 
+    mission_type = (goal.get("mission_type") or "").lower()
     frequency = _normalized_frequency(goal.get("frequency"))
+    if mission_type == "objective":
+        return "long_term"
+    if mission_type == "project":
+        return "weekly" if frequency in {"weekly", "monthly"} else "long_term"
+    if mission_type == "standard":
+        if frequency == "daily":
+            return "daily"
+        if frequency == "weekly":
+            return "weekly"
+        return "long_term"
+
     if frequency == "daily":
         return "daily"
     if frequency == "weekly":
@@ -291,6 +303,11 @@ def _goal_group(goal: dict) -> str:
 
 
 def _goal_impact_from_logs(goal: dict, logs_today: list[dict], workout_context: dict) -> dict | None:
+    progress_logs_today = [
+        log
+        for log in logs_today
+        if (log.get("log_type") or "progress").lower() not in {"planned", "note"}
+    ]
     if not logs_today:
         if workout_context.get("workout_completed") and _goal_group(goal) == "daily":
             return {
@@ -317,7 +334,7 @@ def _goal_impact_from_logs(goal: dict, logs_today: list[dict], workout_context: 
 
     current = float(goal.get("current_value") or 0)
     target = float(goal.get("target_value") or 0)
-    total_value = sum(float(log.get("value") or 1) for log in logs_today)
+    total_value = sum(float(log.get("value") or 1) for log in progress_logs_today)
     tracked_current = max(current, total_value)
     completed = bool(goal.get("progress", {}).get("is_complete")) or (target > 0 and tracked_current >= target)
     latest_note = next((log.get("notes") for log in logs_today if log.get("notes")), None)
@@ -335,6 +352,31 @@ def _goal_impact_from_logs(goal: dict, logs_today: list[dict], workout_context: 
 
     if workout_context.get("workout_completed") and (lift_match or strength_match or group == "daily"):
         completed = True
+
+    if not progress_logs_today and logs_today:
+        state = "Planned"
+        completed = False
+        detail = latest_note or "Planned for a future mission window."
+        return {
+            "id": goal.get("id"),
+            "title": goal.get("title", "Untitled goal"),
+            "goal_group": group,
+            "completed": completed,
+            "achievement_tier": "planned",
+            "achievement_label": "Planned",
+            "bonus_points": 0,
+            "over_target_amount": 0,
+            "notes": latest_note or goal.get("description") or "Planned.",
+            "blocker": None,
+            "current_value": tracked_current,
+            "target_value": target,
+            "unit": goal.get("unit"),
+            "category": goal.get("category"),
+            "progress_percent": goal.get("progress", {}).get("percent"),
+            "state": state,
+            "detail": detail,
+            "logs_today": logs_today,
+        }
 
     if above_and_beyond:
         state = "Above and Beyond"
@@ -427,13 +469,29 @@ def _daily_goal_score(goal_impacts: list[dict], daily_goals: list[dict]) -> floa
     if not daily_goals:
         return 1.0 if goal_impacts else 0.85
 
-    completed = sum(1 for goal in daily_goals if goal.get("completed"))
-    progressed = len(goal_impacts)
+    today = datetime.now(LOCAL_TZ).date().isoformat()
+    actionable_daily_goals = [
+        goal
+        for goal in daily_goals
+        if (goal.get("mission_type") or "").lower() != "standard"
+        or (goal.get("standard") or {}).get("status") in {"IN PROGRESS", "COMPLETED", "MISSED"}
+        or _is_same_local_date((goal.get("standard") or {}).get("planned_for"), today)
+    ]
+    if not actionable_daily_goals:
+        return 1.0
+
+    completed = sum(
+        1
+        for goal in actionable_daily_goals
+        if (goal.get("standard") or {}).get("status") == "COMPLETED"
+        or goal.get("progress", {}).get("is_complete")
+    )
+    progressed = len([impact for impact in goal_impacts if impact.get("goal_group") == "daily"])
     if progressed == 0:
         return 0.4
 
-    completed_ratio = completed / len(daily_goals)
-    progressed_ratio = min(1.0, progressed / len(daily_goals))
+    completed_ratio = completed / len(actionable_daily_goals)
+    progressed_ratio = min(1.0, progressed / len(actionable_daily_goals))
     return round(min(1.0, 0.35 + (completed_ratio * 0.45) + (progressed_ratio * 0.2)), 2)
 
 
@@ -454,6 +512,26 @@ def _weekly_goal_score(goals: list[dict], today_date: date) -> float:
     pressure = _day_progress_weight(today_date)
     scores = []
     for goal in weekly_goals:
+        if (goal.get("mission_type") or "").lower() == "standard":
+            standard = goal.get("standard") or {}
+            status = standard.get("status")
+            if status == "COMPLETED":
+                scores.append(1.0)
+                continue
+            if status == "PLANNED":
+                scores.append(max(0.75, 0.95 - pressure * 0.15))
+                continue
+            if status == "MISSED":
+                scores.append(0.25)
+                continue
+
+        if (goal.get("mission_type") or "").lower() == "project":
+            project = goal.get("project") or {}
+            completed = float(project.get("completed_count") or 0)
+            total = float(project.get("total_count") or 0)
+            scores.append(0.85 if total <= 0 else max(0.5, min(1.0, completed / total + 0.35)))
+            continue
+
         progress = goal.get("progress") or {}
         target = float(goal.get("target_value") or 0)
         current = float(goal.get("current_value") or 0)
@@ -656,7 +734,8 @@ def _goals_as_objectives(user_id: str) -> list[dict]:
 def _goal_objective_note(goal: dict, current: float, target: float) -> str:
     title = (goal.get("title") or "").lower()
     unit = goal.get("unit") or ""
-    eta_summary = goal.get("eta", {}).get("summary")
+    eta = goal.get("eta") or {}
+    eta_summary = eta.get("summary")
 
     if target > 0 and "feature" in title:
         return f"{int(current)} Jarvis features shipped toward {int(target)} this week."
@@ -673,7 +752,8 @@ def _goal_blocker(goal: dict, current: float, target: float) -> str:
         unit = goal.get("unit") or "units"
         return f"{format_number(remaining)} {unit} remaining to hit the target."
 
-    return goal.get("eta", {}).get("summary") or "No blocker recorded."
+    eta = goal.get("eta") or {}
+    return eta.get("summary") or "No blocker recorded."
 
 
 def _today_meals(user_id: str, date_str: str) -> list[dict]:

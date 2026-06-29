@@ -3,7 +3,14 @@ from math import ceil
 
 from backend.core.config import LOCAL_TZ
 from backend.db.supabase_client import supabase
-from backend.schemas.goal import GoalCreate, GoalLogCreate, GoalLogUpdate, GoalUpdate
+from backend.schemas.goal import (
+    GoalCreate,
+    GoalLogCreate,
+    GoalLogUpdate,
+    GoalMilestoneCreate,
+    GoalMilestoneUpdate,
+    GoalUpdate,
+)
 
 
 STRENGTH_UNITS = {"lb", "lbs", "pound", "pounds"}
@@ -16,9 +23,14 @@ LIFT_GOAL_KEYWORDS = {
 }
 PERIODIC_GOAL_TYPES = {"habit", "count", "binary"}
 PERIODIC_FREQUENCIES = {"daily", "weekly"}
+MISSION_TYPES = {"objective", "standard", "project"}
+PROJECT_MILESTONE_COMPLETE_STATUSES = {"complete", "purchased"}
+STANDARD_ACTION_LOG_TYPES = {"progress", "completed", "milestone"}
+STANDARD_PLAN_LOG_TYPES = {"planned"}
 
 
 def create_goal(payload: GoalCreate):
+    mission_type = normalize_mission_type(payload.mission_type, payload.goal_type, payload.frequency)
     insert_data = {
         "user_id": payload.user_id,
         "title": payload.title,
@@ -30,13 +42,25 @@ def create_goal(payload: GoalCreate):
         "unit": payload.unit,
         "frequency": payload.frequency,
         "is_active": payload.is_active,
+        "mission_type": mission_type,
+        "status": payload.status,
+        "start_date": payload.start_date,
+        "due_date": payload.due_date,
+        "planned_date": payload.planned_date,
+        "planned_time": payload.planned_time,
+        "metadata": payload.metadata or {},
     }
 
     response = supabase.table("goals").insert(insert_data).execute()
     if not response.data:
         raise Exception("Failed to create goal.")
 
-    return get_goal(response.data[0]["id"])
+    goal_id = response.data[0]["id"]
+    if mission_type == "project":
+        for index, milestone in enumerate(payload.milestones or []):
+            create_goal_milestone(goal_id, milestone, index)
+
+    return get_goal(goal_id)
 
 
 def list_goals(user_id: str, active_only: bool = True):
@@ -119,6 +143,9 @@ def create_goal_log(goal_id: str, payload: GoalLogCreate):
             "goal_id": goal_id,
             "value": value,
             "notes": payload.notes,
+            "log_type": payload.log_type,
+            "planned_for": payload.planned_for,
+            "metadata": payload.metadata or {},
         })
         .execute()
     )
@@ -130,15 +157,29 @@ def create_goal_log(goal_id: str, payload: GoalLogCreate):
     current_value = float(goal.get("current_value") or 0)
     goal_type = (goal.get("goal_type") or "").lower()
 
-    if is_periodic_goal(goal):
+    mission_type = normalize_goal_mission_type(goal)
+
+    if mission_type == "standard":
         period_start, period_end = get_current_period_bounds(goal)
         next_value = sum_log_values_for_period(logs, period_start, period_end)
+        update_fields = {"current_value": next_value}
+        if payload.log_type == "planned":
+            update_fields["status"] = "planned"
+            update_fields["planned_date"] = payload.planned_for
+        elif float(goal.get("target_value") or 0) > 0 and next_value >= float(goal.get("target_value") or 0):
+            update_fields["status"] = "complete"
+        else:
+            update_fields["status"] = "active"
+        supabase.table("goals").update(update_fields).eq("id", goal_id).execute()
     elif goal_type in {"count", "habit"}:
         next_value = current_value + float(value or 0)
+        supabase.table("goals").update({"current_value": next_value}).eq("id", goal_id).execute()
     else:
         next_value = float(value or 0)
-
-    supabase.table("goals").update({"current_value": next_value}).eq("id", goal_id).execute()
+        update_fields = {"current_value": next_value}
+        if goal.get("target_value") and next_value >= float(goal.get("target_value") or 0):
+            update_fields["status"] = "complete"
+        supabase.table("goals").update(update_fields).eq("id", goal_id).execute()
 
     return {
         "log": response.data[0],
@@ -154,6 +195,48 @@ def update_goal_log(log_id: str, payload: GoalLogUpdate):
 
 def delete_goal_log(log_id: str):
     response = supabase.table("goal_logs").delete().eq("id", log_id).execute()
+    return response.data or []
+
+
+def list_goal_milestones(goal_id: str):
+    try:
+        response = (
+            supabase
+            .table("goal_milestones")
+            .select("*")
+            .eq("goal_id", goal_id)
+            .order("sort_order", desc=False)
+            .order("created_at", desc=False)
+            .execute()
+        )
+        return response.data or []
+    except Exception:
+        return []
+
+
+def create_goal_milestone(goal_id: str, payload: GoalMilestoneCreate, index: int | None = None):
+    insert_data = payload.model_dump(exclude_unset=True)
+    insert_data["goal_id"] = goal_id
+    if index is not None and "sort_order" not in insert_data:
+        insert_data["sort_order"] = index
+
+    response = supabase.table("goal_milestones").insert(insert_data).execute()
+    if not response.data:
+        raise Exception("Failed to create milestone.")
+    return response.data[0]
+
+
+def update_goal_milestone(milestone_id: str, payload: GoalMilestoneUpdate):
+    update_data = payload.model_dump(exclude_unset=True)
+    if update_data.get("status") in PROJECT_MILESTONE_COMPLETE_STATUSES and not update_data.get("completed_at"):
+        update_data["completed_at"] = datetime.now(LOCAL_TZ).isoformat()
+
+    response = supabase.table("goal_milestones").update(update_data).eq("id", milestone_id).execute()
+    return response.data[0] if response.data else None
+
+
+def delete_goal_milestone(milestone_id: str):
+    response = supabase.table("goal_milestones").delete().eq("id", milestone_id).execute()
     return response.data or []
 
 
@@ -190,6 +273,7 @@ def auto_update_strength_goals(user_id: str, lift: str, estimated_1rm: float, so
             "goal_id": goal["id"],
             "value": estimated_1rm,
             "notes": source_note,
+            "log_type": "progress",
         }).execute()
 
         supabase.table("goals").update({
@@ -217,24 +301,42 @@ def is_matching_strength_goal(goal: dict, lift: str) -> bool:
 def enrich_goal(goal: dict):
     logs = list_goal_logs(goal["id"])
     enriched = dict(goal)
+    enriched["mission_type"] = normalize_goal_mission_type(goal)
+    enriched["status"] = goal.get("status") or ("active" if goal.get("is_active", True) else "archived")
+    enriched["metadata"] = goal.get("metadata") or {}
 
-    if is_periodic_goal(goal):
+    if enriched["mission_type"] == "standard":
         period_start, period_end = get_current_period_bounds(goal)
         period_value = sum_log_values_for_period(logs, period_start, period_end)
         enriched["current_value"] = period_value
-        enriched["period"] = build_period_snapshot(goal, period_start, period_end, period_value, True)
+        enriched["period"] = build_period_snapshot(goal, logs, period_start, period_end, period_value, True)
         enriched["period_history"] = build_period_history(goal, logs)
+        enriched["standard"] = build_standard_snapshot(enriched, logs)
+
+    if enriched["mission_type"] == "project":
+        milestones = list_goal_milestones(goal["id"])
+        enriched["milestones"] = milestones
+        enriched["project"] = build_project_snapshot(enriched, milestones, logs)
 
     enriched["logs"] = logs[:5]
     enriched["progress"] = calculate_progress(enriched)
-    if is_periodic_goal(goal):
-        enriched["eta"] = calculate_periodic_eta(enriched)
-    else:
+    if enriched["mission_type"] == "objective":
         enriched["eta"] = calculate_eta(enriched, logs)
+    else:
+        enriched["eta"] = None
     return enriched
 
 
 def calculate_progress(goal: dict) -> dict:
+    if normalize_goal_mission_type(goal) == "project":
+        project = goal.get("project") or {}
+        percent = project.get("percent") or 0
+        return {
+            "percent": percent,
+            "remaining": project.get("remaining_count"),
+            "is_complete": project.get("total_count", 0) > 0 and project.get("completed_count") == project.get("total_count"),
+        }
+
     target = goal.get("target_value")
     current = float(goal.get("current_value") or 0)
 
@@ -396,6 +498,23 @@ def is_periodic_goal(goal: dict) -> bool:
     return goal_type in PERIODIC_GOAL_TYPES and frequency in PERIODIC_FREQUENCIES
 
 
+def normalize_mission_type(mission_type: str | None, goal_type: str | None, frequency: str | None) -> str:
+    normalized = (mission_type or "").lower()
+    if normalized in MISSION_TYPES:
+        return normalized
+    if (goal_type or "").lower() in PERIODIC_GOAL_TYPES and (frequency or "").lower() in PERIODIC_FREQUENCIES:
+        return "standard"
+    return "objective"
+
+
+def normalize_goal_mission_type(goal: dict) -> str:
+    title = (goal.get("title") or "").lower()
+    mission_type = normalize_mission_type(goal.get("mission_type"), goal.get("goal_type"), goal.get("frequency"))
+    if "jarvis workstation" in title:
+        return "project"
+    return mission_type
+
+
 def get_current_period_bounds(goal: dict):
     today = datetime.now(LOCAL_TZ).date()
     return get_period_bounds_for_date(goal, today)
@@ -420,6 +539,9 @@ def get_period_bounds_for_date(goal: dict, anchor_date: date):
 def sum_log_values_for_period(logs: list[dict], period_start: datetime, period_end: datetime) -> float:
     total = 0.0
     for log in logs:
+        log_type = (log.get("log_type") or "progress").lower()
+        if log_type not in STANDARD_ACTION_LOG_TYPES:
+            continue
         created_at = parse_datetime(log.get("created_at"))
         if created_at and period_start <= created_at < period_end:
             total += float(log.get("value") if log.get("value") is not None else 1)
@@ -427,7 +549,7 @@ def sum_log_values_for_period(logs: list[dict], period_start: datetime, period_e
 
 
 def build_period_history(goal: dict, logs: list[dict], periods: int = 8):
-    if not is_periodic_goal(goal):
+    if normalize_goal_mission_type(goal) != "standard":
         return []
 
     frequency = (goal.get("frequency") or "").lower()
@@ -439,13 +561,14 @@ def build_period_history(goal: dict, logs: list[dict], periods: int = 8):
         anchor_date = today - timedelta(days=index * step_days)
         period_start, period_end = get_period_bounds_for_date(goal, anchor_date)
         value = sum_log_values_for_period(logs, period_start, period_end)
-        history.append(build_period_snapshot(goal, period_start, period_end, value, index == 0))
+        history.append(build_period_snapshot(goal, logs, period_start, period_end, value, index == 0))
 
     return history
 
 
 def build_period_snapshot(
     goal: dict,
+    logs: list[dict],
     period_start: datetime,
     period_end: datetime,
     value: float,
@@ -455,6 +578,20 @@ def build_period_snapshot(
     percent = round(min(100, max(0, (value / target) * 100)), 1) if target > 0 else None
     hit_goal = target > 0 and value >= target
     inclusive_end = (period_end - timedelta(days=1)).date()
+    planned_log = latest_planned_log_for_period(logs, period_start, period_end)
+    planned_for = planned_log.get("planned_for") if planned_log else goal.get("planned_date")
+    today = datetime.now(LOCAL_TZ)
+    period_closed = today >= period_end
+    if hit_goal:
+        period_status = "COMPLETED"
+    elif value > 0:
+        period_status = "IN PROGRESS"
+    elif planned_for and is_current:
+        period_status = "PLANNED"
+    elif not is_current and period_closed:
+        period_status = "MISSED"
+    else:
+        period_status = "NOT PLANNED"
 
     return {
         "frequency": (goal.get("frequency") or "").lower(),
@@ -467,6 +604,84 @@ def build_period_snapshot(
         "hit_goal": hit_goal,
         "missed_goal": (not is_current) and target > 0 and not hit_goal,
         "is_current": is_current,
+        "status": period_status,
+        "planned_for": planned_for,
+        "planned_time": goal.get("planned_time"),
+        "remaining": max(0, round(target - value, 2)) if target > 0 else None,
+    }
+
+
+def latest_planned_log_for_period(logs: list[dict], period_start: datetime, period_end: datetime):
+    planned_logs = []
+    for log in logs:
+        if (log.get("log_type") or "").lower() not in STANDARD_PLAN_LOG_TYPES:
+            continue
+        planned_for = parse_date(log.get("planned_for"))
+        if planned_for and period_start.date() <= planned_for < period_end.date():
+            planned_logs.append(log)
+    return sorted(planned_logs, key=lambda row: row.get("created_at") or "", reverse=True)[0] if planned_logs else None
+
+
+def build_standard_snapshot(goal: dict, logs: list[dict]) -> dict:
+    period = goal.get("period") or {}
+    history = goal.get("period_history") or []
+    completed_periods = [item for item in history if not item.get("is_current")]
+    success_count = sum(1 for item in completed_periods if item.get("hit_goal"))
+    miss_count = sum(1 for item in completed_periods if item.get("missed_goal"))
+    streak = 0
+    for item in completed_periods:
+        if item.get("hit_goal"):
+            streak += 1
+        else:
+            break
+    total = success_count + miss_count
+    success_rate = round((success_count / total) * 100, 1) if total else None
+
+    return {
+        "status": period.get("status") or "NOT PLANNED",
+        "period_start": period.get("period_start"),
+        "period_end": period.get("period_end"),
+        "planned_for": period.get("planned_for") or goal.get("planned_date"),
+        "planned_time": goal.get("planned_time"),
+        "remaining": period.get("remaining"),
+        "streak_count": int(goal.get("streak_count") or streak),
+        "success_count": int(goal.get("success_count") or success_count),
+        "miss_count": int(goal.get("miss_count") or miss_count),
+        "success_rate": success_rate,
+    }
+
+
+def build_project_snapshot(goal: dict, milestones: list[dict], logs: list[dict]) -> dict:
+    total = len(milestones)
+    completed = [
+        milestone
+        for milestone in milestones
+        if (milestone.get("status") or "").lower() in PROJECT_MILESTONE_COMPLETE_STATUSES
+    ]
+    remaining = [
+        milestone
+        for milestone in milestones
+        if (milestone.get("status") or "").lower() not in PROJECT_MILESTONE_COMPLETE_STATUSES
+    ]
+    next_milestone = next(
+        (
+            milestone
+            for milestone in remaining
+            if (milestone.get("status") or "").lower() == "planned"
+        ),
+        remaining[0] if remaining else None,
+    )
+    status = "COMPLETE" if total > 0 and len(completed) == total else (goal.get("status") or "active").upper()
+
+    return {
+        "status": status,
+        "completed_count": len(completed),
+        "total_count": total,
+        "remaining_count": len(remaining),
+        "percent": round((len(completed) / total) * 100, 1) if total else 0,
+        "next_milestone": next_milestone,
+        "monthly_cadence": (goal.get("metadata") or {}).get("monthly_cadence") or "Buy approximately 1 part or upgrade per month.",
+        "recent_milestone_log": next((log for log in logs if (log.get("log_type") or "").lower() == "milestone"), None),
     }
 
 
@@ -484,3 +699,9 @@ def parse_datetime(value: str | None):
     if not value:
         return None
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(LOCAL_TZ)
+
+
+def parse_date(value: str | None):
+    if not value:
+        return None
+    return date.fromisoformat(value[:10])

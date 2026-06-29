@@ -1,18 +1,28 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 from backend.core.security import verify_api_key
-from backend.schemas.goal import GoalCreate, GoalLogCreate, GoalLogUpdate, GoalUpdate
+from backend.schemas.goal import (
+    GoalCreate,
+    GoalLogCreate,
+    GoalLogUpdate,
+    GoalMilestoneCreate,
+    GoalMilestoneUpdate,
+    GoalUpdate,
+)
 from backend.services.goal_service import (
     create_goal,
     create_goal_log,
+    create_goal_milestone,
     delete_goal,
     delete_goal_log,
+    delete_goal_milestone,
     get_goal,
     get_goal_period_history,
     list_goal_logs,
     list_goals,
     update_goal,
     update_goal_log,
+    update_goal_milestone,
 )
 
 router = APIRouter(
@@ -134,6 +144,49 @@ def create_goal_log_route(goal_id: str, payload: GoalLogCreate):
     return {
         "status": "ok",
         **result,
+    }
+
+
+@router.post("/{goal_id}/plan")
+def plan_standard_route(goal_id: str, payload: GoalLogCreate):
+    planned_payload = payload.model_copy(update={"log_type": "planned", "value": 0})
+    result = create_goal_log(goal_id, planned_payload)
+    if not result:
+        raise HTTPException(status_code=404, detail="Goal not found.")
+    return {
+        "status": "ok",
+        **result,
+    }
+
+
+@router.post("/{goal_id}/milestones")
+def create_goal_milestone_route(goal_id: str, payload: GoalMilestoneCreate):
+    goal = get_goal(goal_id)
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found.")
+    return {
+        "status": "ok",
+        "milestone": create_goal_milestone(goal_id, payload),
+        "goal": get_goal(goal_id),
+    }
+
+
+@router.patch("/milestones/{milestone_id}")
+def update_goal_milestone_route(milestone_id: str, payload: GoalMilestoneUpdate):
+    milestone = update_goal_milestone(milestone_id, payload)
+    if not milestone:
+        raise HTTPException(status_code=404, detail="Goal milestone not found.")
+    return {
+        "status": "ok",
+        "milestone": milestone,
+    }
+
+
+@router.delete("/milestones/{milestone_id}")
+def delete_goal_milestone_route(milestone_id: str):
+    return {
+        "status": "ok",
+        "deleted": delete_goal_milestone(milestone_id),
     }
 
 

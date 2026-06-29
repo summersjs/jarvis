@@ -369,8 +369,9 @@ def completed_meal_nutrition(meals: list[dict]) -> dict:
         meta = meal_meta(meal)
         if not meta.get("completed"):
             continue
+        servings = float(meta.get("servings") or 1)
         for key in totals:
             value = meta.get(key)
             if value is not None:
-                totals[key] += float(value or 0)
+                totals[key] += float(value or 0) * servings
     return {key: round(value, 1) for key, value in totals.items()}

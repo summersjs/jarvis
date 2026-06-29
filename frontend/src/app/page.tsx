@@ -589,6 +589,10 @@ export default function CommandCenterPage() {
             <Utensils className="h-4 w-4" />
             <span>Meal Planner</span>
           </Link>
+          <Link className="command-nav-link tactical-nav-link" href="/food-vault">
+            <DatabaseZap className="h-4 w-4" />
+            <span>Food Vault</span>
+          </Link>
           <Link className="command-nav-link tactical-nav-link" href="/shopping">
             <ShoppingCart className="h-4 w-4" />
             <span>Shopping</span>

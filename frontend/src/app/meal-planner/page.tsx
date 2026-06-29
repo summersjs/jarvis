@@ -32,6 +32,32 @@ type MealPlanEntry = {
   } | null;
 };
 
+type FoodVaultItem = {
+  id: string;
+  name: string;
+  brand?: string | null;
+  serving_size?: string | null;
+  calories?: number | null;
+  protein_g?: number | null;
+  carbs_g?: number | null;
+  fat_g?: number | null;
+  package_quantity?: number | null;
+  current_quantity?: number | null;
+  low_stock_threshold?: number | null;
+  estimated_price?: number | null;
+  default_store?: string | null;
+  shopping_category?: string | null;
+  notes?: string | null;
+  is_favorite?: boolean;
+};
+
+type NutritionTargets = {
+  daily_calorie_target?: number | null;
+  daily_protein_target?: number | null;
+  daily_carb_target?: number | null;
+  daily_fat_target?: number | null;
+};
+
 type FinanceSummary = {
   weekly_food_budget: {
     monthly_grocery_budget: number;
@@ -64,12 +90,17 @@ type MealMeta = {
   fat_g?: number | null;
   completed?: boolean;
   completed_at?: string | null;
+  food_vault_item_id?: string | null;
+  servings?: number | null;
+  save_to_food_vault?: boolean;
 };
 
 export default function MealPlannerPage() {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [foodItems, setFoodItems] = useState<FoodVaultItem[]>([]);
   const [entries, setEntries] = useState<MealPlanEntry[]>([]);
   const [financeSummary, setFinanceSummary] = useState<FinanceSummary | null>(null);
+  const [nutritionTargets, setNutritionTargets] = useState<NutritionTargets | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
@@ -85,6 +116,9 @@ export default function MealPlannerPage() {
   const [protein, setProtein] = useState("");
   const [carbs, setCarbs] = useState("");
   const [fat, setFat] = useState("");
+  const [foodVaultItemId, setFoodVaultItemId] = useState("");
+  const [servings, setServings] = useState("1");
+  const [saveToFoodVault, setSaveToFoodVault] = useState(false);
 
   function getWeekRange() {
     const today = new Date();
@@ -117,6 +151,23 @@ export default function MealPlannerPage() {
       setRecipes(data.recipes || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load recipes.");
+    }
+  }, []);
+
+  const loadFoodVault = useCallback(async () => {
+    try {
+      const [itemsRes, targetsRes] = await Promise.all([
+        fetch(`${API_BASE}/food-vault/items?user_id=john`, { headers: { "x-api-key": API_KEY } }),
+        fetch(`${API_BASE}/food-vault/nutrition-targets?user_id=john`, { headers: { "x-api-key": API_KEY } }),
+      ]);
+      const itemsData = await itemsRes.json();
+      const targetsData = await targetsRes.json();
+      if (!itemsRes.ok) throw new Error(itemsData.detail || "Failed to load Food Vault.");
+      if (!targetsRes.ok) throw new Error(targetsData.detail || "Failed to load nutrition targets.");
+      setFoodItems(itemsData.items || []);
+      setNutritionTargets(targetsData.targets || null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load Food Vault.");
     }
   }, []);
 
@@ -172,12 +223,19 @@ export default function MealPlannerPage() {
       setError("Choose a recipe or enter a custom meal name.");
       return;
     }
+    if (mealSource === "food_vault" && !foodVaultItemId) {
+      setError("Choose a Food Vault item.");
+      return;
+    }
 
     try {
+      const selectedFood = foodItems.find((item) => item.id === foodVaultItemId);
       const mealName =
         customMealName.trim() ||
+        (selectedFood ? foodDisplayName(selectedFood) : "") ||
         recipes.find((recipe) => recipe.id === recipeId)?.title ||
         getMealSourceLabel(mealSource);
+      const servingCount = numberOrNull(servings) || 1;
       const meta: MealMeta = {
         source: mealSource,
         estimated_cost: estimatedCost ? Number(estimatedCost) : null,
@@ -190,7 +248,14 @@ export default function MealPlannerPage() {
         fat_g: numberOrNull(fat),
         completed: false,
         completed_at: null,
+        food_vault_item_id: selectedFood?.id || null,
+        servings: servingCount,
+        save_to_food_vault: saveToFoodVault,
       };
+
+      if (saveToFoodVault && mealSource === "custom" && customMealName.trim()) {
+        await createFoodVaultFromCustom(mealName);
+      }
 
       const res = await fetch(`${API_BASE}/meal-planner`, {
         method: "POST",
@@ -224,8 +289,12 @@ export default function MealPlannerPage() {
       setProtein("");
       setCarbs("");
       setFat("");
+      setFoodVaultItemId("");
+      setServings("1");
+      setSaveToFoodVault(false);
 
       await loadWeekPlan();
+      await loadFoodVault();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create entry.");
     }
@@ -236,6 +305,9 @@ export default function MealPlannerPage() {
     setMessage("");
     const meta = getMealMeta(entry);
     try {
+      if (meta.source === "food_vault" && meta.food_vault_item_id && !meta.completed) {
+        await consumeFoodVaultItem(meta.food_vault_item_id, meta.servings || 1);
+      }
       const res = await fetch(`${API_BASE}/meal-planner/${entry.id}`, {
         method: "PATCH",
         headers: {
@@ -254,6 +326,7 @@ export default function MealPlannerPage() {
       if (!res.ok) throw new Error(data.detail || "Failed to mark meal completed.");
       setMessage("Meal marked eaten. Health Ops will pick this up automatically.");
       await loadWeekPlan();
+      await loadFoodVault();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to mark meal completed.");
     }
@@ -301,16 +374,65 @@ export default function MealPlannerPage() {
     setNotes("Quick logged food. Macro estimates are editable.");
   }
 
+  async function consumeFoodVaultItem(itemId: string, quantity: number) {
+    const res = await fetch(`${API_BASE}/food-vault/items/${itemId}/consume`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+      body: JSON.stringify({ quantity }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Failed to update Food Vault inventory.");
+  }
+
+  async function createFoodVaultFromCustom(mealName: string) {
+    const res = await fetch(`${API_BASE}/food-vault/items`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+      body: JSON.stringify({
+        user_id: "john",
+        name: mealName,
+        serving_size: "1 serving",
+        calories: numberOrNull(calories),
+        protein_g: numberOrNull(protein),
+        carbs_g: numberOrNull(carbs),
+        fat_g: numberOrNull(fat),
+        package_quantity: 1,
+        current_quantity: 0,
+        low_stock_threshold: 0,
+        estimated_price: numberOrNull(estimatedCost),
+        shopping_category: "Food Vault",
+        notes: notes.trim() || null,
+        is_favorite: false,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Failed to save custom food to Food Vault.");
+  }
+
+  function selectFoodVaultItem(itemId: string) {
+    setFoodVaultItemId(itemId);
+    const item = foodItems.find((food) => food.id === itemId);
+    if (!item) return;
+    setCustomMealName(foodDisplayName(item));
+    setEstimatedCost(item.estimated_price ? String(item.estimated_price) : "");
+    setCalories(item.calories ? String(item.calories) : "");
+    setProtein(item.protein_g ? String(item.protein_g) : "");
+    setCarbs(item.carbs_g ? String(item.carbs_g) : "");
+    setFat(item.fat_g ? String(item.fat_g) : "");
+  }
+
   useEffect(() => {
     loadRecipes();
+    loadFoodVault();
     loadWeekPlan();
     loadFinanceSummary();
-  }, [loadFinanceSummary, loadRecipes, loadWeekPlan]);
+  }, [loadFinanceSummary, loadFoodVault, loadRecipes, loadWeekPlan]);
 
   const estimatedCosts = calculateEstimatedFoodCosts(entries);
   const weeklyTarget = financeSummary?.weekly_food_budget.weekly_total_food_target || 0;
   const estimatedTotal = estimatedCosts.groceries + estimatedCosts.eatingOut;
   const estimatedOverUnder = weeklyTarget - estimatedTotal;
+  const todayNutrition = calculateTodayNutrition(entries);
 
   return (
     <main className="min-h-screen bg-black text-green-400 px-6 py-10">
@@ -324,6 +446,9 @@ export default function MealPlannerPage() {
           </div>
 
           <div className="flex gap-3">
+            <Link href="/food-vault" className="command-nav-link">
+              Food Vault
+            </Link>
             <Link
               href="/recipes"
               className="command-nav-link"
@@ -374,6 +499,13 @@ export default function MealPlannerPage() {
             label="Over / under"
             value={`$${formatMoney(estimatedOverUnder)}`}
           />
+        </section>
+
+        <section className="mb-8 grid gap-4 md:grid-cols-4">
+          <SummaryCard icon={Utensils} label="Calories today" value={`${todayNutrition.calories} / ${targetValue(nutritionTargets?.daily_calorie_target)}`} />
+          <SummaryCard icon={Utensils} label="Protein today" value={`${todayNutrition.protein_g}g / ${targetValue(nutritionTargets?.daily_protein_target, "g")}`} />
+          <SummaryCard icon={Utensils} label="Carbs today" value={`${todayNutrition.carbs_g}g / ${targetValue(nutritionTargets?.daily_carb_target, "g")}`} />
+          <SummaryCard icon={Utensils} label="Fat today" value={`${todayNutrition.fat_g}g / ${targetValue(nutritionTargets?.daily_fat_target, "g")}`} />
         </section>
 
         {error && (
@@ -435,10 +567,12 @@ export default function MealPlannerPage() {
                 className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
               >
                 <option value="recipe">Recipe Vault Meal</option>
+                <option value="food_vault">Food Vault Item</option>
                 <option value="leftovers">Leftovers</option>
                 <option value="eat_out">Eat Out</option>
                 <option value="skip">Skip</option>
                 <option value="event_family_meal">Event / Family Meal</option>
+                <option value="custom">Custom Meal</option>
               </select>
             </div>
 
@@ -459,6 +593,36 @@ export default function MealPlannerPage() {
               </select>
             </div>
 
+            {mealSource === "food_vault" && (
+              <>
+                <div>
+                  <label className="mb-2 block text-sm text-green-300/80">Food Vault Item</label>
+                  <select
+                    value={foodVaultItemId}
+                    onChange={(e) => selectFoodVaultItem(e.target.value)}
+                    className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
+                  >
+                    <option value="">-- Choose Food --</option>
+                    {foodItems.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {foodDisplayName(item)} ({item.current_quantity ?? 0} left)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm text-green-300/80">Servings / Quantity Eaten</label>
+                  <input
+                    type="number"
+                    step="0.25"
+                    value={servings}
+                    onChange={(e) => setServings(e.target.value)}
+                    className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
+                  />
+                </div>
+              </>
+            )}
+
             <div>
               <label className="mb-2 block text-sm text-green-300/80">Custom Meal Name</label>
               <input
@@ -468,6 +632,17 @@ export default function MealPlannerPage() {
                 placeholder="Optional if not using a recipe"
               />
             </div>
+
+            {mealSource === "custom" && (
+              <button
+                onClick={() => setSaveToFoodVault((prev) => !prev)}
+                className={`command-action-button rounded-xl border px-4 py-3 text-left ${
+                  saveToFoodVault ? "border-green-300/60 bg-green-400/15 text-green-100" : "border-green-500/30 text-green-300"
+                }`}
+              >
+                Save to Food Vault: {saveToFoodVault ? "Yes" : "No"}
+              </button>
+            )}
 
             <div>
               <label className="mb-2 block text-sm text-green-300/80">Estimated Cost</label>
@@ -599,10 +774,10 @@ export default function MealPlannerPage() {
                 </p>
 
                 <div className="mt-3 grid gap-2 sm:grid-cols-4">
-                  <MacroChip label="Calories" value={meta.calories} unit="cal" />
-                  <MacroChip label="Protein" value={meta.protein_g} unit="g" />
-                  <MacroChip label="Carbs" value={meta.carbs_g} unit="g" />
-                  <MacroChip label="Fat" value={meta.fat_g} unit="g" />
+                  <MacroChip label="Calories" value={macroTotal(meta.calories, meta.servings)} unit="cal" />
+                  <MacroChip label="Protein" value={macroTotal(meta.protein_g, meta.servings)} unit="g" />
+                  <MacroChip label="Carbs" value={macroTotal(meta.carbs_g, meta.servings)} unit="g" />
+                  <MacroChip label="Fat" value={macroTotal(meta.fat_g, meta.servings)} unit="g" />
                 </div>
 
                 {entry.notes && (
@@ -693,6 +868,9 @@ function getMealMeta(entry: MealPlanEntry): MealMeta {
     fat_g: null,
     completed: false,
     completed_at: null,
+    food_vault_item_id: null,
+    servings: 1,
+    save_to_food_vault: false,
   };
 }
 
@@ -707,10 +885,12 @@ function MacroChip({ label, value, unit }: { label: string; value?: number | nul
 
 function getMealSourceLabel(source?: string) {
   if (source === "recipe") return "Recipe Vault Meal";
+  if (source === "food_vault") return "Food Vault Item";
   if (source === "leftovers") return "Leftovers";
   if (source === "eat_out") return "Eat Out";
   if (source === "skip") return "Skip";
   if (source === "event_family_meal") return "Event / Family Meal";
+  if (source === "custom") return "Custom Meal";
   return "Recipe Vault Meal";
 }
 
@@ -722,6 +902,36 @@ function numberOrNull(value: string) {
   if (!value.trim()) return null;
   const parsed = Number(value);
   return Number.isNaN(parsed) ? null : parsed;
+}
+
+function foodDisplayName(item: FoodVaultItem) {
+  return [item.brand, item.name].filter(Boolean).join(" ");
+}
+
+function macroTotal(value?: number | null, servings?: number | null) {
+  if (value == null) return null;
+  return Math.round(value * (servings || 1) * 10) / 10;
+}
+
+function calculateTodayNutrition(entries: MealPlanEntry[]) {
+  const today = new Date().toISOString().split("T")[0];
+  return entries.reduce(
+    (totals, entry) => {
+      const meta = getMealMeta(entry);
+      if (!meta.completed || entry.meal_date !== today) return totals;
+      const servingCount = meta.servings || 1;
+      totals.calories += Number(meta.calories || 0) * servingCount;
+      totals.protein_g += Number(meta.protein_g || 0) * servingCount;
+      totals.carbs_g += Number(meta.carbs_g || 0) * servingCount;
+      totals.fat_g += Number(meta.fat_g || 0) * servingCount;
+      return totals;
+    },
+    { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 }
+  );
+}
+
+function targetValue(value?: number | null, unit = "") {
+  return value || value === 0 ? `${value}${unit}` : "Not set";
 }
 
 function calculateEstimatedFoodCosts(entries: MealPlanEntry[]) {
@@ -738,7 +948,7 @@ function calculateEstimatedFoodCosts(entries: MealPlanEntry[]) {
       const source = meta.source || entry.meal_source || "recipe";
       if (source === "eat_out") {
         totals.eatingOut += cost;
-      } else if (source === "recipe" || source === "leftovers" || source === "event_family_meal") {
+      } else if (source === "recipe" || source === "leftovers" || source === "event_family_meal" || source === "food_vault" || source === "custom") {
         totals.groceries += cost;
       }
       return totals;

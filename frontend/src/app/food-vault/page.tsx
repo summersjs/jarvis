@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { Package, Plus, Target, Utensils } from "lucide-react";
+import { Package, Plus, Target, Utensils, X } from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 const API_KEY = process.env.NEXT_PUBLIC_JARVIS_API_KEY || "";
@@ -56,6 +56,7 @@ export default function FoodVaultPage() {
   const [items, setItems] = useState<FoodItem[]>([]);
   const [targets, setTargets] = useState<NutritionTargets | null>(null);
   const [form, setForm] = useState(emptyItem);
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [targetForm, setTargetForm] = useState({
     daily_calorie_target: "",
     daily_protein_target: "",
@@ -94,7 +95,7 @@ export default function FoodVaultPage() {
     loadData();
   }, [loadData]);
 
-  async function createItem() {
+  async function saveItem() {
     setError("");
     setMessage("");
     if (!form.name.trim()) {
@@ -102,35 +103,83 @@ export default function FoodVaultPage() {
       return;
     }
     try {
-      const res = await fetch(`${API_BASE}/food-vault/items`, {
-        method: "POST",
+      const payload = {
+        user_id: USER_ID,
+        name: form.name.trim(),
+        brand: form.brand.trim() || null,
+        serving_size: form.serving_size.trim() || null,
+        calories: numberOrNull(form.calories),
+        protein_g: numberOrNull(form.protein_g),
+        carbs_g: numberOrNull(form.carbs_g),
+        fat_g: numberOrNull(form.fat_g),
+        package_quantity: numberOrNull(form.package_quantity) ?? 1,
+        current_quantity: numberOrNull(form.current_quantity) ?? 0,
+        low_stock_threshold: numberOrNull(form.low_stock_threshold) ?? 0,
+        estimated_price: numberOrNull(form.estimated_price),
+        default_store: form.default_store.trim() || null,
+        shopping_category: form.shopping_category.trim() || null,
+        notes: form.notes.trim() || null,
+        is_favorite: form.is_favorite,
+      };
+      const res = await fetch(editingItemId ? `${API_BASE}/food-vault/items/${editingItemId}` : `${API_BASE}/food-vault/items`, {
+        method: editingItemId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-        body: JSON.stringify({
-          user_id: USER_ID,
-          name: form.name.trim(),
-          brand: form.brand.trim() || null,
-          serving_size: form.serving_size.trim() || null,
-          calories: numberOrNull(form.calories),
-          protein_g: numberOrNull(form.protein_g),
-          carbs_g: numberOrNull(form.carbs_g),
-          fat_g: numberOrNull(form.fat_g),
-          package_quantity: numberOrNull(form.package_quantity) ?? 1,
-          current_quantity: numberOrNull(form.current_quantity) ?? 0,
-          low_stock_threshold: numberOrNull(form.low_stock_threshold) ?? 0,
-          estimated_price: numberOrNull(form.estimated_price),
-          default_store: form.default_store.trim() || null,
-          shopping_category: form.shopping_category.trim() || null,
-          notes: form.notes.trim() || null,
-          is_favorite: form.is_favorite,
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Failed to create food item.");
+      if (!res.ok) throw new Error(data.detail || "Failed to save food item.");
       setForm(emptyItem);
-      setMessage("Food Vault item saved.");
+      setEditingItemId(null);
+      setMessage(editingItemId ? "Food Vault item updated." : "Food Vault item saved.");
       await loadData();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create food item.");
+      setError(err instanceof Error ? err.message : "Failed to save food item.");
+    }
+  }
+
+  function editItem(item: FoodItem) {
+    setEditingItemId(item.id);
+    setForm({
+      name: item.name || "",
+      brand: item.brand || "",
+      serving_size: item.serving_size || "",
+      calories: valueString(item.calories),
+      protein_g: valueString(item.protein_g),
+      carbs_g: valueString(item.carbs_g),
+      fat_g: valueString(item.fat_g),
+      package_quantity: valueString(item.package_quantity ?? 1),
+      current_quantity: valueString(item.current_quantity ?? 0),
+      low_stock_threshold: valueString(item.low_stock_threshold ?? 0),
+      estimated_price: valueString(item.estimated_price),
+      default_store: item.default_store || "",
+      shopping_category: item.shopping_category || "",
+      notes: item.notes || "",
+      is_favorite: Boolean(item.is_favorite),
+    });
+    setMessage("Food item loaded for editing.");
+  }
+
+  async function deleteItem(item: FoodItem) {
+    setError("");
+    setMessage("");
+    if (!window.confirm(`Delete ${[item.brand, item.name].filter(Boolean).join(" ")} from Food Vault?`)) {
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/food-vault/items/${item.id}`, {
+        method: "DELETE",
+        headers: { "x-api-key": API_KEY },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to delete food item.");
+      if (editingItemId === item.id) {
+        setEditingItemId(null);
+        setForm(emptyItem);
+      }
+      setMessage("Food Vault item deleted.");
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete food item.");
     }
   }
 
@@ -201,7 +250,7 @@ export default function FoodVaultPage() {
         <section className="mb-6 rounded-2xl border border-green-500/30 bg-zinc-950 p-5">
           <div className="mb-4 flex items-center gap-3">
             <Plus className="h-5 w-5 text-green-300" />
-            <h2 className="text-sm font-bold uppercase tracking-[0.22em] text-green-200">Add Food Item</h2>
+            <h2 className="text-sm font-bold uppercase tracking-[0.22em] text-green-200">{editingItemId ? "Edit Food Item" : "Add Food Item"}</h2>
           </div>
           <div className="grid gap-3 md:grid-cols-4">
             {Object.entries({
@@ -223,7 +272,19 @@ export default function FoodVaultPage() {
               <Input key={key} label={label} value={String(form[key as keyof typeof form])} onChange={(value) => setForm((prev) => ({ ...prev, [key]: value }))} />
             ))}
             <button onClick={() => setForm((prev) => ({ ...prev, is_favorite: !prev.is_favorite }))} className={`command-action-button border px-4 py-3 ${form.is_favorite ? "border-green-300/60 bg-green-400/15 text-green-100" : "border-green-500/25 text-green-300"}`}>Favorite: {form.is_favorite ? "Yes" : "No"}</button>
-            <button onClick={createItem} className="command-action-button command-action-green border border-green-400/40 bg-green-400/10 px-4 py-3 text-green-100">Save Food</button>
+            <button onClick={saveItem} className="command-action-button command-action-green border border-green-400/40 bg-green-400/10 px-4 py-3 text-green-100">{editingItemId ? "Update Food" : "Save Food"}</button>
+            {editingItemId && (
+              <button
+                onClick={() => {
+                  setEditingItemId(null);
+                  setForm(emptyItem);
+                  setMessage("");
+                }}
+                className="command-action-button border border-cyan-300/35 px-4 py-3 text-cyan-100"
+              >
+                Cancel Edit
+              </button>
+            )}
           </div>
         </section>
 
@@ -234,15 +295,48 @@ export default function FoodVaultPage() {
           </div>
           <div className="grid gap-3 lg:grid-cols-2">
             {items.map((item) => (
-              <div key={item.id} className={`rounded-xl border bg-black p-4 ${Number(item.current_quantity || 0) <= Number(item.low_stock_threshold || 0) ? "border-amber-300/45" : "border-green-500/20"}`}>
+              <div
+                key={item.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => editItem(item)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    editItem(item);
+                  }
+                }}
+                className={`rounded-xl border bg-black p-4 text-left transition hover:border-green-300/50 hover:shadow-[0_0_22px_rgba(34,197,94,0.18)] ${Number(item.current_quantity || 0) <= Number(item.low_stock_threshold || 0) ? "border-amber-300/45" : "border-green-500/20"}`}
+              >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <p className="font-semibold text-green-100">{[item.brand, item.name].filter(Boolean).join(" ")}</p>
                     <p className="mt-1 text-sm text-green-300/65">{item.serving_size || "Serving not set"}</p>
                   </div>
-                  <span className="rounded-full border border-green-400/30 px-3 py-1 text-xs uppercase tracking-[0.14em]">
-                    {item.current_quantity ?? 0} left
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-full border border-green-400/30 px-3 py-1 text-xs uppercase tracking-[0.14em]">
+                      {item.current_quantity ?? 0} left
+                    </span>
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        deleteItem(item);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          deleteItem(item);
+                        }
+                      }}
+                      className="command-action-button border border-red-400/30 bg-red-500/10 p-2 text-red-200"
+                      aria-label={`Delete ${item.name}`}
+                    >
+                      <X className="h-4 w-4" />
+                    </span>
+                  </div>
                 </div>
                 <div className="mt-3 grid gap-2 sm:grid-cols-4">
                   <Mini label="Cal" value={item.calories} />

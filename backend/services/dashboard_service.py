@@ -1,4 +1,5 @@
 import re
+import json
 from datetime import datetime, timedelta
 
 from backend.core.config import LOCAL_TZ
@@ -23,6 +24,25 @@ def _meal_name(entry: dict) -> str:
     return recipe.get("title") or entry.get("custom_meal_name") or "Unnamed meal"
 
 
+def _meal_meta(entry: dict) -> dict:
+    notes = entry.get("notes") or ""
+    if not notes.startswith("JARVIS_META:"):
+        return {}
+    try:
+        return json.loads(notes.replace("JARVIS_META:", "", 1))
+    except json.JSONDecodeError:
+        return {}
+
+
+def _clean_meal_note(entry: dict) -> str | None:
+    meta = _meal_meta(entry)
+    if meta:
+        return meta.get("note") or None
+
+    notes = entry.get("notes")
+    return None if notes and notes.startswith("JARVIS_META:") else notes
+
+
 def _get_today_meals(user_id: str, today: str) -> list[dict]:
     entries = list_meal_plan_entries(user_id=user_id, start_date=today, end_date=today)
     return [
@@ -31,7 +51,8 @@ def _get_today_meals(user_id: str, today: str) -> list[dict]:
             "meal_date": entry.get("meal_date"),
             "meal_type": entry.get("meal_type"),
             "name": _meal_name(entry),
-            "notes": entry.get("notes"),
+            "notes": _clean_meal_note(entry),
+            "meta": _meal_meta(entry),
         }
         for entry in entries
     ]

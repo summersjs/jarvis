@@ -133,6 +133,23 @@ type DailyDebriefSummary = {
     meals_completed: number;
     ate_out_today: boolean;
     estimated_food_spend: number;
+    nutrition_totals?: {
+      calories?: number | null;
+      protein_g?: number | null;
+      carbs_g?: number | null;
+      fat_g?: number | null;
+    };
+    meals?: Array<{
+      id?: string;
+      meal_type?: string;
+      name?: string;
+      completed?: boolean;
+      calories?: number;
+      protein_g?: number;
+      carbs_g?: number;
+      fat_g?: number;
+      estimated_cost?: number;
+    }>;
     notes?: string | null;
   };
   finance?: {
@@ -247,6 +264,12 @@ type DebriefHistoryEntry = {
     win: string;
     category: string;
   };
+  lessons?: {
+    adjust_tomorrow?: string | null;
+  };
+  training?: {
+    training_notes?: string | null;
+  };
   objectives?: Objective[];
 };
 
@@ -359,7 +382,7 @@ export default function DailyDebriefPage() {
   const loadedRef = useRef(false);
   const autosaveTimerRef = useRef<number | null>(null);
   const lastSavedSignatureRef = useRef("");
-  const isLocked = !!summary?.saved_entry?.is_finalized;
+  const isLocked = false;
 
   const loadData = useCallback(async () => {
     try {
@@ -396,11 +419,6 @@ export default function DailyDebriefPage() {
       const quiet = !!options?.quiet;
       const payload = toPayload(form, summary, finalize);
       const signature = JSON.stringify(payload);
-
-      if (!finalize && summary?.saved_entry?.is_finalized) {
-        setSaveState("saved");
-        return;
-      }
 
       if (!finalize && signature === lastSavedSignatureRef.current) {
         setSaveState("saved");
@@ -454,7 +472,7 @@ export default function DailyDebriefPage() {
     }
 
     try {
-      await saveEntry({ finalize: true, quiet: true });
+      await saveEntry({ finalize: false, quiet: true });
       await loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save debrief.");
@@ -816,12 +834,8 @@ export default function DailyDebriefPage() {
                   <input
                     type="number"
                     value={form.nutrition.meals_completed}
-                    onChange={(e) =>
-                      setForm((prev) => ({
-                        ...prev,
-                        nutrition: { ...prev.nutrition, meals_completed: e.target.value },
-                      }))
-                    }
+                    onChange={() => undefined}
+                    readOnly
                     className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
                   />
                 </Field>
@@ -842,6 +856,33 @@ export default function DailyDebriefPage() {
                   />
                 </Field>
                 <div className="md:col-span-2">
+                  <div className="mb-4 grid gap-3 md:grid-cols-4">
+                    <SummaryChip label="Calories" value={`${summary?.nutrition?.nutrition_totals?.calories ?? 0}`} />
+                    <SummaryChip label="Protein" value={`${summary?.nutrition?.nutrition_totals?.protein_g ?? 0}g`} />
+                    <SummaryChip label="Carbs" value={`${summary?.nutrition?.nutrition_totals?.carbs_g ?? 0}g`} />
+                    <SummaryChip label="Fat" value={`${summary?.nutrition?.nutrition_totals?.fat_g ?? 0}g`} />
+                  </div>
+                  <div className="mb-4 rounded-xl border border-green-500/20 bg-black p-4">
+                    <p className="text-xs uppercase tracking-[0.18em] text-green-500/70">Meals Today</p>
+                    <div className="mt-3 space-y-2">
+                      {(summary?.nutrition?.meals || []).length === 0 && (
+                        <p className="text-sm text-green-300/60">No meal planner entries for today.</p>
+                      )}
+                      {(summary?.nutrition?.meals || []).map((meal) => (
+                        <div key={meal.id || `${meal.meal_type}-${meal.name}`} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-green-500/15 bg-zinc-950 px-3 py-2">
+                          <div>
+                            <p className="font-semibold text-green-100">{meal.name || "Unnamed meal"}</p>
+                            <p className="text-xs uppercase tracking-[0.14em] text-green-300/55">
+                              {meal.meal_type || "meal"} · {meal.calories || 0} cal · {meal.protein_g || 0}g protein · {meal.carbs_g || 0}g carbs · {meal.fat_g || 0}g fat
+                            </p>
+                          </div>
+                          <span className={`rounded-full border px-3 py-1 text-xs uppercase tracking-[0.14em] ${meal.completed ? "border-green-300/45 bg-green-400/10 text-green-100" : "border-cyan-300/30 text-cyan-100"}`}>
+                            {meal.completed ? "Eaten" : "Planned"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                   <Field label="Notes">
                     <textarea
                       value={form.nutrition.notes}
@@ -1135,13 +1176,13 @@ export default function DailyDebriefPage() {
               <button
                 onClick={completeDebrief}
                 disabled={isFinalizing || isLocked}
-                className="rounded-xl border border-cyan-300/40 bg-cyan-400/10 px-4 py-4 text-sm font-semibold uppercase tracking-[0.18em] text-cyan-100 transition hover:bg-cyan-400/20 disabled:opacity-50"
+                className="command-action-button command-action-cyan rounded-xl border border-cyan-300/40 bg-cyan-400/10 px-4 py-4 text-sm font-semibold uppercase tracking-[0.18em] text-cyan-100 disabled:opacity-50"
               >
-                {isLocked ? "Mission Logged" : isFinalizing ? "Logging Mission..." : "Complete Daily Debrief"}
+                {isFinalizing ? "Updating Mission..." : summary?.saved_entry?.is_finalized ? "Update Mission Log" : "Mission Logged"}
               </button>
             </div>
 
-            <Panel title="Recent Entries" icon={ClipboardList}>
+            <Panel title="Journal Snapshot" icon={ClipboardList}>
               <div className="space-y-3">
                 {history.length === 0 && (
                   <p className="text-sm text-green-300/60">No saved debriefs yet.</p>
@@ -1156,6 +1197,11 @@ export default function DailyDebriefPage() {
                     <p className="mt-2 text-sm text-green-300/80">
                       {entry.victory?.win || entry.summary || "No summary provided."}
                     </p>
+                    <div className="mt-3 grid gap-2 text-xs text-green-300/65 md:grid-cols-3">
+                      <p>Victory: {entry.victory?.win || "None"}</p>
+                      <p>Lessons: {(entry as DebriefHistoryEntry & { lessons?: { adjust_tomorrow?: string } }).lessons?.adjust_tomorrow || "None"}</p>
+                      <p>Training: {(entry as DebriefHistoryEntry & { training?: { training_notes?: string } }).training?.training_notes || "None"}</p>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1207,15 +1253,15 @@ function fromSummary(summary: DailyDebriefSummary): DebriefForm {
       training_notes: saved.training?.training_notes || summary.training?.training_notes || "",
     },
     nutrition: {
-      meals_planned_today: toInputValue(saved.nutrition?.meals_planned_today ?? summary.nutrition?.meals_planned_today ?? ""),
-      meals_completed: toInputValue(saved.nutrition?.meals_completed ?? summary.nutrition?.meals_completed ?? ""),
-      ate_out_today: saved.nutrition?.ate_out_today ?? summary.nutrition?.ate_out_today ?? false,
-      estimated_food_spend: toInputValue(saved.nutrition?.estimated_food_spend ?? summary.nutrition?.estimated_food_spend ?? summary.food_spend_today ?? ""),
+      meals_planned_today: toInputValue(summary.nutrition?.meals_planned_today ?? saved.nutrition?.meals_planned_today ?? ""),
+      meals_completed: toInputValue(summary.nutrition?.meals_completed ?? saved.nutrition?.meals_completed ?? ""),
+      ate_out_today: summary.nutrition?.ate_out_today ?? saved.nutrition?.ate_out_today ?? false,
+      estimated_food_spend: toInputValue(summary.nutrition?.estimated_food_spend ?? summary.food_spend_today ?? saved.nutrition?.estimated_food_spend ?? ""),
       notes: saved.nutrition?.notes || summary.nutrition?.notes || "",
     },
     finance: {
-      money_spent_today: toInputValue(saved.finance?.money_spent_today ?? summary.finance?.money_spent_today ?? summary.food_spend_today ?? ""),
-      category: saved.finance?.category || summary.finance?.category || "Food",
+      money_spent_today: toInputValue(summary.finance?.money_spent_today ?? summary.food_spend_today ?? saved.finance?.money_spent_today ?? ""),
+      category: summary.finance?.category || saved.finance?.category || "Food",
       notes: saved.finance?.notes || summary.finance?.notes || "",
       unexpected_expense: saved.finance?.unexpected_expense ?? summary.finance?.unexpected_expense ?? false,
       spending_status: saved.finance?.spending_status || summary.daily_spending_status || "WATCH",

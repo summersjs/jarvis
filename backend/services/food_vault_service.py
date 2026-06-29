@@ -43,6 +43,11 @@ def update_food_vault_item(item_id: str, payload: FoodVaultItemUpdate) -> dict |
     return response.data[0] if response.data else None
 
 
+def delete_food_vault_item(item_id: str) -> dict | None:
+    response = supabase.table("food_vault_items").delete().eq("id", item_id).execute()
+    return response.data[0] if response.data else None
+
+
 def consume_food_vault_item(item_id: str, payload: FoodVaultConsume) -> dict:
     item = get_food_vault_item(item_id)
     if not item:

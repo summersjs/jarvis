@@ -18,6 +18,7 @@ import {
   ShieldCheck,
   Smile,
   Utensils,
+  X,
   Zap,
   type LucideIcon,
 } from "lucide-react";
@@ -169,6 +170,9 @@ const TRIGGER_OPTIONS = [
 const RELIEF_OPTIONS = ["Music", "Movement", "Deep Breaths", "Standing Up", "Walking", "Talking", "Time", "Nothing", "Other"];
 const DURATION_OPTIONS = ["<30 seconds", "30 sec-2 min", "2-10 min", "10-30 min", "30+ min", "Unknown"];
 const SEVERITY_OPTIONS = ["Mild", "Moderate", "Severe"];
+const SUPPLEMENT_CAFFEINE_MG: Record<string, number> = {
+  C4: 150,
+};
 
 type DetailField = keyof DetailForm;
 
@@ -275,6 +279,36 @@ const DETAIL_CONFIG: Record<string, DetailConfig> = {
       { field: "duration", label: "Duration", options: DURATION_OPTIONS },
     ],
   },
+  custom_event: {
+    title: "Custom Event Context",
+    prompt: "Classify this event so it is clearly real and useful later.",
+    presets: [
+      {
+        label: "Mistake / Accidental Tap",
+        values: { notes: "Mistake / accidental tap" },
+      },
+      {
+        label: "Unusual Sensation",
+        values: { notes: "Custom category: unusual sensation" },
+      },
+      {
+        label: "Behavior / Routine Note",
+        values: { notes: "Custom category: behavior or routine note" },
+      },
+    ],
+    sections: [
+      {
+        field: "notes",
+        label: "Event Type",
+        prefix: "Custom event",
+        options: ["Unusual sensation", "Behavior or routine note", "Food reaction", "Sleep related", "Workout related", "Medication/supplement note", "Possible mistake"],
+      },
+      { field: "activity", label: "Activity", options: ACTIVITY_OPTIONS },
+      { field: "trigger", label: "Context", options: TRIGGER_OPTIONS },
+      { field: "severity", label: "Severity", options: SEVERITY_OPTIONS },
+      { field: "duration", label: "Duration", options: DURATION_OPTIONS },
+    ],
+  },
 };
 
 const CAFFEINE_BUTTONS = [
@@ -290,6 +324,7 @@ const CAFFEINE_BUTTONS = [
   ["Red Bull 20 oz", 189],
   ["Monster", 160],
   ["Celsius", 200],
+  ["C4 Powder", 150],
 ] as const;
 
 const EVENT_ICONS: Record<string, LucideIcon> = {
@@ -414,6 +449,26 @@ export default function HealthOpsPage() {
     }
   }
 
+  async function deleteEvent(event: HealthEvent) {
+    setError("");
+    setMessage("");
+    if (!window.confirm(`Delete ${labelForEvent(event.event_type, dashboard?.event_types || [])} from ${formatTime(event.occurred_at)}?`)) {
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/health-ops/events/${event.id}`, {
+        method: "DELETE",
+        headers: { "x-api-key": API_KEY },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to delete health event.");
+      setMessage("Health event deleted.");
+      await loadDashboard();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete health event.");
+    }
+  }
+
   function applyDetailPreset(values: Partial<DetailForm>) {
     setDetailForm((prev) => ({ ...prev, ...values }));
   }
@@ -470,7 +525,7 @@ export default function HealthOpsPage() {
       <div className="mx-auto max-w-7xl">
         <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <div>
-            <p className="text-sm uppercase tracking-[0.3em] text-green-500/70">Jarvis Medical Observation Log</p>
+            <p className="section-label">Jarvis Medical Observation Log</p>
             <h1 className="mt-2 text-4xl font-bold">Health Ops</h1>
             <p className="mt-3 max-w-3xl text-green-300/80">
               Factual health observations, timestamps, frequencies, and trends. No diagnosis. No causation claims.
@@ -486,24 +541,26 @@ export default function HealthOpsPage() {
 
         {error && <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-red-300">{error}</div>}
         {message && <div className="mb-6 rounded-xl border border-green-500/30 bg-green-500/10 p-4 text-green-200">{message}</div>}
-        {loading && <div className="rounded-2xl border border-green-500/25 bg-zinc-950 p-6">Loading Health Ops...</div>}
+        {loading && <div className="hud-panel">Loading Health Ops...</div>}
 
         {!loading && dashboard && (
           <div className="grid gap-6">
             <section className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
               <HudPanel title="Today's Health Snapshot" icon={ShieldCheck}>
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  <SnapshotMetric icon={Zap} label="Energy" value={scoreValue(dashboard.snapshot.energy)} />
-                  <SnapshotMetric icon={Smile} label="Mood" value={scoreValue(dashboard.snapshot.mood)} />
-                  <SnapshotMetric icon={Activity} label="Stress" value={scoreValue(dashboard.snapshot.stress)} />
-                  <SnapshotMetric icon={Moon} label="Sleep" value={sleepValue(dashboard.snapshot)} />
-                  <SnapshotMetric icon={Droplets} label="Water" value={unitValue(dashboard.snapshot.water_oz, "oz")} />
-                  <SnapshotMetric icon={Coffee} label="Caffeine" value={unitValue(dashboard.snapshot.caffeine_mg, "mg")} />
-                  <SnapshotMetric icon={Dumbbell} label="Workout Completed" value={dashboard.snapshot.workout_completed ? "Yes" : "No"} />
-                  <SnapshotMetric icon={Utensils} label="Meals" value={`${dashboard.snapshot.meals_completed || 0}/${dashboard.snapshot.meals_planned || 0}`} />
-                  <SnapshotMetric icon={HeartPulse} label="Current Symptom Count" value={String(dashboard.snapshot.current_symptom_count || 0)} />
-                  <SnapshotMetric icon={Utensils} label="Protein" value={nutritionValue(dashboard.snapshot.nutrition_totals, "protein_g", "g")} />
-                  <SnapshotMetric icon={Activity} label="Calories" value={nutritionValue(dashboard.snapshot.nutrition_totals, "calories", "cal")} />
+                  <SnapshotMetric icon={Zap} label="Energy" value={scoreValue(dashboard.snapshot.energy)} tone="cyan" />
+                  <SnapshotMetric icon={Smile} label="Mood" value={scoreValue(dashboard.snapshot.mood)} tone="green" />
+                  <SnapshotMetric icon={Activity} label="Stress" value={scoreValue(dashboard.snapshot.stress)} tone={stressTone(dashboard.snapshot.stress)} />
+                  <SnapshotMetric icon={Moon} label="Sleep" value={sleepValue(dashboard.snapshot)} tone="purple" />
+                  <SnapshotMetric icon={Droplets} label="Water" value={unitValue(dashboard.snapshot.water_oz, "oz")} tone="cyan" />
+                  <SnapshotMetric icon={Coffee} label="Caffeine" value={unitValue(dashboard.snapshot.caffeine_mg, "mg")} tone={caffeineTone(dashboard.snapshot.caffeine_mg)} />
+                  <SnapshotMetric icon={Dumbbell} label="Workout Completed" value={dashboard.snapshot.workout_completed ? "Yes" : "No"} tone={dashboard.snapshot.workout_completed ? "green" : "amber"} />
+                  <SnapshotMetric icon={Utensils} label="Meals" value={`${dashboard.snapshot.meals_completed || 0}/${dashboard.snapshot.meals_planned || 0}`} tone="green" />
+                  <SnapshotMetric icon={HeartPulse} label="Current Symptom Count" value={String(dashboard.snapshot.current_symptom_count || 0)} tone={Number(dashboard.snapshot.current_symptom_count || 0) > 0 ? "red" : "green"} />
+                  <SnapshotMetric icon={Utensils} label="Protein" value={nutritionValue(dashboard.snapshot.nutrition_totals, "protein_g", "g")} tone="green" />
+                  <SnapshotMetric icon={Activity} label="Calories" value={nutritionValue(dashboard.snapshot.nutrition_totals, "calories", "cal")} tone="amber" />
+                  <SnapshotMetric icon={Utensils} label="Carbs" value={nutritionValue(dashboard.snapshot.nutrition_totals, "carbs_g", "g")} tone="cyan" />
+                  <SnapshotMetric icon={Utensils} label="Fat" value={nutritionValue(dashboard.snapshot.nutrition_totals, "fat_g", "g")} tone="purple" />
                 </div>
               </HudPanel>
 
@@ -517,7 +574,7 @@ export default function HealthOpsPage() {
                   <TextField label="Water Intake oz" value={checkin.water_oz} onChange={(value) => setCheckin((prev) => ({ ...prev, water_oz: value }))} />
                 </div>
 
-                <div className="mt-4 rounded-xl border border-green-500/20 bg-black p-3">
+                <div className="hud-row mt-4 flex-col items-stretch">
                   <p className="text-xs uppercase tracking-[0.18em] text-green-500/65">Caffeine</p>
                   <p className="mt-1 text-lg font-semibold text-green-100">{checkin.caffeine_mg || "0"} mg today</p>
                   <div className="mt-3 flex flex-wrap gap-2">
@@ -534,8 +591,8 @@ export default function HealthOpsPage() {
                 </div>
 
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  <SnapshotMetric icon={Utensils} label="Meals Planned" value={String(dashboard.snapshot.meals_planned || 0)} />
-                  <SnapshotMetric icon={CheckCircle2} label="Meals Completed" value={`${dashboard.snapshot.meals_completed || 0} from Meal Planner`} />
+                  <SnapshotMetric icon={Utensils} label="Meals Planned" value={String(dashboard.snapshot.meals_planned || 0)} tone="amber" />
+                  <SnapshotMetric icon={CheckCircle2} label="Meals Completed" value={`${dashboard.snapshot.meals_completed || 0} from Meal Planner`} tone="green" />
                   <ToggleField label="Ate Out?" checked={checkin.ate_out} onChange={(value) => setCheckin((prev) => ({ ...prev, ate_out: value }))} />
                   <TextField label="Food Spend" value={checkin.food_spend} onChange={(value) => setCheckin((prev) => ({ ...prev, food_spend: value }))} />
                 </div>
@@ -554,6 +611,7 @@ export default function HealthOpsPage() {
                         }`}
                       >
                         {supplement}
+                        {SUPPLEMENT_CAFFEINE_MG[supplement] ? ` +${SUPPLEMENT_CAFFEINE_MG[supplement]}mg` : ""}
                       </button>
                     ))}
                   </div>
@@ -570,13 +628,13 @@ export default function HealthOpsPage() {
                 {dashboard.event_types.map((eventType) => {
                   const Icon = EVENT_ICONS[eventType.key] || Plus;
                   return (
-                    <div key={eventType.key} className="rounded-xl border border-green-500/25 bg-black p-4 transition hover:border-green-300/50 hover:shadow-[0_0_22px_rgba(34,197,94,0.18)]">
+                    <div key={eventType.key} className={`hud-row flex-col items-stretch gap-4 ${eventType.count_today > 0 ? "border-amber-300/25 bg-amber-300/5" : ""}`}>
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="text-sm font-semibold text-green-100">{eventType.label}</p>
                           <p className="mt-1 text-xs uppercase tracking-[0.16em] text-green-500/65">{eventType.count_today} today</p>
                         </div>
-                        <Icon className="h-5 w-5 text-green-300" />
+                        <Icon className={eventType.count_today > 0 ? "h-5 w-5 text-amber-200" : "h-5 w-5 text-green-300"} />
                       </div>
                       <button
                         onClick={() => logEvent(eventType)}
@@ -599,13 +657,23 @@ export default function HealthOpsPage() {
                 <div className="space-y-3">
                   {dashboard.timeline.length === 0 && <p className="text-green-300/65">No health events logged today.</p>}
                   {dashboard.timeline.map((event) => (
-                    <div key={event.id} className="rounded-xl border border-green-500/20 bg-black p-4">
+                    <div key={event.id} className="hud-row flex-col items-stretch">
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
                           <p className="font-semibold text-green-100">{labelForEvent(event.event_type, dashboard.event_types)}</p>
                           <p className="mt-1 text-sm text-green-300/65">{formatTime(event.occurred_at)}</p>
                         </div>
-                        {event.severity && <span className="rounded-full border border-green-400/35 px-2 py-1 text-xs uppercase tracking-[0.14em]">{event.severity}</span>}
+                        <div className="flex items-center gap-2">
+                          {event.severity && <span className={`rounded-full border px-2 py-1 text-xs uppercase tracking-[0.14em] ${severityBadgeClass(event.severity)}`}>{event.severity}</span>}
+                          <button
+                            onClick={() => deleteEvent(event)}
+                            className="command-action-button border border-red-400/30 bg-red-500/10 p-2 text-red-200"
+                            aria-label={`Delete ${labelForEvent(event.event_type, dashboard.event_types)}`}
+                            title="Delete accidental log"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
                       </div>
                       <div className="mt-3 grid gap-2 text-sm text-green-300/75 sm:grid-cols-2">
                         <TimelineFact label="Activity" value={event.activity} />
@@ -635,14 +703,14 @@ export default function HealthOpsPage() {
               {summary && (
                 <div className="grid gap-4 lg:grid-cols-[1fr_0.8fr]">
                   <SummaryList summaries={summary.event_summary.event_summaries} />
-                  <div className="rounded-xl border border-green-500/20 bg-black p-4">
+                  <div className="hud-row flex-col items-stretch">
                     <p className="text-xs uppercase tracking-[0.18em] text-green-500/65">Observed Averages</p>
                     <div className="mt-3 grid gap-3">
-                      <SnapshotMetric icon={Moon} label="Sleep" value={unitValue(summary.averages.sleep_hours, "hours")} />
-                      <SnapshotMetric icon={Coffee} label="Caffeine" value={unitValue(summary.averages.caffeine_mg_per_day, "mg/day")} />
-                      <SnapshotMetric icon={Droplets} label="Water" value={unitValue(summary.averages.water_oz_per_day, "oz/day")} />
-                      <SnapshotMetric icon={Dumbbell} label="Workout Days" value={`${summary.workout_adherence.completed_days}/${summary.workout_adherence.logged_days}`} />
-                      <SnapshotMetric icon={Utensils} label="Meals Completed" value={String(summary.meals_completed || 0)} />
+                      <SnapshotMetric icon={Moon} label="Sleep" value={unitValue(summary.averages.sleep_hours, "hours")} tone="purple" />
+                      <SnapshotMetric icon={Coffee} label="Caffeine" value={unitValue(summary.averages.caffeine_mg_per_day, "mg/day")} tone="amber" />
+                      <SnapshotMetric icon={Droplets} label="Water" value={unitValue(summary.averages.water_oz_per_day, "oz/day")} tone="cyan" />
+                      <SnapshotMetric icon={Dumbbell} label="Workout Days" value={`${summary.workout_adherence.completed_days}/${summary.workout_adherence.logged_days}`} tone="green" />
+                      <SnapshotMetric icon={Utensils} label="Meals Completed" value={String(summary.meals_completed || 0)} tone="green" />
                     </div>
                     <p className="mt-4 text-sm text-green-300/60">{summary.factual_note}</p>
                   </div>
@@ -671,10 +739,12 @@ export default function HealthOpsPage() {
 
 function HudPanel({ title, icon: Icon, children }: { title: string; icon: LucideIcon; children: ReactNode }) {
   return (
-    <section className="rounded-2xl border border-green-500/30 bg-zinc-950 p-5 shadow-[0_0_26px_rgba(34,197,94,0.12)]">
-      <div className="mb-4 flex items-center gap-3">
-        <Icon className="h-5 w-5 text-green-300" />
-        <h2 className="text-sm font-bold uppercase tracking-[0.22em] text-green-200">{title}</h2>
+    <section className="hud-panel">
+      <div className="mb-5 flex items-center gap-3">
+        <div className="hud-panel-icon">
+          <Icon className="h-5 w-5" />
+        </div>
+        <h2 className="hud-panel-title">{title}</h2>
       </div>
       {children}
     </section>
@@ -816,14 +886,47 @@ function EventDetailPopup({
   );
 }
 
-function SnapshotMetric({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
+type MetricTone = "green" | "cyan" | "amber" | "red" | "purple";
+
+const metricToneClasses: Record<MetricTone, { row: string; icon: string; value: string }> = {
+  green: {
+    row: "",
+    icon: "",
+    value: "text-green-100",
+  },
+  cyan: {
+    row: "border-cyan-300/20 bg-cyan-300/5",
+    icon: "border-cyan-300/30 bg-cyan-300/10 text-cyan-100",
+    value: "text-cyan-100",
+  },
+  amber: {
+    row: "border-amber-300/20 bg-amber-300/5",
+    icon: "border-amber-300/30 bg-amber-300/10 text-amber-100",
+    value: "text-amber-100",
+  },
+  red: {
+    row: "border-red-400/25 bg-red-500/5",
+    icon: "border-red-400/35 bg-red-500/10 text-red-200",
+    value: "text-red-200",
+  },
+  purple: {
+    row: "border-purple-300/20 bg-purple-400/5",
+    icon: "border-purple-300/30 bg-purple-400/10 text-purple-100",
+    value: "text-purple-100",
+  },
+};
+
+function SnapshotMetric({ icon: Icon, label, value, tone = "green" }: { icon: LucideIcon; label: string; value: string; tone?: MetricTone }) {
+  const classes = metricToneClasses[tone];
   return (
-    <div className="rounded-xl border border-green-500/20 bg-black p-3">
-      <div className="flex items-center gap-2 text-green-300/65">
+    <div className={`hud-row items-start ${classes.row}`}>
+      <div className={`hud-row-icon ${classes.icon}`}>
         <Icon className="h-4 w-4" />
-        <p className="text-xs uppercase tracking-[0.16em]">{label}</p>
       </div>
-      <p className="mt-2 text-lg font-semibold text-green-100">{value}</p>
+      <div>
+        <p className="text-xs uppercase tracking-[0.16em] text-green-500/65">{label}</p>
+        <p className={`mt-1 text-lg font-semibold ${classes.value}`}>{value}</p>
+      </div>
     </div>
   );
 }
@@ -836,7 +939,12 @@ function TextField({ label, value, onChange, placeholder }: { label: string; val
   return (
     <label className="grid gap-2">
       <span className="text-xs uppercase tracking-[0.16em] text-green-500/65">{label}</span>
-      <input value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} className="rounded-xl border border-green-500/30 bg-black px-4 py-3" />
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="rounded-xl border border-green-500/30 bg-black/60 px-4 py-3 text-green-100 outline-none transition focus:border-green-300/70 focus:shadow-[0_0_18px_rgba(34,197,94,0.16)]"
+      />
     </label>
   );
 }
@@ -862,13 +970,17 @@ function SummaryList({ summaries }: { summaries: EventSummary[] }) {
   return (
     <div className="grid gap-3">
       {summaries.map((summary) => (
-        <div key={summary.event_type} className="rounded-xl border border-green-500/20 bg-black p-4">
+        <div key={summary.event_type} className="hud-row flex-col items-stretch">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="font-semibold text-green-100">{summary.label}</p>
               <p className="mt-1 text-sm text-green-300/65">{summary.occurrences} occurrences · Avg {summary.average_per_day}/day</p>
             </div>
-            {summary.highest_day && <span className="text-xs uppercase tracking-[0.14em] text-green-300/65">High {summary.highest_day.count}</span>}
+            {summary.highest_day && (
+              <span className="rounded-full border border-amber-300/25 bg-amber-300/10 px-3 py-1 text-xs uppercase tracking-[0.14em] text-amber-100">
+                High {summary.highest_day.count}
+              </span>
+            )}
           </div>
           <div className="mt-3 grid gap-2 text-sm text-green-300/75 sm:grid-cols-2">
             <TimelineFact label="Most common activity" value={summary.most_common_activity} />
@@ -914,9 +1026,15 @@ function hydrateCheckin(previous: CheckinForm, dashboard: HealthDashboard): Chec
 
 function toggleSupplement(checkin: CheckinForm, supplement: string): CheckinForm {
   const exists = checkin.supplements.includes(supplement);
+  const caffeineDelta = SUPPLEMENT_CAFFEINE_MG[supplement] || 0;
+  const currentCaffeine = Number(checkin.caffeine_mg || 0);
+  const nextCaffeine = caffeineDelta
+    ? Math.max(0, currentCaffeine + (exists ? -caffeineDelta : caffeineDelta))
+    : currentCaffeine;
   return {
     ...checkin,
     supplements: exists ? checkin.supplements.filter((item) => item !== supplement) : [...checkin.supplements, supplement],
+    caffeine_mg: caffeineDelta ? String(nextCaffeine) : checkin.caffeine_mg,
   };
 }
 
@@ -956,4 +1074,25 @@ function sleepValue(snapshot: Record<string, unknown>) {
   const hours = snapshot.hours_slept ? `${snapshot.hours_slept}h` : "No duration";
   const quality = snapshot.sleep_quality ? `${snapshot.sleep_quality}/5` : "No quality";
   return `${hours} · ${quality}`;
+}
+
+function stressTone(value: unknown): MetricTone {
+  const score = Number(value || 0);
+  if (score >= 4) return "red";
+  if (score >= 3) return "amber";
+  return "green";
+}
+
+function caffeineTone(value: unknown): MetricTone {
+  const amount = Number(value || 0);
+  if (amount >= 300) return "red";
+  if (amount >= 200) return "amber";
+  return "green";
+}
+
+function severityBadgeClass(value: string) {
+  const normalized = value.toLowerCase();
+  if (normalized.includes("severe")) return "border-red-400/35 bg-red-500/10 text-red-200";
+  if (normalized.includes("moderate")) return "border-amber-300/35 bg-amber-300/10 text-amber-100";
+  return "border-green-400/35 bg-green-400/10 text-green-100";
 }

@@ -220,10 +220,34 @@ def update_health_event(event_id: str, payload: HealthEventUpdate) -> dict | Non
     return response.data[0] if response.data else None
 
 
+def delete_health_event(event_id: str) -> dict | None:
+    response = supabase.table("health_events").delete().eq("id", event_id).execute()
+    return response.data[0] if response.data else None
+
+
 def upsert_daily_checkin(payload: HealthDailyCheckinUpsert) -> dict:
     context = _context_snapshot(payload.user_id, date.fromisoformat(payload.checkin_date))
     data = payload.model_dump(exclude_unset=True)
-    data["source_data"] = {**context, **(payload.source_data or {})}
+    source_data = {**context, **(payload.source_data or {})}
+    for key in (
+        "energy",
+        "mood",
+        "stress",
+        "sleep_quality",
+        "hours_slept",
+        "water_oz",
+        "caffeine_mg",
+        "workout_completed",
+        "meals_planned",
+        "meals_completed",
+        "ate_out",
+        "food_spend",
+        "training_notes",
+        "supplements",
+    ):
+        if data.get(key) is not None:
+            source_data[key] = data[key]
+    data["source_data"] = source_data
 
     existing = _daily_checkin(payload.user_id, payload.checkin_date)
     if existing:

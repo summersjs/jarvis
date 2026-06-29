@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from calendar import monthrange
 from datetime import date, datetime, timedelta
 
@@ -761,13 +762,59 @@ def _today_meals(user_id: str, date_str: str) -> list[dict]:
     meals = []
     for entry in entries:
         recipe = entry.get("recipes") or {}
+        meta = _meal_meta(entry)
         meals.append({
             "id": entry.get("id"),
             "meal_type": entry.get("meal_type"),
             "name": recipe.get("title") or entry.get("custom_meal_name") or "Unnamed meal",
-            "notes": entry.get("notes"),
+            "notes": meta.get("note") or _clean_meal_note(entry.get("notes")),
+            "source": meta.get("source") or entry.get("meal_source"),
+            "completed": bool(meta.get("completed")),
+            "estimated_cost": _safe_float(meta.get("estimated_cost") or entry.get("estimated_cost")),
+            "calories": _safe_float(meta.get("calories")),
+            "protein_g": _safe_float(meta.get("protein_g")),
+            "carbs_g": _safe_float(meta.get("carbs_g")),
+            "fat_g": _safe_float(meta.get("fat_g")),
+            "servings": _safe_float(meta.get("servings") or 1),
         })
     return meals
+
+
+def _meal_meta(entry: dict) -> dict:
+    notes = entry.get("notes") or ""
+    if not notes.startswith("JARVIS_META:"):
+        return {}
+    try:
+        return json.loads(notes.replace("JARVIS_META:", "", 1))
+    except json.JSONDecodeError:
+        return {}
+
+
+def _clean_meal_note(notes: str | None) -> str | None:
+    if not notes or notes.startswith("JARVIS_META:"):
+        return None
+    return notes
+
+
+def _today_meal_snapshot(user_id: str, date_str: str) -> dict:
+    meals = _today_meals(user_id, date_str)
+    completed = [meal for meal in meals if meal.get("completed")]
+    spend = round(sum(_safe_float(meal.get("estimated_cost")) for meal in completed), 2)
+    totals = {
+        "calories": round(sum(_safe_float(meal.get("calories")) * _safe_float(meal.get("servings") or 1) for meal in completed), 1),
+        "protein_g": round(sum(_safe_float(meal.get("protein_g")) * _safe_float(meal.get("servings") or 1) for meal in completed), 1),
+        "carbs_g": round(sum(_safe_float(meal.get("carbs_g")) * _safe_float(meal.get("servings") or 1) for meal in completed), 1),
+        "fat_g": round(sum(_safe_float(meal.get("fat_g")) * _safe_float(meal.get("servings") or 1) for meal in completed), 1),
+    }
+    return {
+        "meals": meals,
+        "completed": completed,
+        "meals_planned_today": len(meals),
+        "meals_completed": len(completed),
+        "ate_out_today": any((meal.get("source") or "") == "eat_out" for meal in completed),
+        "estimated_food_spend": spend,
+        "nutrition_totals": totals,
+    }
 
 
 def _food_transactions_for_date(user_id: str, date_str: str) -> list[dict]:
@@ -1060,7 +1107,9 @@ def build_daily_debrief_summary(user_id: str = "john") -> dict:
     saved = _lookup_latest_debrief(user_id, today) or {}
     budget = _current_month_budget(user_id, month)
     transactions = _food_transactions_for_date(user_id, today)
-    food_spend_today = round(sum(float(item.get("amount") or 0) for item in transactions), 2)
+    meal_snapshot = _today_meal_snapshot(user_id, today)
+    transaction_food_spend = round(sum(float(item.get("amount") or 0) for item in transactions), 2)
+    food_spend_today = round(transaction_food_spend + meal_snapshot["estimated_food_spend"], 2)
     workout_context = _today_workout_context(user_id, now.date())
     scheduled_lift = workout_context["scheduled_lift"]
     next_protocol = workout_context["next_protocol"]
@@ -1151,14 +1200,16 @@ def build_daily_debrief_summary(user_id: str = "john") -> dict:
     training["goal_impact"] = training_defaults["goal_impact"]
 
     nutrition_defaults = {
-        "meals_planned_today": len(_today_meals(user_id, today)),
-        "meals_completed": saved.get("nutrition", {}).get("meals_completed", 0),
-        "ate_out_today": any(
+        "meals_planned_today": meal_snapshot["meals_planned_today"],
+        "meals_completed": meal_snapshot["meals_completed"],
+        "ate_out_today": meal_snapshot["ate_out_today"] or any(
             row.get("category") == "Eating Out"
             or "eat out" in (row.get("notes") or "").lower()
             for row in transactions
         ),
         "estimated_food_spend": food_spend_today,
+        "nutrition_totals": meal_snapshot["nutrition_totals"],
+        "meals": meal_snapshot["meals"],
         "notes": saved.get("nutrition", {}).get("notes"),
     }
     nutrition = {
@@ -1166,8 +1217,11 @@ def build_daily_debrief_summary(user_id: str = "john") -> dict:
         **(saved.get("nutrition") or {}),
     }
     nutrition["meals_planned_today"] = nutrition_defaults["meals_planned_today"]
+    nutrition["meals_completed"] = nutrition_defaults["meals_completed"]
     nutrition["estimated_food_spend"] = nutrition_defaults["estimated_food_spend"]
     nutrition["ate_out_today"] = nutrition_defaults["ate_out_today"]
+    nutrition["nutrition_totals"] = nutrition_defaults["nutrition_totals"]
+    nutrition["meals"] = nutrition_defaults["meals"]
 
     finance_defaults = {
         "money_spent_today": food_spend_today,

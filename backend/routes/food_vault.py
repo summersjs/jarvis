@@ -10,6 +10,7 @@ from backend.schemas.food_vault import (
 from backend.services.food_vault_service import (
     consume_food_vault_item,
     create_food_vault_item,
+    delete_food_vault_item,
     get_nutrition_targets,
     list_food_vault_items,
     update_food_vault_item,
@@ -42,6 +43,14 @@ def update_item(item_id: str, payload: FoodVaultItemUpdate):
     if not item:
         raise HTTPException(status_code=404, detail="Food vault item not found.")
     return {"status": "ok", "item": item}
+
+
+@router.delete("/items/{item_id}")
+def delete_item(item_id: str):
+    deleted = delete_food_vault_item(item_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Food vault item not found.")
+    return {"status": "ok", "deleted": deleted}
 
 
 @router.post("/items/{item_id}/consume")

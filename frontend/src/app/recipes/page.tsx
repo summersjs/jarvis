@@ -17,6 +17,17 @@ type RecipeIngredient = {
   is_optional?: boolean;
 };
 
+type FoodVaultItem = {
+  id: string;
+  name: string;
+  brand?: string | null;
+  serving_size?: string | null;
+  calories?: number | null;
+  protein_g?: number | null;
+  carbs_g?: number | null;
+  fat_g?: number | null;
+};
+
 type Recipe = {
   id: string;
   title: string;
@@ -50,6 +61,8 @@ const emptyIngredient = (): RecipeIngredient => ({
 
 export default function RecipesPage() {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [foodItems, setFoodItems] = useState<FoodVaultItem[]>([]);
+  const [selectedFoodItemId, setSelectedFoodItemId] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -87,8 +100,22 @@ export default function RecipesPage() {
     }
   }
 
+  async function loadFoodVault() {
+    try {
+      const res = await fetch(`${API_BASE}/food-vault/items?user_id=john`, {
+        headers: { "x-api-key": API_KEY },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to load Food Vault.");
+      setFoodItems(data.items || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load Food Vault.");
+    }
+  }
+
   useEffect(() => {
     loadRecipes();
+    loadFoodVault();
   }, []);
 
   function updateForm<K extends keyof NewRecipeForm>(key: K, value: NewRecipeForm[K]) {
@@ -128,6 +155,26 @@ export default function RecipesPage() {
           : prev.ingredients.filter((_, i) => i !== index),
     }));
   }
+
+  function addFoodVaultIngredient() {
+    const item = foodItems.find((food) => food.id === selectedFoodItemId);
+    if (!item) return;
+    setForm((prev) => ({
+      ...prev,
+      ingredients: [
+        ...prev.ingredients,
+        {
+          item_name: foodDisplayName(item),
+          quantity: item.serving_size || "1 serving",
+          category: "Food Vault",
+          is_optional: false,
+        },
+      ],
+    }));
+    setSelectedFoodItemId("");
+  }
+
+  const macroTotals = calculateRecipeMacros(form.ingredients, foodItems);
 
   function resetForm() {
     setForm({
@@ -346,10 +393,36 @@ export default function RecipesPage() {
                 <h3 className="text-xl font-semibold">Ingredients</h3>
                 <button
                   onClick={addIngredientRow}
-                  className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
+                  className="command-action-button command-action-green rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 text-green-100"
                 >
                   Add Ingredient
                 </button>
+              </div>
+
+              <div className="mb-4 grid gap-3 rounded-xl border border-green-500/20 bg-black p-4 md:grid-cols-[1fr_auto]">
+                <select
+                  value={selectedFoodItemId}
+                  onChange={(e) => setSelectedFoodItemId(e.target.value)}
+                  className="rounded-xl border border-green-500/30 bg-zinc-950 px-4 py-3"
+                >
+                  <option value="">Add ingredient from Food Vault</option>
+                  {foodItems.map((item) => (
+                    <option key={item.id} value={item.id}>{foodDisplayName(item)}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={addFoodVaultIngredient}
+                  className="command-action-button border border-cyan-300/35 px-4 py-3 text-cyan-100"
+                >
+                  Add Food Item
+                </button>
+              </div>
+
+              <div className="mb-4 grid gap-2 md:grid-cols-4">
+                <Macro label="Calories" value={macroTotals.calories} unit="cal" />
+                <Macro label="Protein" value={macroTotals.protein_g} unit="g" />
+                <Macro label="Carbs" value={macroTotals.carbs_g} unit="g" />
+                <Macro label="Fat" value={macroTotals.fat_g} unit="g" />
               </div>
 
               <div className="space-y-4">
@@ -405,7 +478,7 @@ export default function RecipesPage() {
             <button
               onClick={createRecipe}
               disabled={isSaving}
-              className="mt-6 w-full rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-3 hover:bg-green-500/20 transition disabled:opacity-50"
+              className="command-action-button command-action-green mt-6 w-full rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-3 text-green-100 disabled:opacity-50"
             >
               {isSaving ? "Saving..." : "Save Recipe"}
             </button>
@@ -463,5 +536,40 @@ export default function RecipesPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+function foodDisplayName(item: FoodVaultItem) {
+  return [item.brand, item.name].filter(Boolean).join(" ");
+}
+
+function calculateRecipeMacros(ingredients: RecipeIngredient[], foodItems: FoodVaultItem[]) {
+  return ingredients.reduce(
+    (totals, ingredient) => {
+      const food = foodItems.find((item) => foodDisplayName(item) === ingredient.item_name);
+      if (!food) return totals;
+      const quantity = parseServingQuantity(ingredient.quantity);
+      totals.calories += Number(food.calories || 0) * quantity;
+      totals.protein_g += Number(food.protein_g || 0) * quantity;
+      totals.carbs_g += Number(food.carbs_g || 0) * quantity;
+      totals.fat_g += Number(food.fat_g || 0) * quantity;
+      return totals;
+    },
+    { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 }
+  );
+}
+
+function parseServingQuantity(quantity?: string | null) {
+  if (!quantity) return 1;
+  const match = quantity.match(/^\s*(\d+(?:\.\d+)?)/);
+  return match ? Number(match[1]) : 1;
+}
+
+function Macro({ label, value, unit }: { label: string; value: number; unit: string }) {
+  return (
+    <div className="rounded-lg border border-green-500/20 bg-black px-3 py-2">
+      <p className="text-[0.65rem] uppercase tracking-[0.16em] text-green-500/65">{label}</p>
+      <p className="mt-1 font-semibold text-green-100">{Math.round(value * 10) / 10} {unit}</p>
+    </div>
   );
 }

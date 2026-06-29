@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { type ComponentType, useCallback, useEffect, useState } from "react";
-import { ClipboardList, DollarSign, ShoppingCart, Utensils, Wallet } from "lucide-react";
+import { ClipboardList, DollarSign, ShoppingCart, Utensils, Wallet, X } from "lucide-react";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -357,6 +357,28 @@ export default function MealPlannerPage() {
       await loadWeekPlan();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to reopen meal.");
+    }
+  }
+
+  async function deleteMeal(entry: MealPlanEntry) {
+    setError("");
+    setMessage("");
+    const mealName = entry.recipes?.title || entry.custom_meal_name || "this meal";
+    if (!window.confirm(`Delete ${mealName} from the meal planner?`)) {
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/meal-planner/${entry.id}`, {
+        method: "DELETE",
+        headers: { "x-api-key": API_KEY },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to delete meal.");
+      setMessage("Meal plan entry deleted.");
+      await loadWeekPlan();
+      await loadFinanceSummary();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete meal.");
     }
   }
 
@@ -761,11 +783,21 @@ export default function MealPlannerPage() {
                       {entry.recipes?.title || entry.custom_meal_name || "Unnamed meal"}
                     </p>
                   </div>
-                  <span className={`rounded-full border px-3 py-1 text-xs uppercase tracking-[0.16em] ${
-                    meta.completed ? "border-green-300/45 bg-green-300/10 text-green-100" : "border-cyan-300/30 text-cyan-100"
-                  }`}>
-                    {meta.completed ? "Eaten" : "Planned"}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className={`rounded-full border px-3 py-1 text-xs uppercase tracking-[0.16em] ${
+                      meta.completed ? "border-green-300/45 bg-green-300/10 text-green-100" : "border-cyan-300/30 text-cyan-100"
+                    }`}>
+                      {meta.completed ? "Eaten" : "Planned"}
+                    </span>
+                    <button
+                      onClick={() => deleteMeal(entry)}
+                      className="command-action-button border border-red-400/30 bg-red-500/10 p-2 text-red-200"
+                      aria-label={`Delete ${entry.recipes?.title || entry.custom_meal_name || "meal"}`}
+                      title="Delete meal"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
 
                 <p className="mt-1 text-sm text-green-300/65">

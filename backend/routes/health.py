@@ -6,6 +6,7 @@ from backend.services.health_service import (
     build_doctor_summary,
     build_health_dashboard,
     create_health_event,
+    delete_health_event,
     update_health_event,
     upsert_daily_checkin,
 )
@@ -41,6 +42,17 @@ def patch_event(event_id: str, payload: HealthEventUpdate):
     return {
         "status": "ok",
         "event": event,
+    }
+
+
+@router.delete("/events/{event_id}")
+def delete_event(event_id: str):
+    deleted = delete_health_event(event_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Health event not found.")
+    return {
+        "status": "ok",
+        "deleted": deleted,
     }
 
 

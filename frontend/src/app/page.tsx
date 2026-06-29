@@ -47,6 +47,14 @@ type MealEntry = {
   meal_type: string;
   name: string;
   notes?: string | null;
+  meta?: {
+    calories?: number | null;
+    protein_g?: number | null;
+    carbs_g?: number | null;
+    fat_g?: number | null;
+    completed?: boolean;
+    servings?: number | null;
+  } | null;
 };
 
 type ShoppingItem = {
@@ -1165,8 +1173,23 @@ function MealPlanPanel({ meals }: { meals: MealEntry[] }) {
                 <Utensils className="h-4 w-4" />
               </div>
               <div>
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-green-500/70">{meal.meal_type}</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-green-500/70">{meal.meal_type}</p>
+                  {meal.meta?.completed && (
+                    <span className="rounded-full border border-green-300/35 bg-green-400/10 px-2 py-0.5 text-[0.65rem] font-bold uppercase tracking-[0.14em] text-green-100">
+                      Eaten
+                    </span>
+                  )}
+                </div>
                 <p className="mt-1 font-semibold text-green-100">{meal.name}</p>
+                {meal.meta && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <MealMacro label="Cal" value={macroValue(meal.meta.calories, meal.meta.servings)} unit="" />
+                    <MealMacro label="Protein" value={macroValue(meal.meta.protein_g, meal.meta.servings)} unit="g" />
+                    <MealMacro label="Carbs" value={macroValue(meal.meta.carbs_g, meal.meta.servings)} unit="g" />
+                    <MealMacro label="Fat" value={macroValue(meal.meta.fat_g, meal.meta.servings)} unit="g" />
+                  </div>
+                )}
                 {meal.notes && <p className="mt-1 text-sm text-green-300/60">{meal.notes}</p>}
               </div>
             </div>
@@ -1175,6 +1198,20 @@ function MealPlanPanel({ meals }: { meals: MealEntry[] }) {
       )}
     </HudPanel>
   );
+}
+
+function MealMacro({ label, value, unit }: { label: string; value: number | null; unit: string }) {
+  if (value == null) return null;
+  return (
+    <span className="rounded-md border border-green-500/20 bg-black/40 px-2 py-1 text-[0.7rem] uppercase tracking-[0.12em] text-green-300/75">
+      {label}: {value}{unit}
+    </span>
+  );
+}
+
+function macroValue(value?: number | null, servings?: number | null) {
+  if (value == null) return null;
+  return Math.round(Number(value) * Number(servings || 1) * 10) / 10;
 }
 
 function ShoppingPanel({ shopping }: { shopping: DashboardResponse["shopping"] }) {

@@ -47,7 +47,7 @@ values
   ('john', 'Iced Coffee 12 oz', null, '12 oz', 120, 2, 20, 3, 1, 0, 0, null, null, 'Coffee', 'Default estimate; edit as needed.', false),
   ('john', 'Iced Coffee 16 oz', null, '16 oz', 160, 3, 27, 4, 1, 0, 0, null, null, 'Coffee', 'Default estimate; edit as needed.', false),
   ('john', 'Iced Coffee 20 oz', null, '20 oz', 200, 4, 34, 5, 1, 0, 0, null, null, 'Coffee', 'Default estimate; edit as needed.', false),
-  ('john', 'C4', 'Cellucor', '1 can', 0, 0, 0, 0, 1, 0, 2, null, null, 'Energy Drinks', 'Caffeine/pre-workout item; edit nutrition if needed.', false)
+  ('john', 'C4 Powder', 'Cellucor', '1 scoop', 0, 0, 0, 0, 60, 30, 5, null, null, 'Supplements', 'Powder supplement. 150mg caffeine per serving. Tub contains 60 servings; user estimate is about 30 servings remaining.', false)
 on conflict (user_id, brand, name, serving_size) do update set
   calories = excluded.calories,
   protein_g = excluded.protein_g,

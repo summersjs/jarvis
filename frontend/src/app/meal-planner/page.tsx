@@ -13,6 +13,15 @@ const API_KEY =
 type Recipe = {
   id: string;
   title: string;
+  ingredients?: RecipeIngredient[];
+};
+
+type RecipeIngredient = {
+  id?: string;
+  item_name: string;
+  quantity?: string | null;
+  category?: string | null;
+  is_optional?: boolean;
 };
 
 type MealPlanEntry = {
@@ -443,6 +452,19 @@ export default function MealPlannerPage() {
     setFat(item.fat_g ? String(item.fat_g) : "");
   }
 
+  function selectRecipe(recipeIdValue: string) {
+    setRecipeId(recipeIdValue);
+    const recipe = recipes.find((item) => item.id === recipeIdValue);
+    if (!recipe) return;
+    const totals = calculateRecipeMacros(recipe.ingredients || [], foodItems);
+    setCustomMealName(recipe.title);
+    setCalories(totals.calories ? String(totals.calories) : "");
+    setProtein(totals.protein_g ? String(totals.protein_g) : "");
+    setCarbs(totals.carbs_g ? String(totals.carbs_g) : "");
+    setFat(totals.fat_g ? String(totals.fat_g) : "");
+    setServings("1");
+  }
+
   useEffect(() => {
     loadRecipes();
     loadFoodVault();
@@ -602,7 +624,7 @@ export default function MealPlannerPage() {
               <label className="mb-2 block text-sm text-green-300/80">Recipe</label>
               <select
                 value={recipeId}
-                onChange={(e) => setRecipeId(e.target.value)}
+                onChange={(e) => selectRecipe(e.target.value)}
                 className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
                 disabled={mealSource !== "recipe"}
               >
@@ -940,9 +962,54 @@ function foodDisplayName(item: FoodVaultItem) {
   return [item.brand, item.name].filter(Boolean).join(" ");
 }
 
+function calculateRecipeMacros(ingredients: RecipeIngredient[], foodItems: FoodVaultItem[]) {
+  const totals = ingredients.reduce(
+    (acc, ingredient) => {
+      const food = findFoodItemForIngredient(ingredient.item_name, foodItems);
+      if (!food) return acc;
+      const quantity = parseServingQuantity(ingredient.quantity);
+      acc.calories += Number(food.calories || 0) * quantity;
+      acc.protein_g += Number(food.protein_g || 0) * quantity;
+      acc.carbs_g += Number(food.carbs_g || 0) * quantity;
+      acc.fat_g += Number(food.fat_g || 0) * quantity;
+      return acc;
+    },
+    { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 }
+  );
+  return {
+    calories: roundMacro(totals.calories),
+    protein_g: roundMacro(totals.protein_g),
+    carbs_g: roundMacro(totals.carbs_g),
+    fat_g: roundMacro(totals.fat_g),
+  };
+}
+
+function findFoodItemForIngredient(name: string, foodItems: FoodVaultItem[]) {
+  const normalized = normalizeFoodName(name);
+  return foodItems.find((item) => {
+    const display = normalizeFoodName(foodDisplayName(item));
+    const itemName = normalizeFoodName(item.name);
+    return display === normalized || itemName === normalized || display.includes(normalized) || normalized.includes(itemName);
+  });
+}
+
+function normalizeFoodName(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
 function macroTotal(value?: number | null, servings?: number | null) {
   if (value == null) return null;
   return Math.round(value * (servings || 1) * 10) / 10;
+}
+
+function parseServingQuantity(quantity?: string | null) {
+  if (!quantity) return 1;
+  const match = quantity.match(/^\s*(\d+(?:\.\d+)?)/);
+  return match ? Number(match[1]) : 1;
+}
+
+function roundMacro(value: number) {
+  return Math.round(value * 10) / 10;
 }
 
 function calculateTodayNutrition(entries: MealPlanEntry[]) {

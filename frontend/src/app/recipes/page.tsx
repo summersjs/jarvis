@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { X } from "lucide-react";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -249,6 +250,26 @@ export default function RecipesPage() {
     }
   }
 
+  async function deleteRecipe(recipe: Recipe) {
+    setError("");
+    setMessage("");
+    if (!window.confirm(`Delete ${recipe.title} from Recipe Vault?`)) {
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/recipes/${recipe.id}`, {
+        method: "DELETE",
+        headers: { "x-api-key": API_KEY },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to delete recipe.");
+      setMessage(`Recipe deleted: ${recipe.title}`);
+      await loadRecipes();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete recipe.");
+    }
+  }
+
   return (
     <main className="min-h-screen bg-black text-green-400 px-6 py-10">
       <div className="mx-auto max-w-5xl">
@@ -492,19 +513,35 @@ export default function RecipesPage() {
             </div>
           )}
 
-          {recipes.map((recipe) => (
+          {recipes.map((recipe) => {
+            const totals = calculateRecipeMacros(recipe.ingredients || [], foodItems);
+            return (
             <Link
-                key={recipe.id}
-                href={`/recipes/${recipe.id}`}
-                className="block rounded-xl border border-green-500/20 bg-zinc-950 p-4 hover:bg-green-500/5 transition"
+              key={recipe.id}
+              href={`/recipes/${recipe.id}`}
+              className="block rounded-xl border border-green-500/20 bg-zinc-950 p-4 transition hover:border-green-300/45 hover:bg-green-500/5 hover:shadow-[0_0_22px_rgba(34,197,94,0.16)]"
             >
               <div className="flex items-center justify-between">
                 <h2 className="text-xl font-semibold">{recipe.title}</h2>
-                {recipe.is_favorite && (
-                  <span className="rounded-lg border border-green-500/30 px-3 py-1 text-sm">
-                    Favorite
-                  </span>
-                )}
+                <div className="flex items-center gap-2">
+                  {recipe.is_favorite && (
+                    <span className="rounded-lg border border-green-500/30 px-3 py-1 text-sm">
+                      Favorite
+                    </span>
+                  )}
+                  <button
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      deleteRecipe(recipe);
+                    }}
+                    className="command-action-button border border-red-400/30 bg-red-500/10 p-2 text-red-200"
+                    aria-label={`Delete ${recipe.title}`}
+                    title="Delete recipe"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
 
               <p className="mt-2 text-sm text-green-300/70">
@@ -513,6 +550,15 @@ export default function RecipesPage() {
 
               {recipe.description && (
                 <p className="mt-2 text-green-300/80">{recipe.description}</p>
+              )}
+
+              {(totals.calories > 0 || totals.protein_g > 0 || totals.carbs_g > 0 || totals.fat_g > 0) && (
+                <div className="mt-4 grid gap-2 md:grid-cols-4">
+                  <Macro label="Calories" value={totals.calories} unit="cal" />
+                  <Macro label="Protein" value={totals.protein_g} unit="g" />
+                  <Macro label="Carbs" value={totals.carbs_g} unit="g" />
+                  <Macro label="Fat" value={totals.fat_g} unit="g" />
+                </div>
               )}
 
               {recipe.ingredients && recipe.ingredients.length > 0 && (
@@ -532,7 +578,8 @@ export default function RecipesPage() {
                 </div>
               )}
             </Link>
-          ))}
+            );
+          })}
         </div>
       </div>
     </main>
@@ -546,7 +593,7 @@ function foodDisplayName(item: FoodVaultItem) {
 function calculateRecipeMacros(ingredients: RecipeIngredient[], foodItems: FoodVaultItem[]) {
   return ingredients.reduce(
     (totals, ingredient) => {
-      const food = foodItems.find((item) => foodDisplayName(item) === ingredient.item_name);
+      const food = findFoodItemForIngredient(ingredient.item_name, foodItems);
       if (!food) return totals;
       const quantity = parseServingQuantity(ingredient.quantity);
       totals.calories += Number(food.calories || 0) * quantity;
@@ -557,6 +604,19 @@ function calculateRecipeMacros(ingredients: RecipeIngredient[], foodItems: FoodV
     },
     { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 }
   );
+}
+
+function findFoodItemForIngredient(name: string, foodItems: FoodVaultItem[]) {
+  const normalized = normalizeFoodName(name);
+  return foodItems.find((item) => {
+    const display = normalizeFoodName(foodDisplayName(item));
+    const itemName = normalizeFoodName(item.name);
+    return display === normalized || itemName === normalized || display.includes(normalized) || normalized.includes(itemName);
+  });
+}
+
+function normalizeFoodName(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 function parseServingQuantity(quantity?: string | null) {

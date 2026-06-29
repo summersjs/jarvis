@@ -90,6 +90,8 @@ type FinanceSummary = {
 type MealMeta = {
   source: string;
   estimated_cost: number | null;
+  package_quantity?: number | null;
+  unit_cost?: number | null;
   vendor: string | null;
   note: string | null;
   count_toward_eating_out: boolean;
@@ -247,7 +249,11 @@ export default function MealPlannerPage() {
       const servingCount = numberOrNull(servings) || 1;
       const meta: MealMeta = {
         source: mealSource,
-        estimated_cost: estimatedCost ? Number(estimatedCost) : null,
+        estimated_cost: mealSource === "food_vault" && selectedFood
+          ? calculateFoodVaultUnitCost(selectedFood, servingCount)
+          : estimatedCost ? Number(estimatedCost) : null,
+        package_quantity: selectedFood?.package_quantity ?? null,
+        unit_cost: selectedFood ? calculateFoodVaultUnitCost(selectedFood, 1) : null,
         vendor: vendor.trim() || null,
         note: notes.trim() || null,
         count_toward_eating_out: mealSource === "eat_out",
@@ -445,7 +451,7 @@ export default function MealPlannerPage() {
     const item = foodItems.find((food) => food.id === itemId);
     if (!item) return;
     setCustomMealName(foodDisplayName(item));
-    setEstimatedCost(item.estimated_price ? String(item.estimated_price) : "");
+    setEstimatedCost(calculateFoodVaultUnitCost(item, 1)?.toFixed(2) || "");
     setCalories(item.calories ? String(item.calories) : "");
     setProtein(item.protein_g ? String(item.protein_g) : "");
     setCarbs(item.carbs_g ? String(item.carbs_g) : "");
@@ -823,7 +829,7 @@ export default function MealPlannerPage() {
                 </div>
 
                 <p className="mt-1 text-sm text-green-300/65">
-                  {entry.estimated_cost ? `$${formatMoney(entry.estimated_cost)}` : meta.estimated_cost ? `$${formatMoney(meta.estimated_cost || 0)}` : "No cost set"}
+                  {mealCostLabel(entry, meta)}
                   {entry.vendor || meta.vendor ? ` · ${entry.vendor || meta.vendor}` : ""}
                 </p>
 
@@ -924,6 +930,8 @@ function getMealMeta(entry: MealPlanEntry): MealMeta {
     completed_at: null,
     food_vault_item_id: null,
     servings: 1,
+    package_quantity: null,
+    unit_cost: null,
     save_to_food_vault: false,
   };
 }
@@ -952,6 +960,10 @@ function formatMoney(value: number) {
   return value.toFixed(2);
 }
 
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
 function numberOrNull(value: string) {
   if (!value.trim()) return null;
   const parsed = Number(value);
@@ -960,6 +972,22 @@ function numberOrNull(value: string) {
 
 function foodDisplayName(item: FoodVaultItem) {
   return [item.brand, item.name].filter(Boolean).join(" ");
+}
+
+function calculateFoodVaultUnitCost(item: FoodVaultItem, servings = 1) {
+  const packagePrice = Number(item.estimated_price || 0);
+  const packageQuantity = Number(item.package_quantity || 1);
+  if (!packagePrice || !packageQuantity) return null;
+  return roundMoney((packagePrice / packageQuantity) * servings);
+}
+
+function mealCostLabel(entry: MealPlanEntry, meta: MealMeta) {
+  const cost = Number(meta.estimated_cost || entry.estimated_cost || 0);
+  if (!cost) return "No cost set";
+  if (meta.source === "food_vault" && meta.package_quantity && Number(meta.package_quantity) > 1) {
+    return `$${formatMoney(cost)} individual cost`;
+  }
+  return `$${formatMoney(cost)}`;
 }
 
 function calculateRecipeMacros(ingredients: RecipeIngredient[], foodItems: FoodVaultItem[]) {

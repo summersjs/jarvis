@@ -3,6 +3,7 @@ from math import ceil
 
 from backend.core.config import LOCAL_TZ
 from backend.db.supabase_client import supabase
+from backend.integrations.google_calendar import create_calendar_event
 from backend.schemas.goal import (
     GoalCreate,
     GoalLogCreate,
@@ -153,6 +154,33 @@ def create_goal_log(goal_id: str, payload: GoalLogCreate):
     if not response.data:
         raise Exception("Failed to create goal log.")
 
+    created_log = response.data[0]
+    metadata = payload.metadata or {}
+    mission_type = normalize_goal_mission_type(goal)
+    if mission_type == "standard" and payload.log_type == "planned" and payload.planned_for:
+        planned_time = metadata.get("planned_time") or goal.get("planned_time")
+        try:
+            event = create_calendar_event(
+                summary=goal.get("title") or "Jarvis planned standard",
+                date_str=payload.planned_for,
+                time_str=planned_time,
+                notes=payload.notes or goal.get("description"),
+            )
+            metadata = {
+                **metadata,
+                "calendar_event_id": event.get("id"),
+                "calendar_event_link": event.get("htmlLink"),
+            }
+            supabase.table("goal_logs").update({"metadata": metadata}).eq("id", created_log["id"]).execute()
+            created_log["metadata"] = metadata
+        except Exception as exc:
+            metadata = {
+                **metadata,
+                "calendar_error": str(exc),
+            }
+            supabase.table("goal_logs").update({"metadata": metadata}).eq("id", created_log["id"]).execute()
+            created_log["metadata"] = metadata
+
     logs = list_goal_logs(goal_id)
     current_value = float(goal.get("current_value") or 0)
     goal_type = (goal.get("goal_type") or "").lower()
@@ -182,7 +210,8 @@ def create_goal_log(goal_id: str, payload: GoalLogCreate):
         supabase.table("goals").update(update_fields).eq("id", goal_id).execute()
 
     return {
-        "log": response.data[0],
+        "log": created_log,
+        "calendar": created_log.get("metadata", {}),
         "goal": get_goal(goal_id),
     }
 
@@ -232,7 +261,26 @@ def update_goal_milestone(milestone_id: str, payload: GoalMilestoneUpdate):
         update_data["completed_at"] = datetime.now(LOCAL_TZ).isoformat()
 
     response = supabase.table("goal_milestones").update(update_data).eq("id", milestone_id).execute()
-    return response.data[0] if response.data else None
+    if not response.data:
+        return None
+
+    milestone = response.data[0]
+    if update_data.get("status") in PROJECT_MILESTONE_COMPLETE_STATUSES:
+        supabase.table("goal_logs").insert({
+            "goal_id": milestone["goal_id"],
+            "value": 1,
+            "notes": f"Milestone completed: {milestone.get('title')}",
+            "log_type": "milestone",
+            "planned_for": milestone.get("target_date"),
+            "metadata": {
+                "milestone_id": milestone_id,
+                "milestone_title": milestone.get("title"),
+                "cost": milestone.get("cost"),
+                "notes": milestone.get("notes"),
+            },
+        }).execute()
+
+    return milestone
 
 
 def delete_goal_milestone(milestone_id: str):

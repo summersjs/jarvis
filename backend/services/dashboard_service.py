@@ -266,8 +266,35 @@ def _get_lift_profile(user_id: str, lift: str | None) -> dict | None:
     return response.data[0]
 
 
-def _highest_priority_remaining_task(user_id: str, workout_logic: dict, shopping: dict, mission: dict) -> str:
-    goals = mission.get("goals") or []
+def _planned_standard_for_date(goals: list[dict], date_str: str) -> dict | None:
+    for goal in goals:
+        if (goal.get("mission_type") or "").lower() != "standard":
+            continue
+        standard = goal.get("standard") or {}
+        planned_for = standard.get("planned_for") or goal.get("planned_date")
+        if planned_for and planned_for[:10] == date_str:
+            return goal
+    return None
+
+
+def _format_planned_standard(goal: dict) -> str:
+    standard = goal.get("standard") or {}
+    planned_for = standard.get("planned_for") or goal.get("planned_date")
+    planned_time = standard.get("planned_time") or goal.get("planned_time")
+    if not planned_for:
+        return goal.get("title", "planned standard")
+    date_label = datetime.fromisoformat(f"{planned_for[:10]}T12:00:00").strftime("%A, %B %-d")
+    time_label = f" at {planned_time}" if planned_time else ""
+    return f"{goal.get('title', 'Planned standard')} on {date_label}{time_label}"
+
+
+def _highest_priority_remaining_task(user_id: str, workout_logic: dict, shopping: dict, mission: dict, today: str | None = None) -> str:
+    goals = mission.get("goals") or dashboard.get("goals") or []
+    if today:
+        planned_standard = _planned_standard_for_date(goals, today)
+        if planned_standard:
+            return f"Planned today: {_format_planned_standard(planned_standard)}."
+
     incomplete_goal = next(
         (
             goal
@@ -307,12 +334,15 @@ def _mission_phase_content(phase: dict, dashboard: dict, mission: dict) -> dict:
     priority = dashboard.get("highest_priority_remaining_task") or "Hold the line."
 
     if phase["key"] == "briefing":
+        planned_today = _planned_standard_for_date(goals, dashboard.get("date", ""))
         items = [
             f"Priority: {today.get('scheduled_lift_label') or 'Recovery'}",
             f"Workout: {today.get('spoken_response') or 'No workout data'}",
             f"Schedule: {calendar.get('today', {}).get('spoken_response') or 'No schedule data'}",
             f"Nutrition: {len(meals)} meal{'' if len(meals) == 1 else 's'} planned",
         ]
+        if planned_today:
+            items.insert(1, f"Planned: {_format_planned_standard(planned_today)}")
         recommendation = dashboard.get("coaching_note") or "Keep the day simple and execute the plan."
         return {
             "title": "Today's Priorities",
@@ -529,7 +559,7 @@ def build_daily_dashboard(user_id: str = "john") -> dict:
         goals=goals,
     )
     mission = mission_scores["daily"]
-    highest_priority_remaining_task = _highest_priority_remaining_task(user_id, workout_logic, shopping, {"goals": goals})
+    highest_priority_remaining_task = _highest_priority_remaining_task(user_id, workout_logic, shopping, {"goals": goals}, today)
     previous_mission_score = get_previous_mission_score(user_id)
     mission_delta = mission["score"] - previous_mission_score if previous_mission_score is not None else None
 

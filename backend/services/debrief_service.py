@@ -829,6 +829,25 @@ def format_number(value: float | int | None) -> str:
     return f"{round(float(value), 2):g}"
 
 
+def _planned_standard_summaries(goals: list[dict], today_date: date) -> list[str]:
+    summaries = []
+    for goal in goals:
+        if (goal.get("mission_type") or "").lower() != "standard":
+            continue
+        standard = goal.get("standard") or {}
+        planned_for = standard.get("planned_for") or goal.get("planned_date")
+        if not planned_for:
+            continue
+        planned_date = date.fromisoformat(planned_for[:10])
+        if planned_date < today_date:
+            continue
+        day_label = "today" if planned_date == today_date else planned_date.strftime("%A, %B %-d")
+        planned_time = standard.get("planned_time") or goal.get("planned_time")
+        time_label = f" at {planned_time}" if planned_time else ""
+        summaries.append(f"{goal.get('title', 'Planned standard')} is planned for {day_label}{time_label}.")
+    return summaries
+
+
 def _safe_calendar_events_for_date(date_obj) -> list[dict]:
     try:
         return get_calendar_events_for_date(date_obj)
@@ -1049,6 +1068,7 @@ def build_daily_debrief_summary(user_id: str = "john") -> dict:
     workout_completed = workout_context["workout_completed"]
     shopping = _latest_unchecked_shopping_items(user_id)
     all_goals = list_goals(user_id, active_only=False)
+    planned_standard_summaries = _planned_standard_summaries(all_goals, now.date())
     objectives = _daily_goal_impacts(user_id, today, workout_context)
     objectives_completed = sum(1 for objective in objectives if objective.get("completed"))
     objectives_total = len(objectives)
@@ -1195,6 +1215,7 @@ def build_daily_debrief_summary(user_id: str = "john") -> dict:
         f"Workout logged: {training['lift_completed']}." if workout_completed and training.get("lift_completed") else "No workout log was found today.",
         f"That session moved {training['goal_impact']}" if training.get("goal_impact") else None,
         f"Stayed {daily_status.lower()} on spending." if daily_status else None,
+        f"Planned standard: {planned_standard_summaries[0]}" if planned_standard_summaries else None,
         f"Next protocol is {_safe_lift_label(next_protocol['lift'])} on {next_protocol['weekday']}." if next_protocol else None,
         f"Tomorrow looks like a {_safe_day_label(tomorrow_day_type)} day." if tomorrow_day_type else None,
         f"Main lesson: {lessons.get('adjust_tomorrow') or lessons.get('worked') or 'keep tomorrow simple.'}",

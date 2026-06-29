@@ -595,6 +595,9 @@ export default function Home() {
             <Link href="/" className="command-nav-link">
               Command Center
             </Link>
+            <Link href="/goals" className="command-nav-link">
+              Goals
+            </Link>
             <Link href="/recipes" className="command-nav-link">
               Recipe Vault
             </Link>

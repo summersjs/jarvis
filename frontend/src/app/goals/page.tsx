@@ -176,6 +176,9 @@ function GoalsPageInner() {
   const [planTimes, setPlanTimes] = useState<Record<string, string>>({});
   const [planNotes, setPlanNotes] = useState<Record<string, string>>({});
   const [milestoneTitles, setMilestoneTitles] = useState<Record<string, string>>({});
+  const [milestonePlanDates, setMilestonePlanDates] = useState<Record<string, string>>({});
+  const [milestoneCosts, setMilestoneCosts] = useState<Record<string, string>>({});
+  const [milestoneNotes, setMilestoneNotes] = useState<Record<string, string>>({});
   const [historyGoal, setHistoryGoal] = useState<Goal | null>(null);
   const [focusedGoalId, setFocusedGoalId] = useState<string | null>(null);
 
@@ -370,6 +373,9 @@ function GoalsPageInner() {
   async function updateMilestone(milestoneId: string, status: string) {
     setError("");
     setMessage("");
+    const targetDate = milestonePlanDates[milestoneId];
+    const cost = milestoneCosts[milestoneId];
+    const notes = milestoneNotes[milestoneId];
 
     try {
       const res = await fetch(apiUrl(`/goals/milestones/${milestoneId}`), {
@@ -378,13 +384,24 @@ function GoalsPageInner() {
           "Content-Type": "application/json",
           "x-api-key": API_KEY,
         },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({
+          status,
+          target_date: targetDate || undefined,
+          cost: cost ? Number(cost) : undefined,
+          notes: notes?.trim() || undefined,
+        }),
       });
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Failed to update milestone.");
 
-      setMessage("Milestone updated.");
+      setMessage(
+        status === "complete"
+          ? "Milestone completed and logged."
+          : status === "open"
+            ? "Milestone reopened."
+            : "Milestone planned.",
+      );
       await loadGoals();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update milestone.");
@@ -691,6 +708,12 @@ function GoalsPageInner() {
                 onMilestoneTitleChange={(value) => setMilestoneTitles((prev) => ({ ...prev, [goal.id]: value }))}
                 onAddMilestone={() => addMilestone(goal)}
                 onUpdateMilestone={updateMilestone}
+                milestonePlanDates={milestonePlanDates}
+                milestoneCosts={milestoneCosts}
+                milestoneNotes={milestoneNotes}
+                onMilestonePlanDateChange={(milestoneId, value) => setMilestonePlanDates((prev) => ({ ...prev, [milestoneId]: value }))}
+                onMilestoneCostChange={(milestoneId, value) => setMilestoneCosts((prev) => ({ ...prev, [milestoneId]: value }))}
+                onMilestoneNoteChange={(milestoneId, value) => setMilestoneNotes((prev) => ({ ...prev, [milestoneId]: value }))}
                 onArchive={() => archiveGoal(goal.id)}
                 onOpenHistory={() => setHistoryGoal(goal)}
               />
@@ -816,6 +839,12 @@ function GoalCard({
   onMilestoneTitleChange,
   onAddMilestone,
   onUpdateMilestone,
+  milestonePlanDates,
+  milestoneCosts,
+  milestoneNotes,
+  onMilestonePlanDateChange,
+  onMilestoneCostChange,
+  onMilestoneNoteChange,
   onArchive,
   onOpenHistory,
 }: {
@@ -837,6 +866,12 @@ function GoalCard({
   onMilestoneTitleChange: (value: string) => void;
   onAddMilestone: () => void;
   onUpdateMilestone: (milestoneId: string, status: string) => void;
+  milestonePlanDates: Record<string, string>;
+  milestoneCosts: Record<string, string>;
+  milestoneNotes: Record<string, string>;
+  onMilestonePlanDateChange: (milestoneId: string, value: string) => void;
+  onMilestoneCostChange: (milestoneId: string, value: string) => void;
+  onMilestoneNoteChange: (milestoneId: string, value: string) => void;
   onArchive: () => void;
   onOpenHistory: () => void;
 }) {
@@ -873,6 +908,12 @@ function GoalCard({
         onMilestoneTitleChange={onMilestoneTitleChange}
         onAddMilestone={onAddMilestone}
         onUpdateMilestone={onUpdateMilestone}
+        milestonePlanDates={milestonePlanDates}
+        milestoneCosts={milestoneCosts}
+        milestoneNotes={milestoneNotes}
+        onMilestonePlanDateChange={onMilestonePlanDateChange}
+        onMilestoneCostChange={onMilestoneCostChange}
+        onMilestoneNoteChange={onMilestoneNoteChange}
         onArchive={onArchive}
       />
     );
@@ -1138,7 +1179,7 @@ function StandardCard({
         />
         <button
           onClick={onPlan}
-          className="rounded-xl border border-cyan-300/40 bg-cyan-300/10 px-4 py-3 text-cyan-100 transition hover:bg-cyan-300/20"
+          className="command-action-button command-action-cyan border border-cyan-300/40 bg-cyan-300/10 px-4 py-3 text-cyan-100"
         >
           Plan
         </button>
@@ -1164,6 +1205,12 @@ function ProjectCard({
   onMilestoneTitleChange,
   onAddMilestone,
   onUpdateMilestone,
+  milestonePlanDates,
+  milestoneCosts,
+  milestoneNotes,
+  onMilestonePlanDateChange,
+  onMilestoneCostChange,
+  onMilestoneNoteChange,
   onArchive,
 }: {
   goal: Goal;
@@ -1172,6 +1219,12 @@ function ProjectCard({
   onMilestoneTitleChange: (value: string) => void;
   onAddMilestone: () => void;
   onUpdateMilestone: (milestoneId: string, status: string) => void;
+  milestonePlanDates: Record<string, string>;
+  milestoneCosts: Record<string, string>;
+  milestoneNotes: Record<string, string>;
+  onMilestonePlanDateChange: (milestoneId: string, value: string) => void;
+  onMilestoneCostChange: (milestoneId: string, value: string) => void;
+  onMilestoneNoteChange: (milestoneId: string, value: string) => void;
   onArchive: () => void;
 }) {
   const project = goal.project;
@@ -1205,28 +1258,94 @@ function ProjectCard({
       </div>
 
       <div className="mt-5 grid gap-2">
-        {milestones.map((milestone) => (
-          <div key={milestone.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-purple-300/20 bg-black px-3 py-2">
+        {milestones.map((milestone) => {
+          const complete = isMilestoneComplete(milestone);
+          const planned = (milestone.status || "").toLowerCase() === "planned";
+          const statusLabel = getMilestoneStatusLabel(milestone);
+
+          return (
+          <div
+            key={milestone.id}
+            className={`grid gap-3 rounded-xl border px-3 py-3 transition ${
+              complete
+                ? "border-green-300/45 bg-green-400/10 shadow-[0_0_22px_rgba(34,197,94,0.16)]"
+                : planned
+                  ? "border-cyan-300/35 bg-cyan-300/5 shadow-[0_0_18px_rgba(34,211,238,0.08)] lg:grid-cols-[1fr_1fr_auto]"
+                  : "border-purple-300/20 bg-black lg:grid-cols-[1fr_1fr_auto]"
+            }`}
+          >
             <div>
-              <p className="font-semibold text-green-100">{milestone.title}</p>
-              <p className="text-xs uppercase tracking-[0.14em] text-purple-200/70">{milestone.status}</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="font-semibold text-green-100">{milestone.title}</p>
+                <span
+                  className={`rounded-full border px-2 py-1 text-[0.65rem] font-bold uppercase tracking-[0.16em] ${
+                    complete
+                      ? "border-green-300/45 bg-green-300/10 text-green-100"
+                      : planned
+                        ? "border-cyan-300/40 bg-cyan-300/10 text-cyan-100"
+                        : "border-purple-300/35 bg-purple-300/10 text-purple-100"
+                  }`}
+                >
+                  {statusLabel}
+                </span>
+              </div>
+              {!complete && (
+                <p className="mt-1 text-xs uppercase tracking-[0.14em] text-purple-200/70">
+                  {milestone.target_date ? formatPlannedDate(milestone.target_date) : "Open"}
+                  {milestone.cost ? ` · $${milestone.cost}` : ""}
+                </p>
+              )}
+              {!complete && milestone.notes && (
+                <p className="mt-1 text-sm text-green-300/70">{milestone.notes}</p>
+              )}
+              {complete && (
+                <p className="mt-1 text-xs uppercase tracking-[0.18em] text-green-300/65">
+                  Inventory secured
+                </p>
+              )}
             </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => onUpdateMilestone(milestone.id, "planned")}
-                className="rounded-lg border border-cyan-300/30 px-3 py-2 text-sm text-cyan-100 hover:bg-cyan-300/10"
-              >
-                Plan
-              </button>
-              <button
-                onClick={() => onUpdateMilestone(milestone.id, "complete")}
-                className="rounded-lg border border-green-400/30 px-3 py-2 text-sm text-green-100 hover:bg-green-400/10"
-              >
-                Complete
-              </button>
-            </div>
+            {!complete && (
+              <>
+                <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-1">
+                  <input
+                    type="date"
+                    value={milestonePlanDates[milestone.id] ?? milestone.target_date ?? ""}
+                    onChange={(e) => onMilestonePlanDateChange(milestone.id, e.target.value)}
+                    className="rounded-lg border border-purple-300/25 bg-black px-3 py-2 text-sm"
+                  />
+                  <input
+                    type="number"
+                    value={milestoneCosts[milestone.id] ?? (milestone.cost ? String(milestone.cost) : "")}
+                    onChange={(e) => onMilestoneCostChange(milestone.id, e.target.value)}
+                    className="rounded-lg border border-purple-300/25 bg-black px-3 py-2 text-sm"
+                    placeholder="Cost"
+                  />
+                  <input
+                    value={milestoneNotes[milestone.id] ?? milestone.notes ?? ""}
+                    onChange={(e) => onMilestoneNoteChange(milestone.id, e.target.value)}
+                    className="rounded-lg border border-purple-300/25 bg-black px-3 py-2 text-sm"
+                    placeholder="2 x 16GB RAM, $180-$200, link"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => onUpdateMilestone(milestone.id, planned ? "open" : "planned")}
+                    className="command-action-button command-action-cyan border border-cyan-300/30 px-3 py-2 text-sm text-cyan-100"
+                  >
+                    {planned ? "Open" : "Plan"}
+                  </button>
+                  <button
+                    onClick={() => onUpdateMilestone(milestone.id, "complete")}
+                    className="command-action-button command-action-green border border-green-400/30 px-3 py-2 text-sm text-green-100"
+                  >
+                    Complete
+                  </button>
+                </div>
+              </>
+            )}
           </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="mt-5 grid gap-3 md:grid-cols-[1fr_auto]">
@@ -1238,7 +1357,7 @@ function ProjectCard({
         />
         <button
           onClick={onAddMilestone}
-          className="rounded-xl border border-purple-300/40 bg-purple-300/10 px-4 py-3 text-purple-100 transition hover:bg-purple-300/20"
+          className="command-action-button command-action-purple border border-purple-300/40 bg-purple-300/10 px-4 py-3 text-purple-100"
         >
           Add Milestone
         </button>
@@ -1247,6 +1366,18 @@ function ProjectCard({
       <RecentLogs goal={goal} />
     </article>
   );
+}
+
+function isMilestoneComplete(milestone: GoalMilestone) {
+  return ["complete", "completed", "purchased"].includes((milestone.status || "").toLowerCase());
+}
+
+function getMilestoneStatusLabel(milestone: GoalMilestone) {
+  if (!isMilestoneComplete(milestone)) {
+    return (milestone.status || "open").toUpperCase();
+  }
+
+  return milestone.title.trim().toLowerCase() === "gpu" ? "Already Acquired" : "Completed";
 }
 
 function CardHeader({
@@ -1338,7 +1469,7 @@ function LogInputs({
       />
       <button
         onClick={onLog}
-        className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-3 transition hover:bg-green-500/20"
+        className="command-action-button command-action-green border border-green-500/40 bg-green-500/10 px-4 py-3 text-green-100"
       >
         Log
       </button>

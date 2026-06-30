@@ -1044,7 +1044,7 @@ function ArchiveStyles() {
       }
 
       .dream-title-input {
-        margin: 4px auto 0;
+        margin: 0 auto 0;
         width: calc(100% - 80px);
         border: 0;
         border-bottom: 1px solid rgba(47, 38, 28, 0.18);
@@ -1057,6 +1057,7 @@ function ArchiveStyles() {
         overflow: hidden;
         text-align: center;
         text-overflow: ellipsis;
+        transform: translateX(-30px);
         white-space: nowrap;
       }
 
@@ -1070,8 +1071,8 @@ function ArchiveStyles() {
 
       .dream-textarea {
         height: 590px;
-        margin-top: 10px;
-        width: 100%;
+        margin-top: -10px;
+        width: calc(100% + 30px);
         caret-color: #2b1d12;
         resize: none;
         border: 0;
@@ -1087,14 +1088,21 @@ function ArchiveStyles() {
         line-height: 1.65;
         outline: none;
         overflow-y: auto;
-        padding: 16px 42px 70px;
+        padding: 14px 30px 70px;
         text-shadow: 0 0.5px 0.5px rgba(0, 0, 0, 0.18);
+        transform: translateX(-30px);
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+      }
+
+      .dream-textarea::-webkit-scrollbar {
+        display: none;
       }
 
       .archive-saved-seal {
         position: absolute;
-        right: clamp(58px, 6vw, 112px);
-        bottom: 42px;
+        right: calc(clamp(58px, 6vw, 112px) + 15px);
+        bottom: 72px;
         display: grid;
         justify-items: center;
         pointer-events: none;
@@ -1291,9 +1299,18 @@ function ArchiveStyles() {
           padding: 32px;
         }
 
+        .dream-title-input,
+        .dream-title-input.long,
+        .dream-title-input.very-long {
+          transform: none;
+          width: 100%;
+        }
+
         .dream-textarea {
           height: 430px;
           font-size: 21px;
+          transform: none;
+          width: 100%;
         }
       }
 
@@ -1343,6 +1360,8 @@ function ArchiveStyles() {
         .dream-title-input.long,
         .dream-title-input.very-long {
           font-size: clamp(24px, 8vw, 34px);
+          transform: none;
+          width: 100%;
         }
 
         .dream-textarea {

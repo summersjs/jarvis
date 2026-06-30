@@ -79,6 +79,18 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
   { label: "Life Moments", image: "/images/Life Moments.png", section: "moments" as const },
 ];
 
+const MOON_PHASE_ICONS: Record<string, string> = {
+  "New Moon": "/icons/new_moon.png",
+  "Waxing Crescent": "/icons/waxing_crescent.png",
+  "First Quarter": "/icons/half_moon.png",
+  "Waxing Gibbous": "/icons/waxing_gibbous.png",
+  "Full Moon": "/icons/full_moon.png",
+  "Waning Gibbous": "/icons/waning_gibbous.png",
+  "Last Quarter": "/icons/last_quarter.png",
+  "Third Quarter": "/icons/last_quarter.png",
+  "Waning Crescent": "/icons/waning_crescent.png",
+};
+
 function emptyForm(prompt: string): DreamForm {
   return {
     title: "",
@@ -547,10 +559,10 @@ function WaxSealButton({ label, image, onClick }: { label: string; image: string
 }
 
 function MoonPhaseIcon({ phase }: { phase: string }) {
-  const phaseClass = phase.toLowerCase().replaceAll(" ", "-") || "unknown";
+  const icon = MOON_PHASE_ICONS[phase] || MOON_PHASE_ICONS["New Moon"];
   return (
-    <span className={`moon-phase-icon ${phaseClass}`} aria-label={phase || "Moon phase unknown"} title={phase || "Moon phase unknown"}>
-      <span />
+    <span className="moon-phase-icon" aria-label={phase || "Moon phase unknown"} title={phase || "Moon phase unknown"}>
+      <Image src={icon} alt="" width={24} height={24} />
     </span>
   );
 }
@@ -909,61 +921,18 @@ function ArchiveStyles() {
       }
 
       .moon-phase-icon {
-        position: relative;
         display: inline-grid;
-        width: 22px;
-        height: 22px;
+        width: 26px;
+        height: 26px;
         place-items: center;
-        border: 1px solid rgba(214, 168, 95, 0.38);
-        border-radius: 999px;
-        background: radial-gradient(circle at 35% 30%, #f4ead2, #d6a85f 58%, #6f4214);
-        box-shadow: 0 0 12px rgba(214, 168, 95, 0.24);
         flex: 0 0 auto;
-        overflow: hidden;
+        filter: drop-shadow(0 0 8px rgba(214, 168, 95, 0.22));
       }
 
-      .moon-phase-icon span {
-        position: absolute;
-        inset: 0;
-        border-radius: inherit;
-      }
-
-      .moon-phase-icon.new-moon {
-        background: #111827;
-      }
-
-      .moon-phase-icon.waxing-crescent span,
-      .moon-phase-icon.first-quarter span,
-      .moon-phase-icon.waxing-gibbous span {
-        background: #0b1220;
-        transform: translateX(-42%);
-      }
-
-      .moon-phase-icon.first-quarter span {
-        transform: translateX(-50%);
-      }
-
-      .moon-phase-icon.waxing-gibbous span {
-        transform: translateX(-72%);
-      }
-
-      .moon-phase-icon.full-moon span {
-        display: none;
-      }
-
-      .moon-phase-icon.waning-gibbous span,
-      .moon-phase-icon.last-quarter span,
-      .moon-phase-icon.waning-crescent span {
-        background: #0b1220;
-        transform: translateX(72%);
-      }
-
-      .moon-phase-icon.last-quarter span {
-        transform: translateX(50%);
-      }
-
-      .moon-phase-icon.waning-crescent span {
-        transform: translateX(42%);
+      .moon-phase-icon img {
+        width: 24px;
+        height: 24px;
+        object-fit: contain;
       }
 
       .dream-editor-wrap {

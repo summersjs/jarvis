@@ -111,6 +111,7 @@ def _context_snapshot(user_id: str, target_date: date) -> dict:
         or (finance.get("dashboard_cards") or {}).get("food_spend_today")
         or 0
     )
+    planned_meals = planned_meal_count(meals)
     completed_meals = completed_meal_count(meals)
     nutrition_totals = merge_nutrition(
         completed_meal_nutrition(meals),
@@ -126,7 +127,7 @@ def _context_snapshot(user_id: str, target_date: date) -> dict:
     return {
         "workout_completed": workout_completed,
         "workout": workout_summary,
-        "meals_planned": len(meals),
+        "meals_planned": planned_meals,
         "meals_completed": completed_meals,
         "nutrition_totals": nutrition_totals,
         "meals": meals,
@@ -382,7 +383,24 @@ def meal_meta(entry: dict) -> dict:
 
 
 def completed_meal_count(meals: list[dict]) -> int:
-    return sum(1 for meal in meals if meal_meta(meal).get("completed"))
+    completed_slots = {
+        meal_slot_key(meal)
+        for meal in meals
+        if meal_meta(meal).get("completed")
+    }
+    return len(completed_slots)
+
+
+def planned_meal_count(meals: list[dict]) -> int:
+    return len({meal_slot_key(meal) for meal in meals})
+
+
+def meal_slot_key(meal: dict) -> str:
+    raw_type = str(meal.get("meal_type") or meal.get("id") or "meal")
+    normalized = "".join(char for char in raw_type.strip().lower() if char.isalnum())
+    if normalized == "snack":
+        return "snack1"
+    return normalized or "meal"
 
 
 def completed_meal_nutrition(meals: list[dict]) -> dict:

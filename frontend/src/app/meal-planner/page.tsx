@@ -108,16 +108,24 @@ type MealMeta = {
 
 const MEAL_TYPE_OPTIONS = [
   { value: "breakfast", label: "Breakfast" },
-  { value: "dinner", label: "Dinner" },
   { value: "lunch", label: "Lunch" },
-  { value: "snack", label: "Snack" },
+  { value: "dinner", label: "Dinner" },
+  { value: "snack1", label: "Snack 1" },
+  { value: "snack2", label: "Snack 2" },
+  { value: "snack3", label: "Snack 3" },
+  { value: "preworkout", label: "Preworkout" },
+  { value: "postworkout", label: "Postworkout" },
 ];
 
 const MEAL_GROUPS = [
   { value: "breakfast", label: "Breakfast" },
   { value: "lunch", label: "Lunch" },
   { value: "dinner", label: "Dinner" },
-  { value: "snack", label: "Snack" },
+  { value: "snack1", label: "Snack 1" },
+  { value: "snack2", label: "Snack 2" },
+  { value: "snack3", label: "Snack 3" },
+  { value: "preworkout", label: "Preworkout" },
+  { value: "postworkout", label: "Postworkout" },
   { value: "other", label: "Other" },
 ];
 
@@ -869,7 +877,7 @@ export default function MealPlannerPage() {
                                     <div className="flex flex-wrap items-start justify-between gap-3">
                                       <div>
                                         <p className="text-xs font-bold uppercase tracking-[0.16em] text-cyan-200/75">
-                                          {entry.meal_type} · {getMealSourceLabel(meta.source)}
+                                          {getMealTypeLabel(entry.meal_type)} · {getMealSourceLabel(meta.source)}
                                         </p>
                                         <p className="mt-2 font-semibold text-green-100">
                                           {entry.recipes?.title || entry.custom_meal_name || "Unnamed meal"}
@@ -1154,6 +1162,11 @@ function getMealSourceLabel(source?: string) {
   return "Recipe Vault Meal";
 }
 
+function getMealTypeLabel(mealType?: string | null) {
+  const normalized = normalizeMealType(mealType);
+  return MEAL_GROUPS.find((group) => group.value === normalized)?.label || "Other";
+}
+
 function formatMoney(value: number) {
   return value.toFixed(2);
 }
@@ -1276,7 +1289,8 @@ function buildWeeklyMealBoard(entries: MealPlanEntry[]) {
     const dateStr = formatDateInput(date);
     const dayEntries = entries.filter((entry) => entry.meal_date === dateStr);
     const groups = dayEntries.reduce<Record<string, MealPlanEntry[]>>((acc, entry) => {
-      const groupKey = MEAL_GROUPS.some((group) => group.value === entry.meal_type) ? entry.meal_type : "other";
+      const mealType = normalizeMealType(entry.meal_type);
+      const groupKey = MEAL_GROUPS.some((group) => group.value === mealType) ? mealType : "other";
       acc[groupKey] = [...(acc[groupKey] || []), entry];
       return acc;
     }, {});
@@ -1308,6 +1322,13 @@ function buildWeeklyMealBoard(entries: MealPlanEntry[]) {
       },
     };
   });
+}
+
+function normalizeMealType(mealType?: string | null) {
+  if (!mealType) return "other";
+  const normalized = mealType.trim().toLowerCase().replace(/[\s_-]+/g, "");
+  if (normalized === "snack") return "snack1";
+  return normalized;
 }
 
 function getStaticWeekRange() {

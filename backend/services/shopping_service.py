@@ -1,5 +1,6 @@
 import re
 from collections import defaultdict
+from datetime import date, datetime, timedelta
 from backend.db.supabase_client import supabase
 from backend.schemas.shopping import (
     ShoppingListCreate,
@@ -70,7 +71,97 @@ def format_quantity(amount: float, unit: str | None) -> str:
 
     return f"{amount_str} {unit}".strip()
 
+
+def current_week_start() -> str:
+    today = date.today()
+    return (today - timedelta(days=today.weekday())).isoformat()
+
+
+def is_food_vault_restock(shopping_list: dict) -> bool:
+    return (shopping_list.get("title") or "").strip().lower() == "food vault restock"
+
+
+def is_week_list(shopping_list: dict) -> bool:
+    title = (shopping_list.get("title") or "").strip().lower()
+    return title.startswith("week of") or bool(shopping_list.get("week_start"))
+
+
+def list_has_open_items(shopping_list_id: str) -> bool:
+    response = (
+        supabase.table("shopping_list_items")
+        .select("id")
+        .eq("shopping_list_id", shopping_list_id)
+        .eq("is_checked", False)
+        .limit(1)
+        .execute()
+    )
+    return bool(response.data)
+
+
+def list_has_items(shopping_list_id: str) -> bool:
+    response = (
+        supabase.table("shopping_list_items")
+        .select("id")
+        .eq("shopping_list_id", shopping_list_id)
+        .limit(1)
+        .execute()
+    )
+    return bool(response.data)
+
+
+def list_created_date(shopping_list: dict) -> date | None:
+    created_at = shopping_list.get("created_at")
+    if not created_at:
+        return None
+    try:
+        return datetime.fromisoformat(created_at.replace("Z", "+00:00")).date()
+    except ValueError:
+        return None
+
+
+def cleanup_shopping_lists(user_id: str) -> None:
+    response = (
+        supabase.table("shopping_lists")
+        .select("*")
+        .eq("user_id", user_id)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    lists = response.data or []
+    if not lists:
+        return
+
+    today = date.today()
+    week_kept = False
+    custom_kept = False
+
+    for shopping_list in lists:
+        list_id = shopping_list["id"]
+        created = list_created_date(shopping_list)
+        no_open_items = not list_has_open_items(list_id)
+        has_items = list_has_items(list_id)
+        stale_completed = no_open_items and has_items and created and created < today
+
+        if is_food_vault_restock(shopping_list):
+            if stale_completed:
+                delete_shopping_list(list_id)
+            continue
+
+        if is_week_list(shopping_list):
+            if week_kept or stale_completed:
+                delete_shopping_list(list_id)
+            else:
+                week_kept = True
+            continue
+
+        if custom_kept or stale_completed:
+            delete_shopping_list(list_id)
+            continue
+
+        custom_kept = True
+
 def create_shopping_list(payload: ShoppingListCreate):
+    cleanup_shopping_lists(payload.user_id)
     insert_data = {
         "user_id": payload.user_id,
         "title": payload.title,
@@ -83,6 +174,7 @@ def create_shopping_list(payload: ShoppingListCreate):
     if not response.data:
         raise Exception("Failed to create shopping list.")
 
+    cleanup_shopping_lists(payload.user_id)
     return get_shopping_list(response.data[0]["id"])
 
 
@@ -115,6 +207,7 @@ def get_shopping_list(shopping_list_id: str):
 
 
 def list_shopping_lists(user_id: str):
+    cleanup_shopping_lists(user_id)
     response = (
         supabase
         .table("shopping_lists")
@@ -172,6 +265,10 @@ def add_shopping_list_item(payload: ShoppingListItemCreate):
     if not response.data:
         raise Exception("Failed to add shopping list item.")
 
+    shopping_list = get_shopping_list(payload.shopping_list_id)
+    if shopping_list:
+        cleanup_shopping_lists(shopping_list.get("user_id") or "john")
+
     return response.data[0]
 
 
@@ -186,7 +283,21 @@ def update_shopping_list_item(item_id: str, payload: ShoppingListItemUpdate):
         .execute()
     )
 
-    return response.data[0] if response.data else None
+    item = response.data[0] if response.data else None
+    if item:
+        list_response = (
+            supabase.table("shopping_list_items")
+            .select("shopping_list_id")
+            .eq("id", item_id)
+            .limit(1)
+            .execute()
+        )
+        list_id = (list_response.data or [{}])[0].get("shopping_list_id")
+        if list_id:
+            shopping_list = get_shopping_list(list_id)
+            if shopping_list:
+                cleanup_shopping_lists(shopping_list.get("user_id") or "john")
+    return item
 
 
 def delete_shopping_list_item(item_id: str):

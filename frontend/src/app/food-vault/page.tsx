@@ -219,6 +219,7 @@ export default function FoodVaultPage() {
           <nav className="flex flex-wrap gap-2">
             <Link href="/" className="command-nav-link">Command Center</Link>
             <Link href="/meal-planner" className="command-nav-link">Meal Planner</Link>
+            <Link href="/recipes" className="command-nav-link">Recipe Vault</Link>
             <Link href="/shopping" className="command-nav-link">Shopping</Link>
           </nav>
         </header>

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { Heart, PackageCheck, Radar, Star } from "lucide-react";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -107,10 +108,9 @@ export default function PreferencesPage() {
       <div className="mx-auto max-w-6xl">
         <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <div>
-            <p className="text-sm uppercase tracking-[0.3em] text-green-500/70">
-              Jarvis Shopping Intelligence
-            </p>
+            <p className="section-label">Preference Intelligence</p>
             <h1 className="mt-2 text-4xl font-bold">Favorites & Obsessions</h1>
+            <p className="mt-3 text-green-300/75">Preferred brands, exact products, sizes, and shopping rules.</p>
           </div>
 
           <div className="flex gap-3">
@@ -124,7 +124,7 @@ export default function PreferencesPage() {
               href="/"
               className="command-nav-link"
             >
-              Back to HUD
+              Command Center
             </Link>
           </div>
         </div>
@@ -142,8 +142,11 @@ export default function PreferencesPage() {
         )}
 
         <div className="grid gap-6 lg:grid-cols-2">
-          <section className="rounded-2xl border border-green-500/30 bg-zinc-950 p-6">
-            <h2 className="mb-4 text-2xl font-semibold">Add Preference</h2>
+          <section className="hud-panel">
+            <div className="mb-5 flex items-center gap-3">
+              <div className="hud-panel-icon"><Radar className="h-5 w-5" /></div>
+              <h2 className="hud-panel-title">Add Preference Signal</h2>
+            </div>
 
             <div className="space-y-4">
               <input
@@ -202,19 +205,22 @@ export default function PreferencesPage() {
 
               <button
                 onClick={createPreference}
-                className="w-full rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-3 hover:bg-green-500/20 transition"
+                className="command-action-button command-action-green w-full rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-3 text-green-100"
               >
                 Save Preference
               </button>
             </div>
           </section>
 
-          <section className="rounded-2xl border border-green-500/30 bg-zinc-950 p-6">
-            <h2 className="mb-4 text-2xl font-semibold">Saved Preferences</h2>
+          <section className="hud-panel">
+            <div className="mb-5 flex items-center gap-3">
+              <div className="hud-panel-icon"><Heart className="h-5 w-5" /></div>
+              <h2 className="hud-panel-title">Saved Preference Signals</h2>
+            </div>
 
             <div className="space-y-4">
               {preferences.length === 0 && (
-                <div className="rounded-xl border border-green-500/20 bg-black p-4">
+                <div className="hud-row">
                   No favorites or obsessions yet.
                 </div>
               )}
@@ -222,16 +228,24 @@ export default function PreferencesPage() {
               {preferences.map((pref) => (
                 <div
                   key={pref.id}
-                  className="rounded-xl border border-green-500/20 bg-black p-4"
+                  className="hud-row items-start gap-4"
                 >
-                  <div className="flex items-center justify-between">
-                    <p className="text-xl font-semibold">{pref.item_keyword}</p>
-                    <span className="rounded-lg border border-green-500/30 px-3 py-1 text-sm">
-                      {pref.preference_type}
-                    </span>
+                  <div className="hud-row-icon">
+                    {pref.preference_type === "obsession" ? <Star className="h-4 w-4" /> : <PackageCheck className="h-4 w-4" />}
                   </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xl font-semibold text-green-100">{pref.item_keyword}</p>
+                      <span className={`rounded-lg border px-3 py-1 text-xs uppercase tracking-[0.16em] ${
+                        pref.preference_type === "obsession"
+                          ? "border-amber-300/35 bg-amber-300/10 text-amber-100"
+                          : "border-green-500/30 text-green-200"
+                      }`}>
+                        {pref.preference_type}
+                      </span>
+                    </div>
 
-                  <div className="mt-3 space-y-1 text-green-300/80">
+                  <div className="mt-3 grid gap-2 text-green-300/80">
                     {pref.preferred_brand && <p>Brand: {pref.preferred_brand}</p>}
                     {pref.preferred_product_name && <p>Product: {pref.preferred_product_name}</p>}
                     {(pref.preferred_size || pref.preferred_unit) && (
@@ -240,6 +254,7 @@ export default function PreferencesPage() {
                       </p>
                     )}
                     {pref.notes && <p>Notes: {pref.notes}</p>}
+                  </div>
                   </div>
                 </div>
               ))}

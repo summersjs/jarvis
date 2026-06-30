@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import { ChefHat, Clock, ListChecks, Pencil } from "lucide-react";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -206,13 +207,12 @@ export default function RecipeDetailPage() {
       <div className="mx-auto max-w-4xl">
         <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <div>
-            <p className="text-sm uppercase tracking-[0.3em] text-green-500/70">
-              Jarvis Food Ops
-            </p>
-            <h1 className="mt-2 text-4xl font-bold">Recipe Detail</h1>
+            <p className="section-label">Recipe Protocol Detail</p>
+            <h1 className="mt-2 text-4xl font-bold">{recipe?.title || "Recipe Detail"}</h1>
+            <p className="mt-3 text-green-300/75">Ingredient sequence, prep timing, and repeatable cooking instructions.</p>
           </div>
 
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
             <button
               onClick={() => {
                 setIsEditing((prev) => !prev);
@@ -246,17 +246,20 @@ export default function RecipeDetailPage() {
         )}
 
         {!recipe && !error && (
-          <div className="rounded-xl border border-green-500/20 bg-zinc-950 p-4">
+          <div className="hud-panel">
             Loading recipe...
           </div>
         )}
 
         {recipe && !isEditing && (
-          <section className="rounded-2xl border border-green-500/30 bg-zinc-950 p-6">
+          <section className="hud-panel">
             <div className="flex items-center justify-between gap-4">
-              <div>
+              <div className="flex items-start gap-3">
+                <div className="hud-panel-icon"><ChefHat className="h-5 w-5" /></div>
+                <div>
                 <h2 className="text-3xl font-bold">{recipe.title}</h2>
                 <p className="mt-2 text-green-300/70">Source: {recipe.source_type}</p>
+                </div>
               </div>
 
               {recipe.is_favorite && (
@@ -271,23 +274,32 @@ export default function RecipeDetailPage() {
             )}
 
             <div className="mt-6 grid gap-4 md:grid-cols-3">
-              <div className="rounded-xl border border-green-500/20 bg-black p-4">
+              <div className="hud-row">
+                <div className="hud-row-icon"><ListChecks className="h-4 w-4" /></div>
+                <div>
                 <p className="text-sm uppercase tracking-wide text-green-500/60">Servings</p>
                 <p className="mt-2 text-xl font-semibold">{recipe.servings ?? "-"}</p>
+                </div>
               </div>
 
-              <div className="rounded-xl border border-green-500/20 bg-black p-4">
+              <div className="hud-row">
+                <div className="hud-row-icon"><Clock className="h-4 w-4" /></div>
+                <div>
                 <p className="text-sm uppercase tracking-wide text-green-500/60">Prep</p>
                 <p className="mt-2 text-xl font-semibold">
                   {recipe.prep_minutes ? `${recipe.prep_minutes} min` : "-"}
                 </p>
+                </div>
               </div>
 
-              <div className="rounded-xl border border-green-500/20 bg-black p-4">
+              <div className="hud-row">
+                <div className="hud-row-icon"><Clock className="h-4 w-4" /></div>
+                <div>
                 <p className="text-sm uppercase tracking-wide text-green-500/60">Cook</p>
                 <p className="mt-2 text-xl font-semibold">
                   {recipe.cook_minutes ? `${recipe.cook_minutes} min` : "-"}
                 </p>
+                </div>
               </div>
             </div>
 
@@ -298,7 +310,7 @@ export default function RecipeDetailPage() {
                   recipe.ingredients.map((ingredient, index) => (
                     <div
                       key={ingredient.id || index}
-                      className="rounded-xl border border-green-500/20 bg-black p-4"
+                      className="hud-row"
                     >
                       <p className="font-semibold">
                         {ingredient.quantity ? `${ingredient.quantity} ` : ""}
@@ -311,7 +323,7 @@ export default function RecipeDetailPage() {
                     </div>
                   ))
                 ) : (
-                  <div className="rounded-xl border border-green-500/20 bg-black p-4">
+                  <div className="hud-row">
                     No ingredients listed.
                   </div>
                 )}
@@ -320,7 +332,7 @@ export default function RecipeDetailPage() {
 
             <div className="mt-8">
               <h3 className="text-2xl font-semibold">Instructions</h3>
-              <div className="mt-4 rounded-xl border border-green-500/20 bg-black p-4 whitespace-pre-wrap text-green-300/90">
+              <div className="hud-row mt-4 whitespace-pre-wrap text-green-300/90">
                 {recipe.instructions || "No instructions yet."}
               </div>
             </div>
@@ -328,8 +340,11 @@ export default function RecipeDetailPage() {
         )}
 
         {recipe && isEditing && (
-          <section className="rounded-2xl border border-green-500/30 bg-zinc-950 p-6">
-            <h2 className="mb-4 text-2xl font-semibold">Edit Recipe</h2>
+          <section className="hud-panel">
+            <div className="mb-5 flex items-center gap-3">
+              <div className="hud-panel-icon"><Pencil className="h-5 w-5" /></div>
+              <h2 className="hud-panel-title">Edit Recipe Protocol</h2>
+            </div>
 
             <div className="grid gap-4 md:grid-cols-2">
               <div className="md:col-span-2">
@@ -405,12 +420,12 @@ export default function RecipeDetailPage() {
               </div>
             </div>
 
-            <div className="mt-8">
+            <div className="mt-8 rounded-xl border border-green-500/20 bg-black/40 p-4">
               <div className="mb-3 flex items-center justify-between">
                 <h3 className="text-xl font-semibold">Ingredients</h3>
                 <button
                   onClick={addIngredientRow}
-                  className="rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 hover:bg-green-500/20 transition"
+                  className="command-action-button command-action-green rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 text-green-100"
                 >
                   Add Ingredient
                 </button>
@@ -456,7 +471,7 @@ export default function RecipeDetailPage() {
 
                       <button
                         onClick={() => removeIngredientRow(index)}
-                        className="rounded-lg border border-red-500/30 px-3 py-2 text-red-300 hover:bg-red-500/10"
+                        className="command-action-button border border-red-500/30 px-3 py-2 text-red-300"
                       >
                         Remove
                       </button>
@@ -469,7 +484,7 @@ export default function RecipeDetailPage() {
             <button
               onClick={saveRecipe}
               disabled={isSaving}
-              className="mt-6 w-full rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-3 hover:bg-green-500/20 transition disabled:opacity-50"
+              className="command-action-button command-action-green mt-6 w-full rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-3 text-green-100 disabled:opacity-50"
             >
               {isSaving ? "Saving..." : "Save Changes"}
             </button>

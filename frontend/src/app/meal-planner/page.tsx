@@ -532,7 +532,7 @@ export default function MealPlannerPage() {
               href="/"
               className="command-nav-link"
             >
-              Back to HUD
+              Command Center
             </Link>
             <Link href="/finance-ops" className="command-nav-link">
               Finance Ops

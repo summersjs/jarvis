@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { X } from "lucide-react";
+import { BookOpen, PlusCircle, X } from "lucide-react";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -275,10 +275,9 @@ export default function RecipesPage() {
       <div className="mx-auto max-w-5xl">
         <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <div>
-            <p className="text-sm uppercase tracking-[0.3em] text-green-500/70">
-              Jarvis Food Ops
-            </p>
+            <p className="section-label">Recipe Intelligence Archive</p>
             <h1 className="mt-2 text-4xl font-bold">Recipe Vault</h1>
+            <p className="mt-3 text-green-300/75">Structured meals, ingredients, macros, and repeatable food protocols.</p>
           </div>
 
           <div className="flex gap-3">
@@ -308,7 +307,7 @@ export default function RecipesPage() {
               href="/"
               className="command-nav-link"
             >
-              Back to HUD
+              Command Center
             </Link>
           </div>
         </div>
@@ -326,8 +325,11 @@ export default function RecipesPage() {
         )}
 
         {showCreateForm && (
-          <section className="mb-8 rounded-2xl border border-green-500/30 bg-zinc-950 p-6">
-            <h2 className="mb-4 text-2xl font-semibold">Create Recipe</h2>
+          <section className="hud-panel mb-8">
+            <div className="mb-5 flex items-center gap-3">
+              <div className="hud-panel-icon"><PlusCircle className="h-5 w-5" /></div>
+              <h2 className="hud-panel-title">Create Recipe Protocol</h2>
+            </div>
 
             <div className="grid gap-4 md:grid-cols-2">
               <div className="md:col-span-2">
@@ -409,7 +411,7 @@ export default function RecipesPage() {
               </div>
             </div>
 
-            <div className="mt-8">
+            <div className="mt-8 rounded-xl border border-green-500/20 bg-black/40 p-4">
               <div className="mb-3 flex items-center justify-between">
                 <h3 className="text-xl font-semibold">Ingredients</h3>
                 <button
@@ -433,7 +435,7 @@ export default function RecipesPage() {
                 </select>
                 <button
                   onClick={addFoodVaultIngredient}
-                  className="command-action-button border border-cyan-300/35 px-4 py-3 text-cyan-100"
+                  className="command-action-button command-action-cyan border border-cyan-300/35 px-4 py-3 text-cyan-100"
                 >
                   Add Food Item
                 </button>
@@ -486,7 +488,7 @@ export default function RecipesPage() {
 
                       <button
                         onClick={() => removeIngredientRow(index)}
-                        className="rounded-lg border border-red-500/30 px-3 py-2 text-red-300 hover:bg-red-500/10"
+                        className="command-action-button border border-red-500/30 px-3 py-2 text-red-300"
                       >
                         Remove
                       </button>
@@ -506,9 +508,14 @@ export default function RecipesPage() {
           </section>
         )}
 
-        <div className="space-y-4">
+        <section className="hud-panel">
+          <div className="mb-5 flex items-center gap-3">
+            <div className="hud-panel-icon"><BookOpen className="h-5 w-5" /></div>
+            <h2 className="hud-panel-title">Stored Meal Protocols</h2>
+          </div>
+          <div className="space-y-4">
           {recipes.length === 0 && (
-            <div className="rounded-xl border border-green-500/20 bg-zinc-950 p-4">
+            <div className="hud-row">
               No recipes yet.
             </div>
           )}
@@ -519,7 +526,7 @@ export default function RecipesPage() {
             <Link
               key={recipe.id}
               href={`/recipes/${recipe.id}`}
-              className="block rounded-xl border border-green-500/20 bg-zinc-950 p-4 transition hover:border-green-300/45 hover:bg-green-500/5 hover:shadow-[0_0_22px_rgba(34,197,94,0.16)]"
+              className="hud-row block p-4 transition hover:-translate-y-0.5 hover:border-green-300/45 hover:bg-green-500/5 hover:shadow-[0_0_22px_rgba(34,197,94,0.16)]"
             >
               <div className="flex items-center justify-between">
                 <h2 className="text-xl font-semibold">{recipe.title}</h2>
@@ -580,7 +587,8 @@ export default function RecipesPage() {
             </Link>
             );
           })}
-        </div>
+          </div>
+        </section>
       </div>
     </main>
   );
@@ -635,7 +643,7 @@ function parseServingQuantity(quantity?: string | null) {
 
 function Macro({ label, value, unit }: { label: string; value: number; unit: string }) {
   return (
-    <div className="rounded-lg border border-green-500/20 bg-black px-3 py-2">
+    <div className="rounded-lg border border-green-500/20 bg-black px-3 py-2 transition hover:border-green-300/40 hover:shadow-[0_0_16px_rgba(34,197,94,0.14)]">
       <p className="text-[0.65rem] uppercase tracking-[0.16em] text-green-500/65">{label}</p>
       <p className="mt-1 font-semibold text-green-100">{Math.round(value * 10) / 10} {unit}</p>
     </div>

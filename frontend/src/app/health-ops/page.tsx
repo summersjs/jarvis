@@ -356,6 +356,7 @@ export default function HealthOpsPage() {
   const [selectedEvent, setSelectedEvent] = useState<HealthEvent | null>(null);
   const [detailForm, setDetailForm] = useState<DetailForm>(emptyDetailForm);
   const [doctorRange, setDoctorRange] = useState("7");
+  const [pendingCaffeineButtons, setPendingCaffeineButtons] = useState<string[]>([]);
   const [checkin, setCheckin] = useState<CheckinForm>({
     energy: "",
     mood: "",
@@ -512,6 +513,7 @@ export default function HealthOpsPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Failed to save daily check-in.");
       setMessage("Daily health check-in saved.");
+      setPendingCaffeineButtons([]);
       await loadDashboard();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save daily check-in.");
@@ -581,8 +583,15 @@ export default function HealthOpsPage() {
                     {CAFFEINE_BUTTONS.map(([label, mg]) => (
                       <button
                         key={label}
-                        onClick={() => setCheckin((prev) => ({ ...prev, caffeine_mg: String(Number(prev.caffeine_mg || 0) + mg) }))}
-                        className="command-action-button border border-green-500/25 px-3 py-2 text-xs text-green-200"
+                        onClick={() => {
+                          setPendingCaffeineButtons((prev) => [...prev, label]);
+                          setCheckin((prev) => ({ ...prev, caffeine_mg: String(Number(prev.caffeine_mg || 0) + mg) }));
+                        }}
+                        className={`command-action-button border px-3 py-2 text-xs ${
+                          pendingCaffeineButtons.includes(label)
+                            ? "border-amber-300/60 bg-amber-300/15 text-amber-100 shadow-[0_0_18px_rgba(251,191,36,0.18)]"
+                            : "border-green-500/25 text-green-200"
+                        }`}
                       >
                         {label}
                       </button>

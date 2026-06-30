@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { CheckCircle2, ClipboardList, Plus, Radar, ShoppingCart } from "lucide-react";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -240,10 +241,9 @@ async function generateFromMealPlan() {
       <div className="mx-auto max-w-6xl">
         <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <div>
-            <p className="text-sm uppercase tracking-[0.3em] text-green-500/70">
-              Jarvis Food Ops
-            </p>
+            <p className="section-label">Supply Acquisition Control</p>
             <h1 className="mt-2 text-4xl font-bold">Shopping Lists</h1>
+            <p className="mt-3 text-green-300/75">Active supply lists, meal-plan generation, and restock operations.</p>
           </div>
 
           <div className="flex gap-3">
@@ -269,7 +269,7 @@ async function generateFromMealPlan() {
               href="/"
               className="command-nav-link"
             >
-              Back to HUD
+              Command Center
             </Link>
           </div>
         </div>
@@ -287,8 +287,11 @@ async function generateFromMealPlan() {
         )}
 
         <div className="grid gap-6 lg:grid-cols-2">
-          <section className="rounded-2xl border border-green-500/30 bg-zinc-950 p-6">
-            <h2 className="mb-4 text-2xl font-semibold">Create Shopping List</h2>
+          <section className="hud-panel">
+            <div className="mb-5 flex items-center gap-3">
+              <div className="hud-panel-icon"><Plus className="h-5 w-5" /></div>
+              <h2 className="hud-panel-title">Create Supply List</h2>
+            </div>
 
             <div className="space-y-4">
               <input
@@ -315,18 +318,18 @@ async function generateFromMealPlan() {
 
               <button
                 onClick={createList}
-                className="w-full rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-3 hover:bg-green-500/20 transition"
+                className="command-action-button command-action-green w-full rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-3 text-green-100"
               >
                 Create Shopping List
               </button>
             </div>
 
             <div className="mt-8">
-              <h3 className="mb-3 text-xl font-semibold">Your Lists</h3>
+              <h3 className="hud-panel-title mb-3">Active Lists</h3>
 
               <div className="space-y-3">
                 {lists.length === 0 && (
-                  <div className="rounded-xl border border-green-500/20 bg-black p-4">
+                  <div className="hud-row">
                     No shopping lists yet.
                   </div>
                 )}
@@ -335,41 +338,55 @@ async function generateFromMealPlan() {
                   <button
                     key={list.id}
                     onClick={() => loadListDetails(list.id)}
-                    className="block w-full rounded-xl border border-green-500/20 bg-black p-4 text-left hover:bg-green-500/5"
+                    className={`hud-row block w-full text-left transition hover:-translate-y-0.5 ${
+                      selectedList?.id === list.id
+                        ? "border-green-300/55 bg-green-400/10 shadow-[0_0_22px_rgba(34,197,94,0.18)]"
+                        : ""
+                    }`}
                   >
+                    <div className="flex items-center gap-3">
+                      <div className="hud-row-icon"><ClipboardList className="h-4 w-4" /></div>
+                      <div>
                     <p className="font-semibold">{list.title}</p>
                     {list.week_start && (
                       <p className="mt-1 text-sm text-green-300/70">
                         Week start: {list.week_start}
                       </p>
                     )}
+                      </div>
+                    </div>
                   </button>
                 ))}
               </div>
             </div>
           </section>
 
-          <section className="rounded-2xl border border-green-500/30 bg-zinc-950 p-6">
-            <h2 className="mb-4 text-2xl font-semibold">Shopping List Details</h2>
+          <section className="hud-panel">
+            <div className="mb-5 flex items-center gap-3">
+              <div className="hud-panel-icon"><Radar className="h-5 w-5" /></div>
+              <h2 className="hud-panel-title">Supply List Details</h2>
+            </div>
 
             <div className="mb-6">
             <button
                 onClick={generateFromMealPlan}
-                className="w-full rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-3 hover:bg-green-500/20 transition"
+                className="command-action-button command-action-green w-full rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-3 text-green-100"
             >
                 Generate from Meal Plan
             </button>
             </div>
 
             {!selectedList && (
-              <div className="rounded-xl border border-green-500/20 bg-black p-4">
+              <div className="hud-row">
                 Select a shopping list.
               </div>
             )}
 
             {selectedList && (
               <>
-                <div className="mb-6 rounded-xl border border-green-500/20 bg-black p-4">
+                <div className="hud-row mb-6">
+                  <div className="hud-row-icon"><ShoppingCart className="h-4 w-4" /></div>
+                  <div>
                   <p className="text-xl font-semibold">{selectedList.title}</p>
                   {selectedList.week_start && (
                     <p className="mt-1 text-sm text-green-300/70">
@@ -379,10 +396,11 @@ async function generateFromMealPlan() {
                   {selectedList.notes && (
                     <p className="mt-2 text-green-300/80">{selectedList.notes}</p>
                   )}
+                  </div>
                 </div>
 
-                <div className="mb-6 space-y-3 rounded-xl border border-green-500/20 bg-black p-4">
-                  <h3 className="text-lg font-semibold">Add Manual Item</h3>
+                <div className="hud-row mb-6 flex-col items-stretch space-y-3">
+                  <h3 className="hud-panel-title">Add Manual Item</h3>
 
                   <input
                     value={newItemName}
@@ -407,7 +425,7 @@ async function generateFromMealPlan() {
 
                   <button
                     onClick={addItem}
-                    className="w-full rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-3 hover:bg-green-500/20 transition"
+                    className="command-action-button command-action-green w-full rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-3 text-green-100"
                   >
                     Add Item
                   </button>
@@ -417,7 +435,7 @@ async function generateFromMealPlan() {
                   <h3 className="text-lg font-semibold">Items</h3>
 
                   {(!selectedList.items || selectedList.items.length === 0) && (
-                    <div className="rounded-xl border border-green-500/20 bg-black p-4">
+                    <div className="hud-row">
                       No items yet.
                     </div>
                   )}
@@ -425,7 +443,7 @@ async function generateFromMealPlan() {
                   {selectedList.items?.map((item) => (
                     <div
                         key={item.id}
-                        className="rounded-xl border border-green-500/20 bg-black p-4"
+                        className={`hud-row ${item.is_checked ? "border-green-300/25 bg-green-400/5" : ""}`}
                     >
                         <div className="flex items-start justify-between gap-4">
                         <div className={item.is_checked ? "opacity-50" : ""}>
@@ -437,12 +455,17 @@ async function generateFromMealPlan() {
                             </p>
                         </div>
 
-                        <input
-                            type="checkbox"
-                            checked={item.is_checked}
-                            onChange={() => toggleItemChecked(item.id, item.is_checked)}
-                            className="mt-1 h-5 w-5"
-                        />
+                        <button
+                          onClick={() => toggleItemChecked(item.id, item.is_checked)}
+                          className={`command-action-button border p-2 ${
+                            item.is_checked
+                              ? "border-green-300/45 bg-green-400/15 text-green-100"
+                              : "border-green-500/30 text-green-300"
+                          }`}
+                          aria-label={item.is_checked ? "Mark item open" : "Mark item bought"}
+                        >
+                          <CheckCircle2 className="h-5 w-5" />
+                        </button>
                         </div>
                     </div>
                     ))}

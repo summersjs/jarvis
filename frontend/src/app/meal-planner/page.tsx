@@ -13,6 +13,7 @@ const API_KEY =
 type Recipe = {
   id: string;
   title: string;
+  servings?: number | null;
   ingredients?: RecipeIngredient[];
 };
 
@@ -470,7 +471,9 @@ export default function MealPlannerPage() {
     const recipe = recipes.find((item) => item.id === recipeIdValue);
     if (!recipe) return;
     const totals = calculateRecipeMacros(recipe.ingredients || [], foodItems);
+    const cost = estimateRecipeCost(recipe.ingredients || [], foodItems);
     setCustomMealName(recipe.title);
+    setEstimatedCost(cost ? cost.toFixed(2) : "");
     setCalories(totals.calories ? String(totals.calories) : "");
     setProtein(totals.protein_g ? String(totals.protein_g) : "");
     setCarbs(totals.carbs_g ? String(totals.carbs_g) : "");
@@ -1242,6 +1245,17 @@ function calculateRecipeMacros(ingredients: RecipeIngredient[], foodItems: FoodV
     carbs_g: roundMacro(totals.carbs_g),
     fat_g: roundMacro(totals.fat_g),
   };
+}
+
+function estimateRecipeCost(ingredients: RecipeIngredient[], foodItems: FoodVaultItem[]) {
+  const total = ingredients.reduce((sum, ingredient) => {
+    const food = findFoodItemForIngredient(ingredient.item_name, foodItems);
+    if (!food?.estimated_price) return sum;
+    const packageQuantity = Number(food.package_quantity || 1);
+    const quantity = parseServingQuantity(ingredient.quantity);
+    return sum + (Number(food.estimated_price) / packageQuantity) * quantity;
+  }, 0);
+  return total > 0 ? roundMoney(total) : null;
 }
 
 function findFoodItemForIngredient(name: string, foodItems: FoodVaultItem[]) {

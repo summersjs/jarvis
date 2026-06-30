@@ -29,6 +29,7 @@ type MealPlanEntry = {
   id: string;
   meal_date: string;
   meal_type: string;
+  recipe_id?: string | null;
   custom_meal_name?: string | null;
   notes?: string | null;
   meal_source?: string | null;
@@ -269,13 +270,14 @@ export default function MealPlannerPage() {
         recipes.find((recipe) => recipe.id === recipeId)?.title ||
         getMealSourceLabel(mealSource);
       const servingCount = numberOrNull(servings) || 1;
+      const enteredCost = numberOrNull(estimatedCost);
       const meta: MealMeta = {
         source: mealSource,
         estimated_cost: mealSource === "food_vault" && selectedFood
           ? calculateFoodVaultUnitCost(selectedFood, servingCount)
-          : estimatedCost ? Number(estimatedCost) : null,
+          : enteredCost == null ? null : roundMoney(enteredCost * servingCount),
         package_quantity: selectedFood?.package_quantity ?? null,
-        unit_cost: selectedFood ? calculateFoodVaultUnitCost(selectedFood, 1) : null,
+        unit_cost: selectedFood ? calculateFoodVaultUnitCost(selectedFood, 1) : enteredCost,
         vendor: vendor.trim() || null,
         note: notes.trim() || null,
         count_toward_eating_out: mealSource === "eat_out",
@@ -344,6 +346,9 @@ export default function MealPlannerPage() {
     try {
       if (meta.source === "food_vault" && meta.food_vault_item_id && !meta.completed) {
         await consumeFoodVaultItem(meta.food_vault_item_id, meta.servings || 1);
+      }
+      if (meta.source === "recipe" && !meta.completed) {
+        await consumeRecipeIngredients(entry, meta);
       }
       const res = await fetch(`${API_BASE}/meal-planner/${entry.id}`, {
         method: "PATCH",
@@ -429,6 +434,38 @@ export default function MealPlannerPage() {
     if (!res.ok) throw new Error(data.detail || "Failed to update Food Vault inventory.");
   }
 
+  async function consumeRecipeIngredients(entry: MealPlanEntry, meta: MealMeta) {
+    const recipe = findRecipeForEntry(entry);
+    if (!recipe?.ingredients?.length) return;
+
+    const mealQuantity = Number(meta.servings || 1);
+    const consumptions = recipe.ingredients
+      .map((ingredient) => {
+        const food = findFoodItemForIngredient(ingredient.item_name, foodItems);
+        if (!food) return null;
+        const ingredientQuantity = parseServingQuantity(ingredient.quantity);
+        return {
+          food,
+          quantity: ingredientQuantity * mealQuantity,
+        };
+      })
+      .filter((item): item is { food: FoodVaultItem; quantity: number } => !!item && item.quantity > 0);
+
+    for (const item of consumptions) {
+      await consumeFoodVaultItem(item.food.id, item.quantity);
+    }
+  }
+
+  function findRecipeForEntry(entry: MealPlanEntry) {
+    if (entry.recipe_id) {
+      const recipe = recipes.find((item) => item.id === entry.recipe_id);
+      if (recipe) return recipe;
+    }
+    const title = entry.recipes?.title || entry.custom_meal_name;
+    if (!title) return null;
+    return recipes.find((item) => item.title.toLowerCase() === title.toLowerCase()) || null;
+  }
+
   async function createFoodVaultFromCustom(mealName: string) {
     const res = await fetch(`${API_BASE}/food-vault/items`, {
       method: "POST",
@@ -472,12 +509,13 @@ export default function MealPlannerPage() {
     if (!recipe) return;
     const totals = calculateRecipeMacros(recipe.ingredients || [], foodItems);
     const cost = estimateRecipeCost(recipe.ingredients || [], foodItems);
+    const recipeServings = Number(recipe.servings || 1);
     setCustomMealName(recipe.title);
-    setEstimatedCost(cost ? cost.toFixed(2) : "");
-    setCalories(totals.calories ? String(totals.calories) : "");
-    setProtein(totals.protein_g ? String(totals.protein_g) : "");
-    setCarbs(totals.carbs_g ? String(totals.carbs_g) : "");
-    setFat(totals.fat_g ? String(totals.fat_g) : "");
+    setEstimatedCost(cost ? formatNumber(roundMoney(cost / recipeServings)) : "");
+    setCalories(totals.calories ? String(perServing(totals.calories, recipeServings)) : "");
+    setProtein(totals.protein_g ? String(perServing(totals.protein_g, recipeServings)) : "");
+    setCarbs(totals.carbs_g ? String(perServing(totals.carbs_g, recipeServings)) : "");
+    setFat(totals.fat_g ? String(perServing(totals.fat_g, recipeServings)) : "");
     setServings("1");
   }
 
@@ -669,31 +707,20 @@ export default function MealPlannerPage() {
               </FormField>
 
               {mealSource === "food_vault" && (
-                <>
-                  <FormField label="Food Vault Item">
-                    <select
-                      value={foodVaultItemId}
-                      onChange={(e) => selectFoodVaultItem(e.target.value)}
-                      className="food-ops-input"
-                    >
-                      <option value="">-- Choose Food --</option>
-                      {sortFoodItemsByName(foodItems).map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {foodDisplayName(item)} ({item.current_quantity ?? 0} left)
-                        </option>
-                      ))}
-                    </select>
-                  </FormField>
-                  <FormField label="Servings / Quantity Eaten">
-                    <input
-                      type="number"
-                      step="0.25"
-                      value={servings}
-                      onChange={(e) => setServings(e.target.value)}
-                      className="food-ops-input"
-                    />
-                  </FormField>
-                </>
+                <FormField label="Food Vault Item">
+                  <select
+                    value={foodVaultItemId}
+                    onChange={(e) => selectFoodVaultItem(e.target.value)}
+                    className="food-ops-input"
+                  >
+                    <option value="">-- Choose Food --</option>
+                    {sortFoodItemsByName(foodItems).map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {foodDisplayName(item)} ({item.current_quantity ?? 0} left)
+                      </option>
+                    ))}
+                  </select>
+                </FormField>
               )}
 
               <FormField label="Custom Meal Name">
@@ -702,6 +729,17 @@ export default function MealPlannerPage() {
                   onChange={(e) => setCustomMealName(e.target.value)}
                   className="food-ops-input"
                   placeholder="Optional if not using a recipe"
+                />
+              </FormField>
+
+              <FormField label="Quantity / Servings">
+                <input
+                  type="number"
+                  min="0"
+                  step="0.25"
+                  value={servings}
+                  onChange={(e) => setServings(e.target.value)}
+                  className="food-ops-input"
                 />
               </FormField>
 
@@ -718,7 +756,7 @@ export default function MealPlannerPage() {
             </MealFormSection>
 
             <MealFormSection title="Cost / Vendor">
-              <FormField label="Estimated Cost">
+              <FormField label="Estimated Cost Per Serving / Item">
                 <input
                   type="number"
                   step="0.01"
@@ -1219,8 +1257,12 @@ function calculateFoodVaultUnitCost(item: FoodVaultItem, servings = 1) {
 function mealCostLabel(entry: MealPlanEntry, meta: MealMeta) {
   const cost = Number(meta.estimated_cost || entry.estimated_cost || 0);
   if (!cost) return "No cost set";
-  if (meta.source === "food_vault" && meta.package_quantity && Number(meta.package_quantity) > 1) {
-    return `$${formatMoney(cost)} individual cost`;
+  const servingCount = Number(meta.servings || 1);
+  if (servingCount > 1) {
+    const unitCost = Number(meta.unit_cost || 0);
+    return unitCost
+      ? `$${formatMoney(cost)} total · ${formatNumber(servingCount)} x $${formatMoney(unitCost)}`
+      : `$${formatMoney(cost)} total`;
   }
   return `$${formatMoney(cost)}`;
 }
@@ -1284,6 +1326,10 @@ function parseServingQuantity(quantity?: string | null) {
 
 function roundMacro(value: number) {
   return Math.round(value * 10) / 10;
+}
+
+function perServing(value: number, servings?: number | null) {
+  return roundMacro(value / Number(servings || 1));
 }
 
 function DayStat({ label, value }: { label: string; value: string }) {

@@ -774,6 +774,21 @@ body {
     inset 0 0 18px rgba(34, 197, 94, 0.08);
 }
 
+.jarvis-card-health {
+  border-color: rgba(125, 211, 252, 0.24);
+  background:
+    radial-gradient(circle at 18% 0%, rgba(14, 165, 233, 0.12), transparent 15rem),
+    linear-gradient(135deg, rgba(2, 6, 4, 0.98), rgba(5, 25, 18, 0.92) 54%, rgba(0, 0, 0, 0.98)),
+    repeating-linear-gradient(135deg, rgba(34, 197, 94, 0.06) 0 1px, transparent 1px 11px);
+}
+
+.jarvis-card-health:hover {
+  border-color: rgba(125, 211, 252, 0.54);
+  box-shadow:
+    0 0 30px rgba(14, 165, 233, 0.22),
+    inset 0 0 18px rgba(34, 197, 94, 0.08);
+}
+
 .jarvis-card-gradient {
   background:
     linear-gradient(135deg, rgba(2, 6, 4, 0.98), rgba(5, 25, 18, 0.92) 54%, rgba(0, 0, 0, 0.98)),
@@ -793,9 +808,159 @@ body {
   --jarvis-accent-soft: rgba(34, 211, 238, 0.16);
 }
 
+.food-ops-status-card {
+  min-height: 10.2rem;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(34, 211, 238, 0.12), transparent 15rem),
+    linear-gradient(135deg, rgba(2, 6, 4, 0.98), rgba(5, 25, 18, 0.92) 54%, rgba(0, 0, 0, 0.98)),
+    repeating-linear-gradient(135deg, rgba(34, 197, 94, 0.06) 0 1px, transparent 1px 11px);
+  box-shadow:
+    0 0 0 1px rgba(103, 232, 249, 0.08) inset,
+    inset 0 0 26px rgba(34, 211, 238, 0.04),
+    0 0 24px rgba(34, 197, 94, 0.1);
+}
+
+.food-ops-icon-badge {
+  display: grid;
+  width: 2.45rem;
+  height: 2.45rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid rgba(103, 232, 249, 0.34);
+  border-radius: 0.55rem;
+  background:
+    linear-gradient(135deg, rgba(34, 211, 238, 0.14), rgba(34, 197, 94, 0.08)),
+    rgba(0, 0, 0, 0.46);
+  box-shadow:
+    inset 0 0 14px rgba(34, 211, 238, 0.12),
+    0 0 18px rgba(34, 211, 238, 0.12);
+}
+
+.food-ops-form-section {
+  border-top: 1px solid rgba(103, 232, 249, 0.14);
+  padding-top: 1rem;
+}
+
+.food-ops-form-section-title {
+  margin-bottom: 0.85rem;
+  color: rgba(103, 232, 249, 0.78);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.food-ops-input {
+  width: 100%;
+  border: 1px solid rgba(34, 197, 94, 0.28);
+  border-radius: 0.75rem;
+  background:
+    linear-gradient(180deg, rgba(3, 18, 12, 0.95), rgba(0, 0, 0, 0.98));
+  padding: 0.78rem 1rem;
+  color: rgb(220, 252, 231);
+  box-shadow:
+    inset 0 0 14px rgba(0, 0, 0, 0.72),
+    0 0 0 rgba(34, 211, 238, 0);
+  transition:
+    border-color 300ms,
+    box-shadow 300ms,
+    background-color 300ms;
+}
+
+.food-ops-input:focus {
+  border-color: rgba(103, 232, 249, 0.72);
+  outline: none;
+  box-shadow:
+    inset 0 0 14px rgba(0, 0, 0, 0.72),
+    0 0 20px rgba(34, 211, 238, 0.18);
+}
+
+.food-ops-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .health-ops-accent {
   --jarvis-accent: rgb(125, 211, 252);
   --jarvis-accent-soft: rgba(14, 165, 233, 0.16);
+}
+
+.health-ops-status-card {
+  min-height: 6.8rem;
+  box-shadow:
+    0 0 0 1px rgba(125, 211, 252, 0.08) inset,
+    inset 0 0 22px rgba(14, 165, 233, 0.04),
+    0 0 22px rgba(34, 197, 94, 0.08);
+}
+
+.health-ops-icon-badge,
+.health-ops-mini-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid rgba(125, 211, 252, 0.36);
+  background:
+    linear-gradient(135deg, rgba(14, 165, 233, 0.16), rgba(34, 197, 94, 0.08)),
+    rgba(0, 0, 0, 0.46);
+  box-shadow:
+    inset 0 0 14px rgba(14, 165, 233, 0.12),
+    0 0 18px rgba(14, 165, 233, 0.12);
+  color: rgb(224, 242, 254);
+}
+
+.health-ops-icon-badge {
+  width: 2.45rem;
+  height: 2.45rem;
+  border-radius: 0.55rem;
+}
+
+.health-ops-mini-icon {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.45rem;
+}
+
+.health-ops-form-section {
+  border: 1px solid rgba(125, 211, 252, 0.14);
+  border-radius: 0.85rem;
+  background:
+    linear-gradient(135deg, rgba(3, 18, 12, 0.72), rgba(0, 0, 0, 0.52)),
+    repeating-linear-gradient(135deg, rgba(14, 165, 233, 0.04) 0 1px, transparent 1px 10px);
+  padding: 1rem;
+}
+
+.health-ops-form-section-title {
+  margin-bottom: 0.75rem;
+  color: rgba(125, 211, 252, 0.78);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.health-ops-input {
+  width: 100%;
+  border: 1px solid rgba(34, 197, 94, 0.28);
+  border-radius: 0.75rem;
+  background:
+    linear-gradient(180deg, rgba(3, 18, 12, 0.95), rgba(0, 0, 0, 0.98));
+  padding: 0.78rem 1rem;
+  color: rgb(220, 252, 231);
+  box-shadow:
+    inset 0 0 14px rgba(0, 0, 0, 0.72),
+    0 0 0 rgba(14, 165, 233, 0);
+  transition:
+    border-color 300ms,
+    box-shadow 300ms,
+    background-color 300ms;
+}
+
+.health-ops-input:focus {
+  border-color: rgba(125, 211, 252, 0.74);
+  outline: none;
+  box-shadow:
+    inset 0 0 14px rgba(0, 0, 0, 0.72),
+    0 0 20px rgba(14, 165, 233, 0.2);
 }
 
 .finance-ops-accent {
@@ -1332,6 +1497,19 @@ body {
   animation: limit-break-sweep 1.1s linear infinite;
 }
 
+.sad-limit-break-bar {
+  background:
+    linear-gradient(102deg, transparent 0%, rgba(254, 202, 202, 0.38) 18%, transparent 35%) 0 0 / 42% 100%,
+    linear-gradient(90deg, rgb(69, 10, 10), rgb(220, 38, 38), rgb(127, 29, 29));
+  box-shadow:
+    0 0 20px rgba(239, 68, 68, 0.78),
+    0 0 38px rgba(127, 29, 29, 0.45),
+    inset 0 0 12px rgba(254, 202, 202, 0.18);
+  animation:
+    goal-red-pulse 1.2s ease-in-out infinite,
+    goal-yellow-shimmer 1.65s linear infinite;
+}
+
 .goal-progress-shell {
   position: relative;
   padding-top: 0.1rem;
@@ -1398,6 +1576,14 @@ body {
   box-shadow:
     inset 0 0 14px rgba(0, 0, 0, 0.82),
     0 0 24px rgba(250, 204, 21, 0.44);
+}
+
+.goal-progress-track-sad {
+  height: 1.45rem;
+  border-color: rgba(248, 113, 113, 0.78);
+  box-shadow:
+    inset 0 0 14px rgba(0, 0, 0, 0.82),
+    0 0 24px rgba(239, 68, 68, 0.36);
 }
 
 .goal-progress-fill {

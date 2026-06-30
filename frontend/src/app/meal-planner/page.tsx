@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { type ComponentType, useCallback, useEffect, useState } from "react";
+import { type ComponentType, type ReactNode, useCallback, useEffect, useState } from "react";
 import { ChevronDown, ClipboardList, DollarSign, ShoppingCart, Utensils, Wallet, X } from "lucide-react";
 
 const API_BASE =
@@ -528,34 +528,59 @@ export default function MealPlannerPage() {
             icon={Wallet}
             label="Weekly grocery budget"
             value={`$${formatMoney(financeSummary?.weekly_food_budget.weekly_grocery_target || 0)}`}
+            status="Budget allocation"
           />
           <SummaryCard
             icon={ShoppingCart}
             label="Weekly eating out budget"
             value={`$${formatMoney(financeSummary?.weekly_food_budget.weekly_eating_out_target || 0)}`}
+            status="Dining allowance"
           />
           <SummaryCard
             icon={Utensils}
             label="Estimated grocery cost"
             value={`$${formatMoney(estimatedCosts.groceries)}`}
+            status={budgetStatusLine(estimatedCosts.groceries, financeSummary?.weekly_food_budget.weekly_grocery_target || 0)}
           />
           <SummaryCard
             icon={DollarSign}
             label="Estimated eat out cost"
             value={`$${formatMoney(estimatedCosts.eatingOut)}`}
+            status={budgetStatusLine(estimatedCosts.eatingOut, financeSummary?.weekly_food_budget.weekly_eating_out_target || 0)}
           />
           <SummaryCard
             icon={ClipboardList}
             label="Over / under"
             value={`$${formatMoney(estimatedOverUnder)}`}
+            status={estimatedOverUnder >= 0 ? "Within weekly food budget" : "Budget breach detected"}
           />
         </section>
 
         <section className="mb-8 grid gap-4 md:grid-cols-4">
-          <SummaryCard icon={Utensils} label="Calories today" value={`${todayNutrition.calories} / ${targetValue(nutritionTargets?.daily_calorie_target)}`} />
-          <SummaryCard icon={Utensils} label="Protein today" value={`${todayNutrition.protein_g}g / ${targetValue(nutritionTargets?.daily_protein_target, "g")}`} />
-          <SummaryCard icon={Utensils} label="Carbs today" value={`${todayNutrition.carbs_g}g / ${targetValue(nutritionTargets?.daily_carb_target, "g")}`} />
-          <SummaryCard icon={Utensils} label="Fat today" value={`${todayNutrition.fat_g}g / ${targetValue(nutritionTargets?.daily_fat_target, "g")}`} />
+          <SummaryCard
+            icon={Utensils}
+            label="Calories today"
+            value={`${todayNutrition.calories} / ${targetValue(nutritionTargets?.daily_calorie_target)}`}
+            progress={{ current: todayNutrition.calories, target: nutritionTargets?.daily_calorie_target || 0, kind: "calories", unit: "cal" }}
+          />
+          <SummaryCard
+            icon={Utensils}
+            label="Protein today"
+            value={`${todayNutrition.protein_g}g / ${targetValue(nutritionTargets?.daily_protein_target, "g")}`}
+            progress={{ current: todayNutrition.protein_g, target: nutritionTargets?.daily_protein_target || 0, kind: "protein", unit: "g" }}
+          />
+          <SummaryCard
+            icon={Utensils}
+            label="Carbs today"
+            value={`${todayNutrition.carbs_g}g / ${targetValue(nutritionTargets?.daily_carb_target, "g")}`}
+            progress={{ current: todayNutrition.carbs_g, target: nutritionTargets?.daily_carb_target || 0, kind: "carbs", unit: "g" }}
+          />
+          <SummaryCard
+            icon={Utensils}
+            label="Fat today"
+            value={`${todayNutrition.fat_g}g / ${targetValue(nutritionTargets?.daily_fat_target, "g")}`}
+            progress={{ current: todayNutrition.fat_g, target: nutritionTargets?.daily_fat_target || 0, kind: "fat", unit: "g" }}
+          />
         </section>
 
         {error && (
@@ -575,190 +600,187 @@ export default function MealPlannerPage() {
             <div>
               <p className="jarvis-section-header food-ops-accent">Food Intake</p>
               <h2 className="mt-1 text-2xl font-semibold">Add Meal</h2>
+              <p className="mt-2 text-sm text-green-300/70">Log food, recipe, or eating out event.</p>
             </div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <div>
-              <label className="mb-2 block text-sm text-green-300/80">Meal Date</label>
-              <input
-                type="date"
-                value={mealDate}
-                onChange={(e) => setMealDate(e.target.value)}
-                className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
-              />
-            </div>
+          <div className="grid gap-5">
+            <MealFormSection title="Meal Timing">
+              <FormField label="Meal Date">
+                <input
+                  type="date"
+                  value={mealDate}
+                  onChange={(e) => setMealDate(e.target.value)}
+                  className="food-ops-input"
+                />
+              </FormField>
 
-            <div>
-              <label className="mb-2 block text-sm text-green-300/80">Meal Type</label>
-              <select
-                value={mealType}
-                onChange={(e) => setMealType(e.target.value)}
-                className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
-              >
-                {MEAL_TYPE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </div>
+              <FormField label="Meal Type">
+                <select
+                  value={mealType}
+                  onChange={(e) => setMealType(e.target.value)}
+                  className="food-ops-input"
+                >
+                  {MEAL_TYPE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </FormField>
+            </MealFormSection>
 
-            <div>
-              <label className="mb-2 block text-sm text-green-300/80">Meal Source</label>
-              <select
-                value={mealSource}
-                onChange={(e) => setMealSource(e.target.value)}
-                className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
-              >
-                {MEAL_SOURCE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </div>
+            <MealFormSection title="Meal Source">
+              <FormField label="Source">
+                <select
+                  value={mealSource}
+                  onChange={(e) => setMealSource(e.target.value)}
+                  className="food-ops-input"
+                >
+                  {MEAL_SOURCE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </FormField>
 
-            <div>
-              <label className="mb-2 block text-sm text-green-300/80">Recipe</label>
-              <select
-                value={recipeId}
-                onChange={(e) => selectRecipe(e.target.value)}
-                className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
-                disabled={mealSource !== "recipe"}
-              >
-                <option value="">-- Choose Recipe --</option>
-                {sortRecipesByTitle(recipes).map((recipe) => (
-                  <option key={recipe.id} value={recipe.id}>
-                    {recipe.title}
-                  </option>
-                ))}
-              </select>
-            </div>
+              <FormField label="Recipe">
+                <select
+                  value={recipeId}
+                  onChange={(e) => selectRecipe(e.target.value)}
+                  className="food-ops-input"
+                  disabled={mealSource !== "recipe"}
+                >
+                  <option value="">-- Choose Recipe --</option>
+                  {sortRecipesByTitle(recipes).map((recipe) => (
+                    <option key={recipe.id} value={recipe.id}>
+                      {recipe.title}
+                    </option>
+                  ))}
+                </select>
+              </FormField>
 
-            {mealSource === "food_vault" && (
-              <>
-                <div>
-                  <label className="mb-2 block text-sm text-green-300/80">Food Vault Item</label>
-                  <select
-                    value={foodVaultItemId}
-                    onChange={(e) => selectFoodVaultItem(e.target.value)}
-                    className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
-                  >
-                    <option value="">-- Choose Food --</option>
-                    {sortFoodItemsByName(foodItems).map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {foodDisplayName(item)} ({item.current_quantity ?? 0} left)
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="mb-2 block text-sm text-green-300/80">Servings / Quantity Eaten</label>
-                  <input
-                    type="number"
-                    step="0.25"
-                    value={servings}
-                    onChange={(e) => setServings(e.target.value)}
-                    className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
-                  />
-                </div>
-              </>
-            )}
+              {mealSource === "food_vault" && (
+                <>
+                  <FormField label="Food Vault Item">
+                    <select
+                      value={foodVaultItemId}
+                      onChange={(e) => selectFoodVaultItem(e.target.value)}
+                      className="food-ops-input"
+                    >
+                      <option value="">-- Choose Food --</option>
+                      {sortFoodItemsByName(foodItems).map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {foodDisplayName(item)} ({item.current_quantity ?? 0} left)
+                        </option>
+                      ))}
+                    </select>
+                  </FormField>
+                  <FormField label="Servings / Quantity Eaten">
+                    <input
+                      type="number"
+                      step="0.25"
+                      value={servings}
+                      onChange={(e) => setServings(e.target.value)}
+                      className="food-ops-input"
+                    />
+                  </FormField>
+                </>
+              )}
 
-            <div>
-              <label className="mb-2 block text-sm text-green-300/80">Custom Meal Name</label>
-              <input
-                value={customMealName}
-                onChange={(e) => setCustomMealName(e.target.value)}
-                className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
-                placeholder="Optional if not using a recipe"
-              />
-            </div>
+              <FormField label="Custom Meal Name">
+                <input
+                  value={customMealName}
+                  onChange={(e) => setCustomMealName(e.target.value)}
+                  className="food-ops-input"
+                  placeholder="Optional if not using a recipe"
+                />
+              </FormField>
 
-            {mealSource === "custom" && (
-              <button
-                onClick={() => setSaveToFoodVault((prev) => !prev)}
-                className={`command-action-button rounded-xl border px-4 py-3 text-left ${
-                  saveToFoodVault ? "border-green-300/60 bg-green-400/15 text-green-100" : "border-green-500/30 text-green-300"
-                }`}
-              >
-                Save to Food Vault: {saveToFoodVault ? "Yes" : "No"}
-              </button>
-            )}
+              {mealSource === "custom" && (
+                <button
+                  onClick={() => setSaveToFoodVault((prev) => !prev)}
+                  className={`command-action-button rounded-xl border px-4 py-3 text-left ${
+                    saveToFoodVault ? "border-cyan-300/60 bg-cyan-400/15 text-cyan-100" : "border-green-500/30 text-green-300"
+                  }`}
+                >
+                  Save to Food Vault: {saveToFoodVault ? "Yes" : "No"}
+                </button>
+              )}
+            </MealFormSection>
 
-            <div>
-              <label className="mb-2 block text-sm text-green-300/80">Estimated Cost</label>
-              <input
-                type="number"
-                step="0.01"
-                value={estimatedCost}
-                onChange={(e) => setEstimatedCost(e.target.value)}
-                className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
-                placeholder="12.50"
-              />
-            </div>
+            <MealFormSection title="Cost / Vendor">
+              <FormField label="Estimated Cost">
+                <input
+                  type="number"
+                  step="0.01"
+                  value={estimatedCost}
+                  onChange={(e) => setEstimatedCost(e.target.value)}
+                  className="food-ops-input"
+                  placeholder="12.50"
+                />
+              </FormField>
 
-            <div>
-              <label className="mb-2 block text-sm text-green-300/80">Restaurant / Vendor</label>
-              <input
-                value={vendor}
-                onChange={(e) => setVendor(e.target.value)}
-                className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
-                placeholder="Chipotle"
-              />
-            </div>
+              <FormField label="Restaurant / Vendor">
+                <input
+                  value={vendor}
+                  onChange={(e) => setVendor(e.target.value)}
+                  className="food-ops-input"
+                  placeholder="Chipotle"
+                />
+              </FormField>
+            </MealFormSection>
 
-            <div className="md:col-span-2">
-              <label className="mb-2 block text-sm text-green-300/80">Notes</label>
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
-                rows={3}
-                placeholder="Prep ahead, post-workout meal, etc."
-              />
-            </div>
+            <MealFormSection title="Nutrition">
+              <FormField label="Calories">
+                <input
+                  type="number"
+                  value={calories}
+                  onChange={(e) => setCalories(e.target.value)}
+                  className="food-ops-input"
+                  placeholder="320"
+                />
+              </FormField>
 
-            <div>
-              <label className="mb-2 block text-sm text-green-300/80">Calories</label>
-              <input
-                type="number"
-                value={calories}
-                onChange={(e) => setCalories(e.target.value)}
-                className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
-                placeholder="320"
-              />
-            </div>
+              <FormField label="Protein g">
+                <input
+                  type="number"
+                  value={protein}
+                  onChange={(e) => setProtein(e.target.value)}
+                  className="food-ops-input"
+                  placeholder="42"
+                />
+              </FormField>
 
-            <div>
-              <label className="mb-2 block text-sm text-green-300/80">Protein g</label>
-              <input
-                type="number"
-                value={protein}
-                onChange={(e) => setProtein(e.target.value)}
-                className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
-                placeholder="42"
-              />
-            </div>
+              <FormField label="Carbs g">
+                <input
+                  type="number"
+                  value={carbs}
+                  onChange={(e) => setCarbs(e.target.value)}
+                  className="food-ops-input"
+                  placeholder="32"
+                />
+              </FormField>
 
-            <div>
-              <label className="mb-2 block text-sm text-green-300/80">Carbs g</label>
-              <input
-                type="number"
-                value={carbs}
-                onChange={(e) => setCarbs(e.target.value)}
-                className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
-                placeholder="32"
-              />
-            </div>
+              <FormField label="Fat g">
+                <input
+                  type="number"
+                  value={fat}
+                  onChange={(e) => setFat(e.target.value)}
+                  className="food-ops-input"
+                  placeholder="4"
+                />
+              </FormField>
+            </MealFormSection>
 
-            <div>
-              <label className="mb-2 block text-sm text-green-300/80">Fat g</label>
-              <input
-                type="number"
-                value={fat}
-                onChange={(e) => setFat(e.target.value)}
-                className="w-full rounded-xl border border-green-500/30 bg-black px-4 py-3"
-                placeholder="4"
-              />
-            </div>
+            <MealFormSection title="Notes" columns="single">
+              <FormField label="Operational Notes">
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="food-ops-input"
+                  rows={3}
+                  placeholder="Prep ahead, post-workout meal, etc."
+                />
+              </FormField>
+            </MealFormSection>
           </div>
 
           <button
@@ -838,7 +860,7 @@ export default function MealPlannerPage() {
                                 return (
                                   <div
                                     key={entry.id}
-                                    className={`rounded-xl border p-4 transition ${
+                                    className={`hoverable-row rounded-xl border p-4 transition ${
                                       meta.completed
                                         ? "border-green-300/45 bg-green-400/10 shadow-[0_0_18px_rgba(34,197,94,0.14)]"
                                         : "border-green-500/20 bg-black"
@@ -928,20 +950,143 @@ function SummaryCard({
   icon: Icon,
   label,
   value,
+  status,
+  progress,
 }: {
   icon: ComponentType<{ className?: string }>;
   label: string;
   value: string;
+  status?: string;
+  progress?: {
+    current: number;
+    target: number;
+    kind: "calories" | "protein" | "carbs" | "fat";
+    unit: string;
+  };
 }) {
   return (
-    <div className="jarvis-card jarvis-card-cyan p-5">
-      <div className="flex items-center gap-3">
-        <Icon className="h-5 w-5 text-green-300" />
-        <p className="text-xs uppercase tracking-[0.25em] text-green-500/70">{label}</p>
+    <div className="jarvis-card jarvis-card-cyan food-ops-status-card p-5">
+      <div className="flex items-start gap-3">
+        <div className="food-ops-icon-badge">
+          <Icon className="h-5 w-5 text-cyan-100" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-bold uppercase tracking-[0.22em] text-cyan-200/70">{label}</p>
+          <p className="mt-3 text-2xl font-bold text-green-50">{value}</p>
+        </div>
       </div>
-      <p className="mt-3 text-2xl font-bold text-green-100">{value}</p>
+      {progress ? (
+        <MacroProgressBar {...progress} />
+      ) : (
+        <p className="mt-4 border-t border-cyan-300/10 pt-3 text-xs uppercase tracking-[0.16em] text-green-300/60">
+          {status || "Status nominal"}
+        </p>
+      )}
     </div>
   );
+}
+
+function MealFormSection({
+  title,
+  children,
+  columns = "double",
+}: {
+  title: string;
+  children: ReactNode;
+  columns?: "single" | "double";
+}) {
+  return (
+    <div className="food-ops-form-section">
+      <p className="food-ops-form-section-title">{title}</p>
+      <div className={columns === "single" ? "grid gap-4" : "grid gap-4 md:grid-cols-2"}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function FormField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="block">
+      <span className="mb-2 block text-xs font-bold uppercase tracking-[0.16em] text-green-300/72">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function MacroProgressBar({
+  current,
+  target,
+  kind,
+  unit,
+}: {
+  current: number;
+  target: number;
+  kind: "calories" | "protein" | "carbs" | "fat";
+  unit: string;
+}) {
+  if (!target || target <= 0) {
+    return (
+      <p className="mt-4 border-t border-cyan-300/10 pt-3 text-xs uppercase tracking-[0.16em] text-green-300/60">
+        Target not configured
+      </p>
+    );
+  }
+
+  const percent = (current / target) * 100;
+  const overTarget = percent > 100;
+  const sadLimitBreak = overTarget && (kind === "calories" || kind === "fat");
+  const happyLimitBreak = overTarget && kind === "protein";
+  const neutralLimitBreak = overTarget && kind === "carbs";
+  const cappedPercent = Math.min(100, Math.max(0, percent));
+  const status = getMacroProgressStatus(percent, kind);
+  const completeClass = happyLimitBreak || neutralLimitBreak ? "goal-progress-track-complete" : "";
+  const fillClass = sadLimitBreak
+    ? "sad-limit-break-bar goal-progress-fill-red"
+    : happyLimitBreak || neutralLimitBreak
+      ? "limit-break-bar goal-progress-fill-complete"
+      : `goal-progress-fill-${status.tone}`;
+
+  return (
+    <div className="goal-progress-shell mt-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <span className={`goal-progress-status goal-progress-status-${sadLimitBreak ? "red" : status.tone}`}>
+          {status.label}
+        </span>
+        <span className="text-xs uppercase tracking-[0.16em] text-cyan-100/70">
+          {formatNumber(current)}{unit} / {formatNumber(target)}{unit}
+        </span>
+      </div>
+      <div className={`goal-progress-track ${completeClass} ${sadLimitBreak ? "goal-progress-track-sad" : ""}`}>
+        <div
+          className={`goal-progress-fill ${fillClass}`}
+          style={{ width: `${cappedPercent}%` }}
+        >
+          {(status.tone === "green" || happyLimitBreak || neutralLimitBreak) && !sadLimitBreak && (
+            <span className="goal-progress-particles" aria-hidden="true" />
+          )}
+        </div>
+      </div>
+      {overTarget && (
+        <p className={`mt-3 text-xs font-bold uppercase tracking-[0.2em] ${sadLimitBreak ? "text-red-200" : "text-yellow-200"}`}>
+          {sadLimitBreak ? "Limit break: over target" : "Limit break"}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function getMacroProgressStatus(percent: number, kind: "calories" | "protein" | "carbs" | "fat") {
+  if (percent > 100) {
+    if (kind === "calories" || kind === "fat") {
+      return { tone: "red", label: "OVER TARGET" };
+    }
+    return { tone: "rainbow", label: "LIMIT BREAK" };
+  }
+  if (percent >= 95) return { tone: "green", label: "TARGET LOCKED" };
+  if (percent >= 70) return { tone: "green", label: "ON TRACK" };
+  if (percent >= 45) return { tone: "yellow", label: "BUILDING" };
+  return { tone: "red", label: kind === "fat" ? "TOO LOW" : "LOW INTAKE" };
 }
 
 function buildMealNotes(meta: MealMeta) {
@@ -1011,6 +1156,19 @@ function getMealSourceLabel(source?: string) {
 
 function formatMoney(value: number) {
   return value.toFixed(2);
+}
+
+function budgetStatusLine(current: number, target: number) {
+  if (!target || target <= 0) return "Target not configured";
+  const remaining = target - current;
+  if (remaining >= 0) return `$${formatMoney(remaining)} remaining`;
+  return `$${formatMoney(Math.abs(remaining))} over target`;
+}
+
+function formatNumber(value?: number | null) {
+  if (value === null || value === undefined) return "0";
+  if (Number.isInteger(value)) return String(value);
+  return String(Math.round(value * 10) / 10);
 }
 
 function roundMoney(value: number) {

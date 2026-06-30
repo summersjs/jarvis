@@ -547,7 +547,7 @@ export default function HealthOpsPage() {
       <div className="mx-auto max-w-7xl">
         <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <div>
-            <p className="section-label">Jarvis Medical Observation Log</p>
+            <p className="jarvis-section-header health-ops-accent">Jarvis Medical Observation Log</p>
             <h1 className="mt-2 text-4xl font-bold">Health Ops</h1>
             <p className="mt-3 max-w-3xl text-green-300/80">
               Factual health observations, timestamps, frequencies, and trends. No diagnosis. No causation claims.
@@ -563,7 +563,7 @@ export default function HealthOpsPage() {
 
         {error && <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-red-300">{error}</div>}
         {message && <div className="mb-6 rounded-xl border border-green-500/30 bg-green-500/10 p-4 text-green-200">{message}</div>}
-        {loading && <div className="hud-panel">Loading Health Ops...</div>}
+        {loading && <div className="jarvis-card jarvis-card-health p-6">Loading Health Ops...</div>}
 
         {!loading && dashboard && (
           <div className="grid gap-6">
@@ -596,8 +596,8 @@ export default function HealthOpsPage() {
                   <TextField label="Water Intake oz" value={checkin.water_oz} onChange={(value) => setCheckin((prev) => ({ ...prev, water_oz: value }))} />
                 </div>
 
-                <div className="hud-row mt-4 flex-col items-stretch">
-                  <p className="text-xs uppercase tracking-[0.18em] text-green-500/65">Caffeine</p>
+                <div className="health-ops-form-section mt-4">
+                  <p className="health-ops-form-section-title">Caffeine</p>
                   <p className="mt-1 text-lg font-semibold text-green-100">{checkin.caffeine_mg || "0"} mg today</p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     {CAFFEINE_BUTTONS.map(([label, mg]) => (
@@ -609,8 +609,8 @@ export default function HealthOpsPage() {
                         }}
                         className={`command-action-button border px-3 py-2 text-xs ${
                           pendingCaffeineButtons.includes(label)
-                            ? "border-amber-300/60 bg-amber-300/15 text-amber-100 shadow-[0_0_18px_rgba(251,191,36,0.18)]"
-                            : "border-green-500/25 text-green-200"
+                            ? "border-sky-300/60 bg-sky-300/15 text-sky-100 shadow-[0_0_18px_rgba(56,189,248,0.2)]"
+                            : "border-sky-300/25 text-sky-100"
                         }`}
                       >
                         {label}
@@ -627,7 +627,7 @@ export default function HealthOpsPage() {
                 </div>
 
                 <div className="mt-4">
-                  <p className="mb-2 text-xs uppercase tracking-[0.18em] text-green-500/65">Supplements</p>
+                  <p className="health-ops-form-section-title">Supplements</p>
                   <div className="flex flex-wrap gap-2">
                     {dashboard.supplements.map((supplement) => (
                       <button
@@ -635,7 +635,7 @@ export default function HealthOpsPage() {
                         onClick={() => setCheckin((prev) => toggleSupplement(prev, supplement))}
                         className={`command-action-button border px-3 py-2 text-xs ${
                           checkin.supplements.includes(supplement)
-                            ? "border-green-300/60 bg-green-400/15 text-green-100"
+                            ? "border-sky-300/60 bg-sky-400/15 text-sky-100"
                             : "border-green-500/25 text-green-300"
                         }`}
                       >
@@ -657,7 +657,7 @@ export default function HealthOpsPage() {
                 {dashboard.event_types.map((eventType) => {
                   const Icon = EVENT_ICONS[eventType.key] || Plus;
                   return (
-                    <div key={eventType.key} className={`hud-row flex-col items-stretch gap-4 ${eventType.count_today > 0 ? "border-amber-300/25 bg-amber-300/5" : ""}`}>
+                    <div key={eventType.key} className={`jarvis-card jarvis-card-health flex flex-col items-stretch gap-4 p-4 ${eventType.count_today > 0 ? "border-sky-300/35 bg-sky-300/5" : ""}`}>
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="text-sm font-semibold text-green-100">{eventType.label}</p>
@@ -686,7 +686,7 @@ export default function HealthOpsPage() {
                 <div className="space-y-3">
                   {dashboard.timeline.length === 0 && <p className="text-green-300/65">No health events logged today.</p>}
                   {dashboard.timeline.map((event) => (
-                    <div key={event.id} className="hud-row flex-col items-stretch">
+                    <div key={event.id} className="hoverable-row rounded-xl border border-sky-300/15 bg-black/35 p-4">
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
                           <p className="font-semibold text-green-100">{labelForEvent(event.event_type, dashboard.event_types)}</p>
@@ -732,8 +732,8 @@ export default function HealthOpsPage() {
               {summary && (
                 <div className="grid gap-4 lg:grid-cols-[1fr_0.8fr]">
                   <SummaryList summaries={summary.event_summary.event_summaries} />
-                  <div className="hud-row flex-col items-stretch">
-                    <p className="text-xs uppercase tracking-[0.18em] text-green-500/65">Observed Averages</p>
+                  <div className="jarvis-card jarvis-card-health p-4">
+                    <p className="health-ops-form-section-title">Observed Averages</p>
                     <div className="mt-3 grid gap-3">
                       <SnapshotMetric icon={Moon} label="Sleep" value={unitValue(summary.averages.sleep_hours, "hours")} tone="purple" />
                       <SnapshotMetric icon={Coffee} label="Caffeine" value={unitValue(summary.averages.caffeine_mg_per_day, "mg/day")} tone="amber" />
@@ -768,12 +768,12 @@ export default function HealthOpsPage() {
 
 function HudPanel({ title, icon: Icon, children }: { title: string; icon: LucideIcon; children: ReactNode }) {
   return (
-    <section className="hud-panel">
+    <section className="jarvis-card jarvis-card-health p-6">
       <div className="mb-5 flex items-center gap-3">
-        <div className="hud-panel-icon">
+        <div className="health-ops-icon-badge">
           <Icon className="h-5 w-5" />
         </div>
-        <h2 className="hud-panel-title">{title}</h2>
+        <h2 className="hud-panel-title text-sky-100">{title}</h2>
       </div>
       {children}
     </section>
@@ -811,10 +811,10 @@ function EventDetailPopup({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/80 px-4 py-6 backdrop-blur-sm sm:items-center">
-      <section className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-2xl border border-green-400/45 bg-zinc-950 p-5 text-green-300 shadow-[0_0_48px_rgba(34,197,94,0.3)]">
+      <section className="jarvis-card jarvis-card-health max-h-[90vh] w-full max-w-4xl overflow-y-auto p-5 text-green-300 shadow-[0_0_48px_rgba(56,189,248,0.22)]">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.26em] text-green-500/70">
+            <p className="health-ops-form-section-title">
               Observation Context
             </p>
             <h2 className="mt-2 text-2xl font-bold text-green-100">{config.title}</h2>
@@ -831,8 +831,8 @@ function EventDetailPopup({
         </div>
 
         {config.presets && config.presets.length > 0 && (
-          <div className="mt-5 rounded-xl border border-green-500/20 bg-black p-4">
-            <p className="text-xs uppercase tracking-[0.18em] text-green-500/65">Fast Presets</p>
+          <div className="health-ops-form-section mt-5">
+            <p className="health-ops-form-section-title">Fast Presets</p>
             <div className="mt-3 flex flex-wrap gap-2">
               {config.presets.map((preset) => (
                 <button
@@ -849,8 +849,8 @@ function EventDetailPopup({
 
         <div className="mt-5 grid gap-4">
           {config.sections.map((section) => (
-            <div key={`${section.field}-${section.label}`} className="rounded-xl border border-green-500/20 bg-black p-4">
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-green-500/65">{section.label}</p>
+            <div key={`${section.field}-${section.label}`} className="health-ops-form-section">
+              <p className="health-ops-form-section-title">{section.label}</p>
               <div className="mt-3 flex flex-wrap gap-2">
                 {section.options.map((option) => {
                   const selected = form[section.field] === (section.prefix ? `${section.prefix}: ${option}` : option);
@@ -860,7 +860,7 @@ function EventDetailPopup({
                       onClick={() => onSetField(section.field, option, section.prefix)}
                       className={`command-action-button border px-4 py-3 text-sm ${
                         selected
-                          ? "border-green-300/65 bg-green-400/15 text-green-100 shadow-[0_0_16px_rgba(34,197,94,0.18)]"
+                          ? "border-sky-300/65 bg-sky-400/15 text-sky-100 shadow-[0_0_16px_rgba(56,189,248,0.18)]"
                           : "border-green-500/25 text-green-300"
                       }`}
                     >
@@ -874,11 +874,11 @@ function EventDetailPopup({
         </div>
 
         <label className="mt-5 grid gap-2">
-          <span className="text-xs uppercase tracking-[0.16em] text-green-500/65">Optional note</span>
+          <span className="text-xs uppercase tracking-[0.16em] text-sky-200/70">Optional note</span>
           <input
             value={form.notes}
             onChange={(event) => onNotesChange(event.target.value)}
-            className="rounded-xl border border-green-500/30 bg-black px-4 py-3"
+            className="health-ops-input"
             placeholder="Short factual note"
           />
         </label>
@@ -948,13 +948,15 @@ const metricToneClasses: Record<MetricTone, { row: string; icon: string; value: 
 function SnapshotMetric({ icon: Icon, label, value, tone = "green" }: { icon: LucideIcon; label: string; value: string; tone?: MetricTone }) {
   const classes = metricToneClasses[tone];
   return (
-    <div className={`hud-row items-start ${classes.row}`}>
-      <div className={`hud-row-icon ${classes.icon}`}>
+    <div className={`jarvis-card jarvis-card-health health-ops-status-card p-4 ${classes.row}`}>
+      <div className="flex items-start gap-3">
+      <div className={`health-ops-mini-icon ${classes.icon}`}>
         <Icon className="h-4 w-4" />
       </div>
       <div>
-        <p className="text-xs uppercase tracking-[0.16em] text-green-500/65">{label}</p>
+        <p className="text-xs font-bold uppercase tracking-[0.16em] text-sky-200/70">{label}</p>
         <p className={`mt-1 text-lg font-semibold ${classes.value}`}>{value}</p>
+      </div>
       </div>
     </div>
   );
@@ -972,7 +974,7 @@ function TextField({ label, value, onChange, placeholder }: { label: string; val
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        className="rounded-xl border border-green-500/30 bg-black/60 px-4 py-3 text-green-100 outline-none transition focus:border-green-300/70 focus:shadow-[0_0_18px_rgba(34,197,94,0.16)]"
+        className="health-ops-input"
       />
     </label>
   );
@@ -980,8 +982,8 @@ function TextField({ label, value, onChange, placeholder }: { label: string; val
 
 function ToggleField({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
   return (
-    <button onClick={() => onChange(!checked)} className={`command-action-button rounded-xl border px-4 py-3 text-left ${checked ? "border-green-300/60 bg-green-400/15 text-green-100" : "border-green-500/30 text-green-300"}`}>
-      <span className="text-xs uppercase tracking-[0.16em] text-green-500/65">{label}</span>
+    <button onClick={() => onChange(!checked)} className={`command-action-button rounded-xl border px-4 py-3 text-left ${checked ? "border-sky-300/60 bg-sky-400/15 text-sky-100" : "border-green-500/30 text-green-300"}`}>
+      <span className="text-xs uppercase tracking-[0.16em] text-sky-200/70">{label}</span>
       <span className="mt-1 block font-semibold">{checked ? "Yes" : "No"}</span>
     </button>
   );
@@ -999,7 +1001,7 @@ function SummaryList({ summaries }: { summaries: EventSummary[] }) {
   return (
     <div className="grid gap-3">
       {summaries.map((summary) => (
-        <div key={summary.event_type} className="hud-row flex-col items-stretch">
+        <div key={summary.event_type} className="hoverable-row rounded-xl border border-sky-300/15 bg-black/35 p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="font-semibold text-green-100">{summary.label}</p>

@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Caveat, Cinzel, Cormorant_Garamond, Inter } from "next/font/google";
 import { Suspense, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 
@@ -55,12 +55,6 @@ type ArchiveSection = "dreams" | "daily" | "lessons" | "moments";
 type SidebarItem =
   | { label: string; image: string; href: string; section?: never }
   | { label: string; image: string; section: ArchiveSection; href?: never };
-type ArchiveBook = {
-  title: string;
-  image: string;
-  description: string;
-  section: ArchiveSection;
-};
 
 const DREAM_PROMPTS = [
   "What would my future self show me if we met tonight?",
@@ -83,33 +77,6 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
   { label: "Daily Journal", image: "/images/Daily Journal.png", section: "daily" as const },
   { label: "Lessons Learned", image: "/images/Lessons Learned.png", section: "lessons" as const },
   { label: "Life Moments", image: "/images/Life Moments.png", section: "moments" as const },
-];
-
-const BOOKS: ArchiveBook[] = [
-  {
-    title: "Dream Journal",
-    image: "/images/Dream Journal.png",
-    description: "Record the places your mind wandered.",
-    section: "dreams" as const,
-  },
-  {
-    title: "Daily Journal",
-    image: "/images/Daily Journal.png",
-    description: "The moments worth remembering.",
-    section: "daily" as const,
-  },
-  {
-    title: "Lessons Learned",
-    image: "/images/Lessons Learned.png",
-    description: "Wisdom earned.",
-    section: "lessons" as const,
-  },
-  {
-    title: "Life Moments",
-    image: "/images/Life Moments.png",
-    description: "Memories you'll want forever.",
-    section: "moments" as const,
-  },
 ];
 
 function emptyForm(prompt: string): DreamForm {
@@ -139,7 +106,6 @@ export default function ArchivePage() {
 }
 
 function ArchivePageContent() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const prompt = useMemo(() => {
     const dayIndex = Math.floor(Date.now() / 86_400_000) % DREAM_PROMPTS.length;
@@ -181,10 +147,6 @@ function ArchivePageContent() {
     }));
   }
 
-  function changeSection(nextSection: ArchiveSection) {
-    router.push(`/archive?section=${nextSection}`);
-  }
-
   function selectDream(dream: Dream) {
     setMessage("");
     setError("");
@@ -210,11 +172,6 @@ function ArchivePageContent() {
     setMessage("");
     setError("");
     setForm(emptyForm(prompt));
-  }
-
-  function startNewDream() {
-    newDream();
-    changeSection("dreams");
   }
 
   async function createDream() {
@@ -266,15 +223,13 @@ function ArchivePageContent() {
     <main className={`archive-shell ${inter.className}`}>
       <ArchiveSidebar activeSection={section} />
       <section className="archive-main">
-        <ArchiveBanner />
+        <div className="archive-hero-grid">
+          <ArchiveBanner />
+          <ArchiveStatsPanel dreams={dreams} activeSection={section} />
+        </div>
 
         {error && <div className="archive-alert archive-error">{error}</div>}
         {message && <div className="archive-alert archive-message">{message}</div>}
-
-        <div className="archive-top-grid">
-          <ArchiveBookShelf activeSection={section} onSelectSection={changeSection} onNewDream={startNewDream} />
-          <ArchiveStatsPanel dreams={dreams} />
-        </div>
 
         {section === "dreams" ? (
           <section className="archive-workspace">
@@ -341,47 +296,21 @@ function ArchiveBanner() {
   );
 }
 
-function ArchiveBookShelf({
-  activeSection,
-  onSelectSection,
-  onNewDream,
-}: {
-  activeSection: ArchiveSection;
-  onSelectSection: (section: ArchiveSection) => void;
-  onNewDream: () => void;
-}) {
-  return (
-    <section className="archive-section">
-      <div className="archive-section-header">
-        <p className={cinzel.className}>Your Collection</p>
-        <button type="button" onClick={onNewDream}>New Dream</button>
-      </div>
-      <div className="archive-bookshelf">
-        {BOOKS.map((book) => (
-          <button
-            key={book.title}
-            type="button"
-            className={`archive-book-card enabled ${activeSection === book.section ? "selected" : ""}`}
-            onClick={() => onSelectSection(book.section)}
-          >
-            <Image src={book.image} alt="" width={220} height={280} className="archive-book-image" />
-            <div>
-              <h3 className={cinzel.className}>{book.title}</h3>
-              <p>{book.description}</p>
-              {book.section !== "dreams" && <span>Coming Soon</span>}
-            </div>
-          </button>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function ArchiveStatsPanel({ dreams }: { dreams: Dream[] }) {
+function ArchiveStatsPanel({ dreams, activeSection }: { dreams: Dream[]; activeSection: ArchiveSection }) {
   const documentedDays = new Set(dreams.map((dream) => dream.dream_date).filter(Boolean)).size;
+  const sectionLabel = {
+    dreams: "Dream Journal",
+    daily: "Daily Journal",
+    lessons: "Lessons Learned",
+    moments: "Life Moments",
+  }[activeSection];
   return (
     <section className="archive-stats">
       <h2 className={cinzel.className}>Archive Stats</h2>
+      <div className="archive-current-section">
+        <span>Current Section</span>
+        <strong>{sectionLabel}</strong>
+      </div>
       <StatRow label="Dreams Recorded" value={dreams.length} />
       <StatRow label="Journal Entries" value={0} />
       <StatRow label="Lessons Learned" value={0} />
@@ -429,7 +358,10 @@ function DreamList({
             onClick={() => onSelect(dream)}
             className={`dream-card ${selectedId === dream.id ? "selected" : ""}`}
           >
-            <span>{formatDate(dream.dream_date)}</span>
+            <span className="dream-card-date">
+              <MoonPhaseIcon phase={dream.moon_phase || getMoonPhase(dream.dream_date || "")} />
+              {formatDate(dream.dream_date)}
+            </span>
             <strong>{dream.title || "Untitled Dream"}</strong>
             <small>Emotion: {(dream.emotions || [])[0] || "Unmarked"}</small>
             <small>Setting: {(dream.settings || [])[0] || "Unknown"}</small>
@@ -460,7 +392,7 @@ function DreamBookEditor({
   onCopyPrompt: () => void;
 }) {
   return (
-    <section className="dream-editor-wrap">
+    <section className={`dream-editor-wrap ${form.id ? "archived" : ""}`}>
       <div className="open-book-editor">
         <div className="book-page book-left">
           <div className="book-row two">
@@ -477,8 +409,8 @@ function DreamBookEditor({
           <input
             value={form.title}
             onChange={(e) => onChange("title", e.target.value)}
-            className={`${cormorant.className} dream-title-input`}
-            placeholder="Give your dream a title..."
+            className={`${cormorant.className} dream-title-input ${form.title.length > 42 ? "very-long" : form.title.length > 28 ? "long" : ""}`}
+            placeholder="Name this memory"
           />
           <textarea
             value={form.dream_text}
@@ -518,6 +450,12 @@ function DreamBookEditor({
             <textarea value={form.notes} onChange={(e) => onChange("notes", e.target.value)} placeholder="A factual note, fragment, or memory trace." />
           </ArchiveField>
         </div>
+        {form.id && (
+          <div className="archive-saved-seal" aria-label="Dream saved to The Archive" title="Dream saved to The Archive">
+            <Image src="/images/Red Wax Seal Button.png" alt="" width={86} height={86} />
+            <span>Sealed</span>
+          </div>
+        )}
       </div>
 
       <div className="dream-prompt-panel">
@@ -605,6 +543,15 @@ function WaxSealButton({ label, image, onClick }: { label: string; image: string
       <Image src={image} alt="" width={72} height={72} />
       <span>{label}</span>
     </button>
+  );
+}
+
+function MoonPhaseIcon({ phase }: { phase: string }) {
+  const phaseClass = phase.toLowerCase().replaceAll(" ", "-") || "unknown";
+  return (
+    <span className={`moon-phase-icon ${phaseClass}`} aria-label={phase || "Moon phase unknown"} title={phase || "Moon phase unknown"}>
+      <span />
+    </span>
   );
 }
 
@@ -761,9 +708,16 @@ function ArchiveStyles() {
         transform: translate(0, -50%);
       }
 
+      .archive-hero-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 230px;
+        gap: 18px;
+        align-items: stretch;
+      }
+
       .archive-banner {
         position: relative;
-        min-height: 300px;
+        min-height: 270px;
         overflow: hidden;
         border: 1px solid rgba(214, 168, 95, 0.22);
         border-radius: 18px;
@@ -793,13 +747,6 @@ function ArchiveStyles() {
         padding: 9px 14px;
         text-transform: uppercase;
         box-shadow: 0 0 22px rgba(47, 111, 179, 0.24);
-      }
-
-      .archive-top-grid {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) 280px;
-        gap: 22px;
-        margin-top: 24px;
       }
 
       .archive-section,
@@ -851,79 +798,58 @@ function ArchiveStyles() {
         box-shadow: 0 0 24px rgba(47, 111, 179, 0.35);
       }
 
-      .archive-bookshelf {
-        margin-top: 18px;
-        display: grid;
-        grid-template-columns: repeat(4, minmax(150px, 1fr));
-        gap: 18px;
-      }
-
-      .archive-book-card {
-        display: grid;
-        gap: 10px;
-        justify-items: center;
-        border: 1px solid transparent;
-        border-radius: 18px;
-        padding: 12px 10px 16px;
-        text-align: center;
-        transition: transform 220ms, box-shadow 220ms, border-color 220ms;
-      }
-
-      .archive-book-card.enabled:hover,
-      .archive-book-card.selected {
-        cursor: pointer;
-        transform: translateY(-8px);
-        border-color: rgba(47, 111, 179, 0.46);
-        box-shadow: 0 0 34px rgba(47, 111, 179, 0.38);
-      }
-
-      .archive-book-card.disabled {
-        opacity: 0.62;
-      }
-
-      .archive-book-image {
-        width: 100%;
-        max-width: 220px;
-        height: 280px;
-        object-fit: contain;
-      }
-
-      .archive-book-card h3 {
-        color: #d6a85f;
-        letter-spacing: 0.14em;
-        text-transform: uppercase;
-      }
-
-      .archive-book-card p,
-      .archive-book-card span,
       .archive-muted {
         color: rgba(232, 211, 165, 0.72);
         font-size: 0.9rem;
       }
 
       .archive-stats {
-        padding: 22px;
+        padding: 16px;
         background-image: linear-gradient(rgba(232, 211, 165, 0.88), rgba(232, 211, 165, 0.78)), url("/images/Parchment Paper Texture.png");
         background-size: cover;
         color: #3a2815;
+        align-self: stretch;
       }
 
       .archive-stat-row {
         display: flex;
         justify-content: space-between;
         border-bottom: 1px solid rgba(58, 40, 21, 0.18);
-        padding: 11px 0;
+        padding: 7px 0;
+        font-size: 0.86rem;
       }
 
       .archive-stat-row strong {
         color: #6f4214;
       }
 
+      .archive-current-section {
+        border: 1px solid rgba(58, 40, 21, 0.16);
+        border-radius: 12px;
+        background: rgba(244, 234, 210, 0.28);
+        margin: 10px 0 6px;
+        padding: 9px 10px;
+      }
+
+      .archive-current-section span {
+        display: block;
+        color: rgba(58, 40, 21, 0.68);
+        font-size: 0.62rem;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .archive-current-section strong {
+        color: #6f4214;
+        font-size: 0.98rem;
+      }
+
       .archive-workspace {
         display: grid;
         grid-template-columns: 300px minmax(0, 1fr);
         gap: 22px;
-        margin-top: 22px;
+        margin-top: 18px;
       }
 
       .dream-list-panel {
@@ -976,6 +902,70 @@ function ArchiveStyles() {
         flex-wrap: wrap;
       }
 
+      .dream-card-date {
+        align-items: center;
+        display: inline-flex;
+        gap: 8px;
+      }
+
+      .moon-phase-icon {
+        position: relative;
+        display: inline-grid;
+        width: 22px;
+        height: 22px;
+        place-items: center;
+        border: 1px solid rgba(214, 168, 95, 0.38);
+        border-radius: 999px;
+        background: radial-gradient(circle at 35% 30%, #f4ead2, #d6a85f 58%, #6f4214);
+        box-shadow: 0 0 12px rgba(214, 168, 95, 0.24);
+        flex: 0 0 auto;
+        overflow: hidden;
+      }
+
+      .moon-phase-icon span {
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+      }
+
+      .moon-phase-icon.new-moon {
+        background: #111827;
+      }
+
+      .moon-phase-icon.waxing-crescent span,
+      .moon-phase-icon.first-quarter span,
+      .moon-phase-icon.waxing-gibbous span {
+        background: #0b1220;
+        transform: translateX(-42%);
+      }
+
+      .moon-phase-icon.first-quarter span {
+        transform: translateX(-50%);
+      }
+
+      .moon-phase-icon.waxing-gibbous span {
+        transform: translateX(-72%);
+      }
+
+      .moon-phase-icon.full-moon span {
+        display: none;
+      }
+
+      .moon-phase-icon.waning-gibbous span,
+      .moon-phase-icon.last-quarter span,
+      .moon-phase-icon.waning-crescent span {
+        background: #0b1220;
+        transform: translateX(72%);
+      }
+
+      .moon-phase-icon.last-quarter span {
+        transform: translateX(50%);
+      }
+
+      .moon-phase-icon.waning-crescent span {
+        transform: translateX(42%);
+      }
+
       .dream-editor-wrap {
         min-width: 0;
         max-width: 1500px;
@@ -984,7 +974,7 @@ function ArchiveStyles() {
       .open-book-editor {
         position: relative;
         display: grid;
-        min-height: 760px;
+        min-height: 830px;
         grid-template-columns: 1fr 1fr;
         gap: clamp(38px, 5vw, 82px);
         overflow: visible;
@@ -992,8 +982,17 @@ function ArchiveStyles() {
         background:
           url("/images/Open Book.png") top center / 100% 100% no-repeat,
           linear-gradient(90deg, rgba(232, 211, 165, 0.94), rgba(232, 211, 165, 0.82));
-        padding: clamp(72px, 6.8vw, 112px) clamp(58px, 6.8vw, 120px) 76px;
+        padding: clamp(42px, 4vw, 68px) clamp(52px, 6.2vw, 110px) 70px;
         box-shadow: 0 28px 80px rgba(0, 0, 0, 0.5), 0 0 40px rgba(47, 111, 179, 0.18);
+        transition: filter 700ms ease, box-shadow 700ms ease;
+      }
+
+      .dream-editor-wrap.archived .open-book-editor {
+        filter: sepia(0.12) saturate(0.92) brightness(0.95);
+        box-shadow:
+          inset 0 0 90px rgba(111, 66, 20, 0.12),
+          0 28px 80px rgba(0, 0, 0, 0.5),
+          0 0 40px rgba(47, 111, 179, 0.18);
       }
 
       .book-page {
@@ -1003,7 +1002,7 @@ function ArchiveStyles() {
 
       .book-row {
         display: grid;
-        gap: 12px;
+        gap: 6px;
       }
 
       .book-row.two {
@@ -1013,8 +1012,8 @@ function ArchiveStyles() {
       .archive-field,
       .archive-choice {
         display: grid;
-        gap: 7px;
-        margin-bottom: 12px;
+        gap: 4px;
+        margin-bottom: 6px;
       }
 
       .archive-field span,
@@ -1034,7 +1033,7 @@ function ArchiveStyles() {
         background: rgba(244, 234, 210, 0.34);
         color: #2b2118;
         outline: none;
-        padding: 9px 10px;
+        padding: 7px 9px;
       }
 
       .archive-field input::placeholder,
@@ -1045,28 +1044,77 @@ function ArchiveStyles() {
       }
 
       .dream-title-input {
-        margin: 14px 0;
-        width: 100%;
+        margin: 4px auto 0;
+        width: calc(100% - 80px);
         border: 0;
         border-bottom: 1px solid rgba(47, 38, 28, 0.18);
         background: transparent;
         color: #2b2118;
-        font-size: clamp(2rem, 4vw, 3.5rem);
+        font-size: clamp(26px, 2vw, 42px);
+        font-weight: 600;
+        line-height: 1.1;
         outline: none;
+        overflow: hidden;
         text-align: center;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .dream-title-input.long {
+        font-size: clamp(22px, 1.7vw, 34px);
+      }
+
+      .dream-title-input.very-long {
+        font-size: clamp(19px, 1.35vw, 28px);
       }
 
       .dream-textarea {
-        min-height: 320px;
+        height: 590px;
+        margin-top: 10px;
         width: 100%;
-        resize: vertical;
+        caret-color: #2b1d12;
+        resize: none;
         border: 0;
+        border-radius: 12px;
         background:
-          repeating-linear-gradient(transparent 0 33px, rgba(47, 38, 28, 0.12) 34px 35px);
-        color: #2b2118;
-        font-size: clamp(1.7rem, 2.35vw, 2.35rem);
-        line-height: 1.22;
+          repeating-linear-gradient(
+            transparent 0 33px,
+            rgba(43, 29, 18, 0.07) 34px 35px
+          );
+        color: #2b1d12;
+        font-size: 24px;
+        letter-spacing: 0.15px;
+        line-height: 1.65;
         outline: none;
+        overflow-y: auto;
+        padding: 16px 42px 70px;
+        text-shadow: 0 0.5px 0.5px rgba(0, 0, 0, 0.18);
+      }
+
+      .archive-saved-seal {
+        position: absolute;
+        right: clamp(58px, 6vw, 112px);
+        bottom: 42px;
+        display: grid;
+        justify-items: center;
+        pointer-events: none;
+        transform: rotate(-8deg);
+      }
+
+      .archive-saved-seal img {
+        width: 86px;
+        height: 86px;
+        object-fit: contain;
+        filter: drop-shadow(0 10px 18px rgba(43, 29, 18, 0.34));
+      }
+
+      .archive-saved-seal span {
+        color: #6f1d16;
+        font-size: 0.64rem;
+        font-weight: 800;
+        letter-spacing: 0.12em;
+        margin-top: -22px;
+        text-transform: uppercase;
       }
 
       .archive-choice div,
@@ -1219,13 +1267,20 @@ function ArchiveStyles() {
       }
 
       @media (max-width: 1100px) {
-        .archive-top-grid,
+        .archive-hero-grid,
         .archive-workspace {
           grid-template-columns: 1fr;
         }
 
-        .archive-bookshelf {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
+        .archive-stats {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 8px 14px;
+        }
+
+        .archive-stats h2,
+        .archive-current-section {
+          grid-column: 1 / -1;
         }
 
         .open-book-editor {
@@ -1234,6 +1289,11 @@ function ArchiveStyles() {
           background-size: cover;
           min-height: 0;
           padding: 32px;
+        }
+
+        .dream-textarea {
+          height: 430px;
+          font-size: 21px;
         }
       }
 
@@ -1266,8 +1326,8 @@ function ArchiveStyles() {
           min-height: 220px;
         }
 
-        .archive-bookshelf {
-          grid-template-columns: 1fr;
+        .archive-stats {
+          grid-template-columns: 1fr 1fr;
         }
 
         .book-row.two {
@@ -1277,6 +1337,18 @@ function ArchiveStyles() {
         .open-book-editor {
           min-height: 0;
           padding: 28px 18px;
+        }
+
+        .dream-title-input,
+        .dream-title-input.long,
+        .dream-title-input.very-long {
+          font-size: clamp(24px, 8vw, 34px);
+        }
+
+        .dream-textarea {
+          height: 380px;
+          font-size: 19px;
+          padding: 16px 24px 58px;
         }
 
         .archive-coming-soon {

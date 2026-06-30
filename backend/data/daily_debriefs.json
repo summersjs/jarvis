@@ -88,5 +88,109 @@
       "win": "Finished deadlift and pushed the training chain forward."
     },
     "weekly_score": 97
+  },
+  {
+    "completed_at": null,
+    "created_at": "2026-06-29T17:15:01.831506-04:00",
+    "daily_score": 100,
+    "date": "2026-06-29",
+    "finance": {
+      "category": "None",
+      "money_spent_today": 15.15,
+      "notes": null,
+      "spending_status": "UNDER CONTROL",
+      "unexpected_expense": false
+    },
+    "is_finalized": false,
+    "lessons": {
+      "adjust_tomorrow": "Tomorrow is a rest day. I probably should read something tomorrow. ",
+      "did_not_work": "I feel like I'm still avoiding some things instead of taking them head on. ",
+      "worked": "Today felt pretty good. I was able to get up and be motivated. I spent the day working on Jarvis and did my dealift workout. I also did 2 loads of laundry"
+    },
+    "lifetime_rank": "Legend",
+    "lifetime_score": 100,
+    "mission_score": 100,
+    "notes": null,
+    "nutrition": {
+      "ate_out_today": false,
+      "estimated_food_spend": 15.15,
+      "meals_completed": 4,
+      "meals_planned_today": 4,
+      "notes": null
+    },
+    "objectives": [
+      {
+        "blocker": "",
+        "completed": true,
+        "id": "9220617f-ed2a-4c2b-8cae-150e4c71098d",
+        "notes": "Investing consistently turns Jarvis from an idea into a permanent tool. One component at a time builds the command center.",
+        "title": "Build the Jarvis Workstation"
+      },
+      {
+        "blocker": "",
+        "completed": true,
+        "id": "36fe3d37-1ff9-45d7-9e70-01cecbeda893",
+        "notes": "Auto-updated from deadlift top set: 290.0 x 6.",
+        "title": "Deadlift 400"
+      },
+      {
+        "blocker": "",
+        "completed": true,
+        "id": "4c49d748-15e0-462e-8811-ba12f2345e81",
+        "notes": "Added Health Ops to track symptoms and a doctor mode",
+        "title": "Ship 3 Features Weekly"
+      },
+      {
+        "blocker": "",
+        "completed": false,
+        "id": "6c3283ad-d3bd-4172-95ca-31eb0a359b8d",
+        "notes": "Friday Date night",
+        "title": "1 Date weekly"
+      },
+      {
+        "blocker": "No blocker recorded.",
+        "completed": false,
+        "id": "50ca87fc-209b-4716-a2ef-d8ef4c04f805",
+        "notes": "Investing consistently turns Jarvis from an idea into a permanent tool. One component at a time builds the command center.",
+        "title": "Build Jarvis Workstation"
+      }
+    ],
+    "overall_status": "ok",
+    "summary": "Evening debrief, John. Today was partial. Daily score 95. Weekly score 93. Lifetime rank Legend. deadlift was scheduled today. You completed 3 of 5 goal impacts today. Weekly goals moved: 2 completed, 1 above and beyond. Workout logged: deadlift. That session moved Deadlift 400 moved today: Above and Beyond. Stayed under control on spending. Planned standard: 1 Date weekly is planned for Friday, July 3. Next protocol is bench on Thursday. Tomorrow looks like a rest day. Main lesson: Keep rest day simple and stay on plan. Top priority tomorrow is Prepare for bench.",
+    "tomorrow": {
+      "calendar": [
+        "Allied payday"
+      ],
+      "meal_prep": "You have 1 events tomorrow. Allied payday from 8:00 AM to 9:00 AM.",
+      "priorities": [
+        "Prepare for bench"
+      ],
+      "reminder": "Next protocol: bench",
+      "shopping_items": [],
+      "top_priorities": [
+        "Prepare for bench"
+      ],
+      "workout": {
+        "label": "bench",
+        "lift": "bench",
+        "weekday": "Thursday"
+      }
+    },
+    "training": {
+      "energy_level": 5,
+      "lift_completed": "deadlift",
+      "pain_notes": "No pain",
+      "top_set_reps": 6,
+      "top_set_weight": 290.0,
+      "training_notes": "I felt great. I updated the training max today. So, I should montior this to see if I need to take it down a notch or not. ",
+      "workout_completed": true
+    },
+    "updated_at": "2026-06-29T17:15:01.831506-04:00",
+    "user_id": "john",
+    "victory": {
+      "category": "Training",
+      "win": "I changed deadlift so that i would be lifting heavier weight. I smashed my old record. "
+    },
+    "weekly_score": 93
   }
 ]

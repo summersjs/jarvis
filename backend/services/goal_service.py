@@ -637,6 +637,7 @@ def build_period_snapshot(
     planned_log = latest_planned_log_for_period(logs, period_start, period_end)
     missed_log = latest_missed_log_for_period(logs, period_start, period_end)
     planned_for = planned_log.get("planned_for") if planned_log else goal.get("planned_date")
+    planned_time = ((planned_log or {}).get("metadata") or {}).get("planned_time") or goal.get("planned_time")
     if missed_log and (
         not planned_log
         or (missed_log.get("created_at") or "") >= (planned_log.get("created_at") or "")
@@ -670,7 +671,7 @@ def build_period_snapshot(
         "is_current": is_current,
         "status": period_status,
         "planned_for": planned_for,
-        "planned_time": goal.get("planned_time"),
+        "planned_time": planned_time,
         "remaining": max(0, round(target - value, 2)) if target > 0 else None,
     }
 

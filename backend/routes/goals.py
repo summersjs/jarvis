@@ -1,3 +1,5 @@
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from backend.core.security import verify_api_key
@@ -61,13 +63,36 @@ def goals_brief_route(user_id: str = "john"):
         }
 
     lines = []
+    planned_lines = []
     for goal in goals:
         title = goal.get("title", "Unnamed goal")
         current = float(goal.get("current_value") or 0)
         target = float(goal.get("target_value") or 0)
         unit = goal.get("unit") or ""
+        mission_type = (goal.get("mission_type") or "").lower()
 
-        if target > 0:
+        planned_summary = goal_planned_summary(goal)
+        if planned_summary:
+            planned_lines.append(planned_summary)
+
+        if mission_type == "standard":
+            standard = goal.get("standard") or {}
+            status = standard.get("status") or "NOT PLANNED"
+            remaining = standard.get("remaining")
+            period_label = standard.get("period_start") and standard.get("period_end")
+            period_text = (
+                f" Current period is {standard.get('period_start')} through {standard.get('period_end')}."
+                if period_label
+                else ""
+            )
+            remaining_text = f" {remaining:g} {unit} remaining this period." if remaining is not None and target > 0 else ""
+            lines.append(f"{title}: {status.lower().replace('_', ' ')}.{period_text}{remaining_text}")
+        elif mission_type == "project":
+            project = goal.get("project") or {}
+            completed = project.get("completed_count") or 0
+            total = project.get("total_count") or 0
+            lines.append(f"{title}: {completed} of {total} milestones complete.")
+        elif target > 0:
             percent = round((current / target) * 100)
             remaining = max(target - current, 0)
             lines.append(
@@ -77,7 +102,11 @@ def goals_brief_route(user_id: str = "john"):
         else:
             lines.append(f"{title}: current progress is {current:g} {unit}.")
 
-    spoken_response = "Here is your goals progress. " + " ".join(lines)
+    planned_text = ""
+    if planned_lines:
+        planned_text = " Planned items: " + " ".join(planned_lines)
+
+    spoken_response = "Here is your goals progress." + planned_text + " " + " ".join(lines)
 
     return {
         "status": "ok",
@@ -85,6 +114,52 @@ def goals_brief_route(user_id: str = "john"):
         "goals": goals,
         "spoken_response": spoken_response
     }
+
+
+def goal_planned_summary(goal: dict) -> str | None:
+    title = goal.get("title", "Planned goal")
+    mission_type = (goal.get("mission_type") or "").lower()
+
+    if mission_type == "standard":
+        standard = goal.get("standard") or {}
+        planned_for = standard.get("planned_for") or goal.get("planned_date")
+        if not planned_for:
+            return None
+        planned_time = standard.get("planned_time") or goal.get("planned_time")
+        return f"{title} is planned for {format_spoken_date(planned_for)}{format_spoken_time(planned_time)}."
+
+    if mission_type == "project":
+        milestone = (goal.get("project") or {}).get("next_milestone") or {}
+        status = (milestone.get("status") or "").lower()
+        target_date = milestone.get("target_date")
+        if status != "planned" and not target_date:
+            return None
+        milestone_title = milestone.get("title") or "next milestone"
+        if target_date:
+            return f"{title}: {milestone_title} is planned for {format_spoken_date(target_date)}."
+        return f"{title}: {milestone_title} is planned."
+
+    planned_date = goal.get("planned_date") or goal.get("due_date")
+    if planned_date:
+        label = "planned" if goal.get("planned_date") else "due"
+        return f"{title} is {label} for {format_spoken_date(planned_date)}{format_spoken_time(goal.get('planned_time'))}."
+    return None
+
+
+def format_spoken_date(value: str | None) -> str:
+    if not value:
+        return "an unscheduled date"
+    planned_date = date.fromisoformat(value[:10])
+    today = date.today()
+    if planned_date == today:
+        return "today"
+    if (planned_date - today).days == 1:
+        return "tomorrow"
+    return f"{planned_date.strftime('%A, %B')} {planned_date.day}"
+
+
+def format_spoken_time(value: str | None) -> str:
+    return f" at {value}" if value else ""
 
 @router.get("/{goal_id}")
 def get_goal_route(goal_id: str):

@@ -21,6 +21,7 @@ from backend.routes.debrief import router as debrief_router
 from backend.routes.finance import router as finance_router
 from backend.routes.health import router as health_router
 from backend.routes.food_vault import router as food_vault_router
+from backend.routes.archive import router as archive_router
 
 
 
@@ -57,3 +58,4 @@ app.include_router(debrief_router)
 app.include_router(finance_router)
 app.include_router(health_router)
 app.include_router(food_vault_router)
+app.include_router(archive_router)

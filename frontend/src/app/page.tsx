@@ -629,6 +629,10 @@ export default function CommandCenterPage() {
             <HeartPulse className="h-4 w-4" />
             <span>Health Ops</span>
           </Link>
+          <Link className="command-nav-link tactical-nav-link" href="/archive">
+            <BookOpen className="h-4 w-4" />
+            <span>The Archive</span>
+          </Link>
         </nav>
 
         {dashboard?.birthday_note && (

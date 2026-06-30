@@ -2,8 +2,9 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Caveat, Cinzel, Cormorant_Garamond, Inter } from "next/font/google";
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 
 const cinzel = Cinzel({ subsets: ["latin"], weight: ["400", "600", "700"] });
 const cormorant = Cormorant_Garamond({ subsets: ["latin"], weight: ["400", "500", "600", "700"] });
@@ -50,6 +51,17 @@ type DreamForm = {
   notes: string;
 };
 
+type ArchiveSection = "dreams" | "daily" | "lessons" | "moments";
+type SidebarItem =
+  | { label: string; image: string; href: string; section?: never }
+  | { label: string; image: string; section: ArchiveSection; href?: never };
+type ArchiveBook = {
+  title: string;
+  image: string;
+  description: string;
+  section: ArchiveSection;
+};
+
 const DREAM_PROMPTS = [
   "What would my future self show me if we met tonight?",
   "Show me something I have been avoiding.",
@@ -61,39 +73,42 @@ const DREAM_PROMPTS = [
   "Let me dream with clarity tonight.",
 ];
 
-const SIDEBAR_ITEMS = [
+const SIDEBAR_ITEMS: SidebarItem[] = [
   { label: "Command Center", image: "/images/Command Center Icon.png", href: "/" },
-  { label: "Health Ops", image: "/images/Health Ops Icon.png" },
-  { label: "Food Ops", image: "/images/Food Ops Icon.png" },
-  { label: "Training Grounds", image: "/images/Training Grounds Icon.png" },
-  { label: "Finance Ops", image: "/images/Finance Icon.png" },
-  { label: "Dream Journal", image: "/images/Dream Journal.png", active: true },
-  { label: "Daily Journal", image: "/images/Daily Journal.png" },
-  { label: "Lessons Learned", image: "/images/Lessons Learned.png" },
-  { label: "Life Moments", image: "/images/Life Moments.png" },
+  { label: "Health Ops", image: "/images/Health Ops Icon.png", href: "/health-ops" },
+  { label: "Food Ops", image: "/images/Food Ops Icon.png", href: "/meal-planner" },
+  { label: "Training Grounds", image: "/images/Training Grounds Icon.png", href: "/workouts" },
+  { label: "Finance Ops", image: "/images/Finance Icon.png", href: "/finance-ops" },
+  { label: "Dream Journal", image: "/images/Dream Journal.png", section: "dreams" as const },
+  { label: "Daily Journal", image: "/images/Daily Journal.png", section: "daily" as const },
+  { label: "Lessons Learned", image: "/images/Lessons Learned.png", section: "lessons" as const },
+  { label: "Life Moments", image: "/images/Life Moments.png", section: "moments" as const },
 ];
 
-const BOOKS = [
+const BOOKS: ArchiveBook[] = [
   {
     title: "Dream Journal",
     image: "/images/Dream Journal.png",
     description: "Record the places your mind wandered.",
-    active: true,
+    section: "dreams" as const,
   },
   {
     title: "Daily Journal",
     image: "/images/Daily Journal.png",
     description: "The moments worth remembering.",
+    section: "daily" as const,
   },
   {
     title: "Lessons Learned",
     image: "/images/Lessons Learned.png",
     description: "Wisdom earned.",
+    section: "lessons" as const,
   },
   {
     title: "Life Moments",
     image: "/images/Life Moments.png",
     description: "Memories you'll want forever.",
+    section: "moments" as const,
   },
 ];
 
@@ -103,7 +118,7 @@ function emptyForm(prompt: string): DreamForm {
     dream_text: "",
     dream_prompt: prompt,
     dream_date: new Date().toISOString().slice(0, 10),
-    moon_phase: "",
+    moon_phase: getMoonPhase(new Date().toISOString().slice(0, 10)),
     people: "",
     emotions: "",
     settings: "",
@@ -116,6 +131,16 @@ function emptyForm(prompt: string): DreamForm {
 }
 
 export default function ArchivePage() {
+  return (
+    <Suspense fallback={<main className={`archive-shell ${inter.className}`} />}>
+      <ArchivePageContent />
+    </Suspense>
+  );
+}
+
+function ArchivePageContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const prompt = useMemo(() => {
     const dayIndex = Math.floor(Date.now() / 86_400_000) % DREAM_PROMPTS.length;
     return DREAM_PROMPTS[dayIndex];
@@ -125,6 +150,7 @@ export default function ArchivePage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const section = normalizeSection(searchParams.get("section"));
 
   const loadDreams = useCallback(async () => {
     setLoading(true);
@@ -148,7 +174,15 @@ export default function ArchivePage() {
   }, [loadDreams]);
 
   function updateForm<K extends keyof DreamForm>(key: K, value: DreamForm[K]) {
-    setForm((prev) => ({ ...prev, [key]: value }));
+    setForm((prev) => ({
+      ...prev,
+      [key]: value,
+      ...(key === "dream_date" ? { moon_phase: getMoonPhase(String(value)) } : {}),
+    }));
+  }
+
+  function changeSection(nextSection: ArchiveSection) {
+    router.push(`/archive?section=${nextSection}`);
   }
 
   function selectDream(dream: Dream) {
@@ -160,7 +194,7 @@ export default function ArchivePage() {
       dream_text: dream.dream_text || "",
       dream_prompt: dream.dream_prompt || prompt,
       dream_date: dream.dream_date || new Date().toISOString().slice(0, 10),
-      moon_phase: dream.moon_phase || "",
+      moon_phase: dream.moon_phase || getMoonPhase(dream.dream_date || new Date().toISOString().slice(0, 10)),
       people: (dream.people || []).join(", "),
       emotions: (dream.emotions || []).join(", "),
       settings: (dream.settings || []).join(", "),
@@ -178,7 +212,32 @@ export default function ArchivePage() {
     setForm(emptyForm(prompt));
   }
 
-  async function archiveDream() {
+  function startNewDream() {
+    newDream();
+    changeSection("dreams");
+  }
+
+  async function createDream() {
+    setMessage("");
+    setError("");
+    try {
+      const payload = formToPayload(form);
+      const res = await fetch(`${API_BASE}/archive/dreams`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to archive dream.");
+      setMessage("Dream archived.");
+      await loadDreams();
+      if (data.dream) selectDream(data.dream);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to archive dream.");
+    }
+  }
+
+  async function saveDream() {
     setMessage("");
     setError("");
     try {
@@ -189,12 +248,12 @@ export default function ArchivePage() {
         body: JSON.stringify(payload),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Failed to archive dream.");
+      if (!res.ok) throw new Error(data.detail || "Failed to save dream.");
       setMessage(form.id ? "Dream updated in The Archive." : "Dream archived.");
       await loadDreams();
-      if (!form.id && data.dream) selectDream(data.dream);
+      if (data.dream) selectDream(data.dream);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to archive dream.");
+      setError(err instanceof Error ? err.message : "Failed to save dream.");
     }
   }
 
@@ -205,7 +264,7 @@ export default function ArchivePage() {
 
   return (
     <main className={`archive-shell ${inter.className}`}>
-      <ArchiveSidebar />
+      <ArchiveSidebar activeSection={section} />
       <section className="archive-main">
         <ArchiveBanner />
 
@@ -213,20 +272,25 @@ export default function ArchivePage() {
         {message && <div className="archive-alert archive-message">{message}</div>}
 
         <div className="archive-top-grid">
-          <ArchiveBookShelf onNewDream={newDream} />
+          <ArchiveBookShelf activeSection={section} onSelectSection={changeSection} onNewDream={startNewDream} />
           <ArchiveStatsPanel dreams={dreams} />
         </div>
 
-        <section className="archive-workspace">
-          <DreamList dreams={dreams} loading={loading} selectedId={form.id} onSelect={selectDream} onNewDream={newDream} />
-          <DreamBookEditor
-            form={form}
-            onChange={updateForm}
-            onArchive={archiveDream}
-            onCancel={newDream}
-            onCopyPrompt={copyPrompt}
-          />
-        </section>
+        {section === "dreams" ? (
+          <section className="archive-workspace">
+            <DreamList dreams={dreams} loading={loading} selectedId={form.id} onSelect={selectDream} onNewDream={newDream} />
+            <DreamBookEditor
+              form={form}
+              onChange={updateForm}
+              onArchive={createDream}
+              onSave={saveDream}
+              onCancel={newDream}
+              onCopyPrompt={copyPrompt}
+            />
+          </section>
+        ) : (
+          <ComingSoonPanel section={section} />
+        )}
       </section>
 
       <ArchiveStyles />
@@ -234,7 +298,7 @@ export default function ArchivePage() {
   );
 }
 
-function ArchiveSidebar() {
+function ArchiveSidebar({ activeSection }: { activeSection: ArchiveSection }) {
   return (
     <aside className="archive-sidebar">
       <div className={`${cinzel.className} archive-brand`}>
@@ -251,15 +315,15 @@ function ArchiveSidebar() {
           );
           if (item.href) {
             return (
-              <Link key={item.label} href={item.href} className={`archive-icon-button ${item.active ? "active" : ""}`} aria-label={item.label}>
+              <Link key={item.label} href={item.href} className="archive-icon-button" aria-label={item.label}>
                 {content}
               </Link>
             );
           }
           return (
-            <button key={item.label} className={`archive-icon-button ${item.active ? "active" : ""}`} aria-label={item.label} type="button">
+            <Link key={item.label} href={`/archive?section=${item.section}`} className={`archive-icon-button ${activeSection === item.section ? "active" : ""}`} aria-label={item.label}>
               {content}
-            </button>
+            </Link>
           );
         })}
       </nav>
@@ -272,15 +336,20 @@ function ArchiveBanner() {
     <section className="archive-banner">
       <Image src="/images/Banner.png" alt="" fill priority className="archive-banner-image" />
       <div className="archive-banner-overlay" />
-      <div className="archive-banner-text">
-        <h1 className={cinzel.className}>The Archive</h1>
-        <p className={cormorant.className}>Some memories fade. Others become part of who we are.</p>
-      </div>
+      <p className={`${cinzel.className} archive-wing-label`}>Archive Wing</p>
     </section>
   );
 }
 
-function ArchiveBookShelf({ onNewDream }: { onNewDream: () => void }) {
+function ArchiveBookShelf({
+  activeSection,
+  onSelectSection,
+  onNewDream,
+}: {
+  activeSection: ArchiveSection;
+  onSelectSection: (section: ArchiveSection) => void;
+  onNewDream: () => void;
+}) {
   return (
     <section className="archive-section">
       <div className="archive-section-header">
@@ -289,12 +358,17 @@ function ArchiveBookShelf({ onNewDream }: { onNewDream: () => void }) {
       </div>
       <div className="archive-bookshelf">
         {BOOKS.map((book) => (
-          <button key={book.title} type="button" className={`archive-book-card ${book.active ? "enabled" : "disabled"}`} disabled={!book.active}>
+          <button
+            key={book.title}
+            type="button"
+            className={`archive-book-card enabled ${activeSection === book.section ? "selected" : ""}`}
+            onClick={() => onSelectSection(book.section)}
+          >
             <Image src={book.image} alt="" width={220} height={280} className="archive-book-image" />
             <div>
               <h3 className={cinzel.className}>{book.title}</h3>
               <p>{book.description}</p>
-              {!book.active && <span>Coming Soon</span>}
+              {book.section !== "dreams" && <span>Coming Soon</span>}
             </div>
           </button>
         ))}
@@ -374,12 +448,14 @@ function DreamBookEditor({
   form,
   onChange,
   onArchive,
+  onSave,
   onCancel,
   onCopyPrompt,
 }: {
   form: DreamForm;
   onChange: <K extends keyof DreamForm>(key: K, value: DreamForm[K]) => void;
   onArchive: () => void;
+  onSave: () => void;
   onCancel: () => void;
   onCopyPrompt: () => void;
 }) {
@@ -392,7 +468,7 @@ function DreamBookEditor({
               <input value={form.dream_date} onChange={(e) => onChange("dream_date", e.target.value)} type="date" />
             </ArchiveField>
             <ArchiveField label="Moon Phase">
-              <input value={form.moon_phase} onChange={(e) => onChange("moon_phase", e.target.value)} placeholder="Waxing Gibbous" />
+              <input value={form.moon_phase} readOnly aria-readonly="true" />
             </ArchiveField>
           </div>
           <ArchiveField label="Dream Prompt Used">
@@ -454,11 +530,47 @@ function DreamBookEditor({
 
       <div className="wax-actions">
         <WaxSealButton label="Archive Dream" image="/images/Blue Wax Seal Button.png" onClick={onArchive} />
-        <WaxSealButton label="Save Changes" image="/images/Green Wax Seal Button.png" onClick={onArchive} />
+        <WaxSealButton label="Save Changes" image="/images/Green Wax Seal Button.png" onClick={onSave} />
         <WaxSealButton label="Cancel" image="/images/Red Wax Seal Button.png" onClick={onCancel} />
         <WaxSealButton label="Add Note" image="/images/Purple Wax Seal Button.png" onClick={() => document.getElementById("archive-notes-anchor")?.scrollIntoView({ behavior: "smooth" })} />
       </div>
       <span id="archive-notes-anchor" />
+    </section>
+  );
+}
+
+function ComingSoonPanel({ section }: { section: ArchiveSection }) {
+  const copy = {
+    daily: {
+      title: "Daily Journal",
+      text: "A quieter journal shelf for ordinary days, reflections, and memory fragments is being prepared.",
+      image: "/images/Daily Journal.png",
+    },
+    lessons: {
+      title: "Lessons Learned",
+      text: "This wing will gather hard-earned wisdom into a searchable book of patterns, choices, and outcomes.",
+      image: "/images/Lessons Learned.png",
+    },
+    moments: {
+      title: "Life Moments",
+      text: "A future gallery for the memories you will want to keep forever.",
+      image: "/images/Life Moments.png",
+    },
+    dreams: {
+      title: "Dream Journal",
+      text: "The dream journal is ready.",
+      image: "/images/Dream Journal.png",
+    },
+  }[section];
+
+  return (
+    <section className="archive-coming-soon">
+      <Image src={copy.image} alt="" width={220} height={280} />
+      <div>
+        <p className={cinzel.className}>Coming Soon</p>
+        <h2 className={cormorant.className}>{copy.title}</h2>
+        <span>{copy.text}</span>
+      </div>
     </section>
   );
 }
@@ -503,7 +615,7 @@ function formToPayload(form: DreamForm) {
     dream_text: form.dream_text || null,
     dream_prompt: form.dream_prompt || null,
     dream_date: form.dream_date || null,
-    moon_phase: form.moon_phase || null,
+    moon_phase: form.moon_phase || getMoonPhase(form.dream_date),
     people: tagsToArray(form.people),
     emotions: tagsToArray(form.emotions),
     settings: tagsToArray(form.settings),
@@ -524,6 +636,30 @@ function formatDate(value?: string | null) {
   return new Date(`${value}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
+function normalizeSection(value: string | null): ArchiveSection {
+  if (value === "daily" || value === "lessons" || value === "moments") return value;
+  return "dreams";
+}
+
+function getMoonPhase(dateValue: string) {
+  if (!dateValue) return "";
+  const selected = new Date(`${dateValue}T12:00:00Z`);
+  if (Number.isNaN(selected.getTime())) return "";
+  const knownNewMoon = Date.UTC(2000, 0, 6, 18, 14);
+  const lunarCycle = 29.530588853;
+  const daysSince = (selected.getTime() - knownNewMoon) / 86_400_000;
+  const age = ((daysSince % lunarCycle) + lunarCycle) % lunarCycle;
+  if (age < 1.84566) return "New Moon";
+  if (age < 5.53699) return "Waxing Crescent";
+  if (age < 9.22831) return "First Quarter";
+  if (age < 12.91963) return "Waxing Gibbous";
+  if (age < 16.61096) return "Full Moon";
+  if (age < 20.30228) return "Waning Gibbous";
+  if (age < 23.99361) return "Last Quarter";
+  if (age < 27.68493) return "Waning Crescent";
+  return "New Moon";
+}
+
 function ArchiveStyles() {
   return (
     <style jsx global>{`
@@ -537,7 +673,7 @@ function ArchiveStyles() {
 
       .archive-main {
         margin-left: 92px;
-        padding: 28px 28px 64px;
+        padding: 28px 32px 64px;
       }
 
       .archive-sidebar {
@@ -641,30 +777,22 @@ function ArchiveStyles() {
       .archive-banner-overlay {
         position: absolute;
         inset: 0;
-        background: linear-gradient(180deg, rgba(3, 6, 13, 0.08), rgba(3, 6, 13, 0.42)), radial-gradient(circle at center, transparent, rgba(0, 0, 0, 0.34));
+        background: linear-gradient(180deg, rgba(3, 6, 13, 0.02), rgba(3, 6, 13, 0.18)), radial-gradient(circle at center, transparent, rgba(0, 0, 0, 0.18));
       }
 
-      .archive-banner-text {
+      .archive-wing-label {
         position: absolute;
-        inset: 0;
-        display: grid;
-        place-content: center;
-        text-align: center;
-      }
-
-      .archive-banner-text h1 {
+        left: 24px;
+        top: 22px;
+        border: 1px solid rgba(214, 168, 95, 0.34);
+        border-radius: 999px;
+        background: rgba(5, 9, 18, 0.62);
         color: #d6a85f;
-        font-size: clamp(2.6rem, 7vw, 6.3rem);
-        letter-spacing: 0.16em;
-        text-shadow: 0 0 22px rgba(214, 168, 95, 0.35);
+        font-size: 0.72rem;
+        letter-spacing: 0.18em;
+        padding: 9px 14px;
         text-transform: uppercase;
-      }
-
-      .archive-banner-text p {
-        margin-top: 12px;
-        color: rgba(244, 234, 210, 0.9);
-        font-size: clamp(1.05rem, 2vw, 1.45rem);
-        font-style: italic;
+        box-shadow: 0 0 22px rgba(47, 111, 179, 0.24);
       }
 
       .archive-top-grid {
@@ -741,7 +869,8 @@ function ArchiveStyles() {
         transition: transform 220ms, box-shadow 220ms, border-color 220ms;
       }
 
-      .archive-book-card.enabled:hover {
+      .archive-book-card.enabled:hover,
+      .archive-book-card.selected {
         cursor: pointer;
         transform: translateY(-8px);
         border-color: rgba(47, 111, 179, 0.46);
@@ -792,8 +921,8 @@ function ArchiveStyles() {
 
       .archive-workspace {
         display: grid;
-        grid-template-columns: 280px minmax(0, 1fr);
-        gap: 20px;
+        grid-template-columns: 300px minmax(0, 1fr);
+        gap: 22px;
         margin-top: 22px;
       }
 
@@ -849,26 +978,27 @@ function ArchiveStyles() {
 
       .dream-editor-wrap {
         min-width: 0;
+        max-width: 1500px;
       }
 
       .open-book-editor {
         position: relative;
         display: grid;
-        min-height: 660px;
+        min-height: 760px;
         grid-template-columns: 1fr 1fr;
-        gap: 42px;
-        overflow: hidden;
+        gap: clamp(38px, 5vw, 82px);
+        overflow: visible;
         border-radius: 24px;
         background:
-          url("/images/Open Book.png") center top / contain no-repeat,
+          url("/images/Open Book.png") top center / 100% 100% no-repeat,
           linear-gradient(90deg, rgba(232, 211, 165, 0.94), rgba(232, 211, 165, 0.82));
-        padding: clamp(54px, 6vw, 86px) clamp(40px, 6vw, 82px) 60px;
+        padding: clamp(72px, 6.8vw, 112px) clamp(58px, 6.8vw, 120px) 76px;
         box-shadow: 0 28px 80px rgba(0, 0, 0, 0.5), 0 0 40px rgba(47, 111, 179, 0.18);
       }
 
       .book-page {
         min-width: 0;
-        color: #2f261c;
+        color: #2b2118;
       }
 
       .book-row {
@@ -899,12 +1029,19 @@ function ArchiveStyles() {
       .archive-field input,
       .archive-field textarea {
         width: 100%;
-        border: 0;
-        border-bottom: 1px solid rgba(47, 38, 28, 0.22);
-        background: rgba(232, 211, 165, 0.14);
-        color: #2f261c;
+        border: 1px solid rgba(47, 38, 28, 0.18);
+        border-radius: 10px;
+        background: rgba(244, 234, 210, 0.34);
+        color: #2b2118;
         outline: none;
-        padding: 7px 8px;
+        padding: 9px 10px;
+      }
+
+      .archive-field input::placeholder,
+      .archive-field textarea::placeholder,
+      .dream-title-input::placeholder,
+      .dream-textarea::placeholder {
+        color: rgba(43, 33, 24, 0.54);
       }
 
       .dream-title-input {
@@ -913,20 +1050,20 @@ function ArchiveStyles() {
         border: 0;
         border-bottom: 1px solid rgba(47, 38, 28, 0.18);
         background: transparent;
-        color: #2f261c;
+        color: #2b2118;
         font-size: clamp(2rem, 4vw, 3.5rem);
         outline: none;
         text-align: center;
       }
 
       .dream-textarea {
-        min-height: 270px;
+        min-height: 320px;
         width: 100%;
         resize: vertical;
         border: 0;
         background:
           repeating-linear-gradient(transparent 0 33px, rgba(47, 38, 28, 0.12) 34px 35px);
-        color: #2f261c;
+        color: #2b2118;
         font-size: clamp(1.7rem, 2.35vw, 2.35rem);
         line-height: 1.22;
         outline: none;
@@ -935,31 +1072,78 @@ function ArchiveStyles() {
       .archive-choice div,
       .star-row {
         display: flex;
-        gap: 7px;
+        gap: 10px;
         flex-wrap: wrap;
       }
 
       .archive-choice button {
-        border: 1px solid rgba(47, 38, 28, 0.18);
+        border: 1px solid rgba(47, 38, 28, 0.36);
         border-radius: 999px;
-        background: rgba(58, 40, 21, 0.1);
-        color: #2f261c;
-        padding: 6px 10px;
+        background: rgba(244, 234, 210, 0.28);
+        color: #2b2118;
+        font-weight: 700;
+        padding: 9px 14px;
+        transition: border-color 180ms, background 180ms, transform 180ms, box-shadow 180ms;
       }
 
       .archive-choice button.active {
-        border-color: rgba(47, 111, 179, 0.72);
-        background: rgba(47, 111, 179, 0.12);
+        border-color: rgba(47, 111, 179, 0.9);
+        background: rgba(47, 111, 179, 0.22);
+        box-shadow: 0 0 0 2px rgba(47, 111, 179, 0.12), inset 0 0 14px rgba(47, 111, 179, 0.12);
+      }
+
+      .archive-choice button:hover {
+        transform: translateY(-1px);
+        border-color: rgba(111, 66, 20, 0.58);
       }
 
       .star-row button {
-        color: rgba(47, 38, 28, 0.38);
-        font-size: 1.5rem;
+        color: rgba(47, 38, 28, 0.48);
+        font-size: 2rem;
+        line-height: 1;
+        text-shadow: none;
       }
 
       .star-row button.lit {
-        color: #6f4214;
-        text-shadow: 0 0 10px rgba(214, 168, 95, 0.34);
+        color: #b9832e;
+        text-shadow: 0 0 10px rgba(214, 168, 95, 0.5);
+      }
+
+      .archive-coming-soon {
+        display: grid;
+        grid-template-columns: 220px minmax(0, 1fr);
+        gap: 28px;
+        align-items: center;
+        border: 1px solid rgba(214, 168, 95, 0.24);
+        border-radius: 22px;
+        background:
+          radial-gradient(circle at 20% 10%, rgba(47, 111, 179, 0.18), transparent 20rem),
+          rgba(5, 9, 18, 0.72);
+        margin-top: 22px;
+        padding: 32px;
+        box-shadow: 0 28px 70px rgba(0, 0, 0, 0.34);
+      }
+
+      .archive-coming-soon img {
+        height: 280px;
+        width: 220px;
+        object-fit: contain;
+      }
+
+      .archive-coming-soon p {
+        color: #d6a85f;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+      }
+
+      .archive-coming-soon h2 {
+        color: #f4ead2;
+        font-size: clamp(2rem, 4vw, 4rem);
+      }
+
+      .archive-coming-soon span {
+        color: rgba(232, 211, 165, 0.78);
+        font-size: 1.1rem;
       }
 
       .dream-prompt-panel {
@@ -1048,6 +1232,8 @@ function ArchiveStyles() {
           grid-template-columns: 1fr;
           background-image: linear-gradient(rgba(232, 211, 165, 0.9), rgba(232, 211, 165, 0.82)), url("/images/Parchment Paper Texture.png");
           background-size: cover;
+          min-height: 0;
+          padding: 32px;
         }
       }
 
@@ -1091,6 +1277,15 @@ function ArchiveStyles() {
         .open-book-editor {
           min-height: 0;
           padding: 28px 18px;
+        }
+
+        .archive-coming-soon {
+          grid-template-columns: 1fr;
+          text-align: center;
+        }
+
+        .archive-coming-soon img {
+          margin: 0 auto;
         }
 
         .dream-prompt-panel {

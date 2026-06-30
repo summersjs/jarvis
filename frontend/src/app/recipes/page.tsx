@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { BookOpen, PlusCircle, X } from "lucide-react";
+import { BookOpen, Eye, PlusCircle, Utensils, X } from "lucide-react";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -27,6 +27,8 @@ type FoodVaultItem = {
   protein_g?: number | null;
   carbs_g?: number | null;
   fat_g?: number | null;
+  estimated_price?: number | null;
+  package_quantity?: number | null;
 };
 
 type Recipe = {
@@ -298,6 +300,12 @@ export default function RecipesPage() {
                 🗓️ Meal Planner
             </Link>
             <Link
+              href="/food-vault"
+              className="command-nav-link"
+            >
+              Food Vault
+            </Link>
+            <Link
         href="/shopping"
         className="command-nav-link"
         >
@@ -523,16 +531,23 @@ export default function RecipesPage() {
           {sortRecipesByTitle(recipes).map((recipe) => {
             const totals = calculateRecipeMacros(recipe.ingredients || [], foodItems);
             return (
-            <Link
-              key={recipe.id}
-              href={`/recipes/${recipe.id}`}
-              className="hud-row block p-4 transition hover:-translate-y-0.5 hover:border-green-300/45 hover:bg-green-500/5 hover:shadow-[0_0_22px_rgba(34,197,94,0.16)]"
-            >
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold">{recipe.title}</h2>
-                <div className="flex items-center gap-2">
+              <article
+                key={recipe.id}
+                className="jarvis-card jarvis-card-cyan p-5"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h2 className="text-xl font-semibold leading-tight text-green-50">{recipe.title}</h2>
+                    <p className="mt-2 text-sm leading-6 text-green-300/80">
+                      {recipe.description || "Stored meal protocol."}
+                    </p>
+                    <p className="mt-2 text-xs uppercase tracking-[0.16em] text-cyan-200/75">
+                      Source: {recipe.source_type} · {recipe.servings || 1} serving{(recipe.servings || 1) === 1 ? "" : "s"}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
                   {recipe.is_favorite && (
-                    <span className="rounded-lg border border-green-500/30 px-3 py-1 text-sm">
+                    <span className="rounded-lg border border-amber-300/35 bg-amber-300/10 px-3 py-1 text-xs uppercase tracking-[0.14em] text-amber-100">
                       Favorite
                     </span>
                   )}
@@ -551,40 +566,39 @@ export default function RecipesPage() {
                 </div>
               </div>
 
-              <p className="mt-2 text-sm text-green-300/70">
-                Source: {recipe.source_type}
-              </p>
-
-              {recipe.description && (
-                <p className="mt-2 text-green-300/80">{recipe.description}</p>
-              )}
-
               {(totals.calories > 0 || totals.protein_g > 0 || totals.carbs_g > 0 || totals.fat_g > 0) && (
-                <div className="mt-4 grid gap-2 md:grid-cols-4">
-                  <Macro label="Calories" value={totals.calories} unit="cal" />
-                  <Macro label="Protein" value={totals.protein_g} unit="g" />
-                  <Macro label="Carbs" value={totals.carbs_g} unit="g" />
-                  <Macro label="Fat" value={totals.fat_g} unit="g" />
+                <div className="mt-4 grid gap-2 sm:grid-cols-4">
+                  <Macro label="Calories" value={perServing(totals.calories, recipe.servings)} unit="cal" />
+                  <Macro label="Protein" value={perServing(totals.protein_g, recipe.servings)} unit="g" />
+                  <Macro label="Carbs" value={perServing(totals.carbs_g, recipe.servings)} unit="g" />
+                  <Macro label="Fat" value={perServing(totals.fat_g, recipe.servings)} unit="g" />
                 </div>
               )}
 
-              {recipe.ingredients && recipe.ingredients.length > 0 && (
-                <div className="mt-4">
-                  <p className="mb-2 text-sm uppercase tracking-wide text-green-500/60">
-                    Ingredients
-                  </p>
-                  <ul className="space-y-1 text-green-300/80">
-                    {recipe.ingredients.map((ingredient, index) => (
-                      <li key={ingredient.id || index}>
-                        • {ingredient.quantity ? `${ingredient.quantity} ` : ""}
-                        {ingredient.item_name}
-                        {ingredient.category ? ` (${ingredient.category})` : ""}
-                      </li>
-                    ))}
-                  </ul>
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-green-500/15 pt-4">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.16em] text-green-500/65">
+                      {recipe.ingredients?.length || 0} ingredient{(recipe.ingredients?.length || 0) === 1 ? "" : "s"}
+                    </p>
+                    <p className="mt-1 text-sm text-green-200/80">{ingredientPreview(recipe.ingredients || [])}</p>
+                    {estimateRecipeCost(recipe.ingredients || [], foodItems) != null && (
+                      <p className="mt-1 text-xs text-cyan-200/70">
+                        Est. cost: ${estimateRecipeCost(recipe.ingredients || [], foodItems)?.toFixed(2)}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Link href={`/recipes/${recipe.id}`} className="command-action-button command-action-cyan border border-cyan-300/35 px-3 py-2 text-xs uppercase tracking-[0.14em] text-cyan-100">
+                      <Eye className="mr-2 h-4 w-4" />
+                      View Details
+                    </Link>
+                    <Link href="/meal-planner" className="command-action-button command-action-green border border-green-400/35 bg-green-400/10 px-3 py-2 text-xs uppercase tracking-[0.14em] text-green-100">
+                      <Utensils className="mr-2 h-4 w-4" />
+                      Add to Meal Planner
+                    </Link>
+                  </div>
                 </div>
-              )}
-            </Link>
+              </article>
             );
           })}
           </div>
@@ -606,6 +620,13 @@ function sortFoodItemsByName(items: FoodVaultItem[]) {
   return [...items].sort((a, b) => foodDisplayName(a).localeCompare(foodDisplayName(b), undefined, { sensitivity: "base" }));
 }
 
+function ingredientPreview(ingredients: RecipeIngredient[]) {
+  if (!ingredients.length) return "No ingredients listed";
+  const firstTwo = ingredients.slice(0, 2).map((ingredient) => ingredient.item_name);
+  const remaining = ingredients.length - firstTwo.length;
+  return `${firstTwo.join(", ")}${remaining > 0 ? ` +${remaining} more` : ""}`;
+}
+
 function calculateRecipeMacros(ingredients: RecipeIngredient[], foodItems: FoodVaultItem[]) {
   return ingredients.reduce(
     (totals, ingredient) => {
@@ -620,6 +641,17 @@ function calculateRecipeMacros(ingredients: RecipeIngredient[], foodItems: FoodV
     },
     { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 }
   );
+}
+
+function estimateRecipeCost(ingredients: RecipeIngredient[], foodItems: FoodVaultItem[]) {
+  const total = ingredients.reduce((sum, ingredient) => {
+    const food = findFoodItemForIngredient(ingredient.item_name, foodItems);
+    if (!food?.estimated_price) return sum;
+    const packageQuantity = Number(food.package_quantity || 1);
+    const quantity = parseServingQuantity(ingredient.quantity);
+    return sum + (Number(food.estimated_price) / packageQuantity) * quantity;
+  }, 0);
+  return total > 0 ? Math.round(total * 100) / 100 : null;
 }
 
 function findFoodItemForIngredient(name: string, foodItems: FoodVaultItem[]) {
@@ -643,9 +675,13 @@ function parseServingQuantity(quantity?: string | null) {
 
 function Macro({ label, value, unit }: { label: string; value: number; unit: string }) {
   return (
-    <div className="rounded-lg border border-green-500/20 bg-black px-3 py-2 transition hover:border-green-300/40 hover:shadow-[0_0_16px_rgba(34,197,94,0.14)]">
-      <p className="text-[0.65rem] uppercase tracking-[0.16em] text-green-500/65">{label}</p>
-      <p className="mt-1 font-semibold text-green-100">{Math.round(value * 10) / 10} {unit}</p>
+    <div className="rounded-lg border border-cyan-300/20 bg-cyan-300/5 px-3 py-2 transition hover:border-cyan-300/45 hover:shadow-[0_0_16px_rgba(34,211,238,0.16)]">
+      <p className="text-[0.72rem] uppercase tracking-[0.14em] text-cyan-200/70">{label}</p>
+      <p className="mt-1 text-base font-semibold text-green-50">{Math.round(value * 10) / 10} {unit}</p>
     </div>
   );
+}
+
+function perServing(value: number, servings?: number | null) {
+  return Math.round((value / Number(servings || 1)) * 10) / 10;
 }

@@ -327,6 +327,19 @@ const CAFFEINE_BUTTONS = [
   ["C4 Powder", 150],
 ] as const;
 
+const CAFFEINE_NUTRITION: Record<string, { calories: number; protein_g: number; carbs_g: number; fat_g: number }> = {
+  "Iced Coffee 12 oz": { calories: 120, protein_g: 2, carbs_g: 20, fat_g: 3 },
+  "Iced Coffee 16 oz": { calories: 160, protein_g: 3, carbs_g: 27, fat_g: 4 },
+  "Iced Coffee 20 oz": { calories: 200, protein_g: 4, carbs_g: 34, fat_g: 5 },
+  "Red Bull 8.4 oz": { calories: 110, protein_g: 1, carbs_g: 28, fat_g: 0 },
+  "Red Bull 12 oz": { calories: 160, protein_g: 1, carbs_g: 40, fat_g: 0 },
+  "Red Bull 16 oz": { calories: 210, protein_g: 2, carbs_g: 54, fat_g: 0 },
+  "Red Bull 20 oz": { calories: 270, protein_g: 2, carbs_g: 69, fat_g: 0 },
+  Monster: { calories: 210, protein_g: 0, carbs_g: 54, fat_g: 0 },
+  Celsius: { calories: 10, protein_g: 0, carbs_g: 2, fat_g: 0 },
+  "C4 Powder": { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 },
+};
+
 const EVENT_ICONS: Record<string, LucideIcon> = {
   deep_breath_awareness: Activity,
   brain_fog: Brain,
@@ -485,6 +498,7 @@ export default function HealthOpsPage() {
     setError("");
     setMessage("");
     try {
+      const caffeineNutrition = calculateCaffeineNutrition(pendingCaffeineButtons);
       const res = await fetch(`${API_BASE}/health-ops/checkins`, {
         method: "POST",
         headers: {
@@ -508,6 +522,12 @@ export default function HealthOpsPage() {
           food_spend: numberOrNull(checkin.food_spend),
           supplements: checkin.supplements,
           notes: checkin.notes || null,
+          source_data: pendingCaffeineButtons.length
+            ? {
+                caffeine_items: pendingCaffeineButtons,
+                caffeine_nutrition: caffeineNutrition,
+              }
+            : undefined,
         }),
       });
       const data = await res.json();
@@ -1045,6 +1065,21 @@ function toggleSupplement(checkin: CheckinForm, supplement: string): CheckinForm
     supplements: exists ? checkin.supplements.filter((item) => item !== supplement) : [...checkin.supplements, supplement],
     caffeine_mg: caffeineDelta ? String(nextCaffeine) : checkin.caffeine_mg,
   };
+}
+
+function calculateCaffeineNutrition(labels: string[]) {
+  return labels.reduce(
+    (totals, label) => {
+      const nutrition = CAFFEINE_NUTRITION[label];
+      if (!nutrition) return totals;
+      totals.calories += nutrition.calories;
+      totals.protein_g += nutrition.protein_g;
+      totals.carbs_g += nutrition.carbs_g;
+      totals.fat_g += nutrition.fat_g;
+      return totals;
+    },
+    { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 }
+  );
 }
 
 function labelForEvent(eventType: string, eventTypes: EventType[]) {

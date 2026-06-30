@@ -73,7 +73,8 @@ body {
   outline-offset: 3px;
 }
 
-.command-action-button {
+.command-action-button,
+.jarvis-action-button {
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -91,7 +92,8 @@ body {
     text-shadow 300ms;
 }
 
-.command-action-button::before {
+.command-action-button::before,
+.jarvis-action-button::before {
   content: "";
   pointer-events: none;
   position: absolute;
@@ -107,17 +109,20 @@ body {
     transform 700ms;
 }
 
-.command-action-button:hover {
+.command-action-button:hover,
+.jarvis-action-button:hover {
   transform: translateY(-2px);
   text-shadow: 0 0 10px currentColor;
 }
 
-.command-action-button:hover::before {
+.command-action-button:hover::before,
+.jarvis-action-button:hover::before {
   opacity: 1;
   transform: translateX(115%);
 }
 
-.command-action-button:focus-visible {
+.command-action-button:focus-visible,
+.jarvis-action-button:focus-visible {
   outline: 2px solid currentColor;
   outline-offset: 3px;
 }
@@ -707,6 +712,105 @@ body {
   border-color: rgba(134, 239, 172, 0.46);
   background: rgba(5, 46, 22, 0.34);
   box-shadow: 0 0 18px rgba(34, 197, 94, 0.14);
+}
+
+.jarvis-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(34, 197, 94, 0.24);
+  background:
+    linear-gradient(135deg, rgba(2, 6, 4, 0.98), rgba(5, 25, 18, 0.92) 54%, rgba(0, 0, 0, 0.98)),
+    repeating-linear-gradient(135deg, rgba(34, 197, 94, 0.06) 0 1px, transparent 1px 11px);
+  box-shadow:
+    0 0 0 1px rgba(187, 247, 208, 0.06) inset,
+    0 0 24px rgba(34, 197, 94, 0.12);
+  transition:
+    transform 300ms,
+    border-color 300ms,
+    background-color 300ms,
+    box-shadow 300ms;
+}
+
+.jarvis-card::before {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background: linear-gradient(to right, transparent, rgba(187, 247, 208, 0.14), transparent);
+  transform: translateX(-110%);
+  transition:
+    opacity 300ms,
+    transform 720ms;
+}
+
+.jarvis-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.jarvis-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(134, 239, 172, 0.48);
+  box-shadow:
+    0 0 30px rgba(34, 197, 94, 0.22),
+    inset 0 0 18px rgba(34, 197, 94, 0.08);
+}
+
+.jarvis-card:hover::before {
+  opacity: 1;
+  transform: translateX(110%);
+}
+
+.jarvis-card-cyan {
+  border-color: rgba(103, 232, 249, 0.22);
+}
+
+.jarvis-card-cyan:hover {
+  border-color: rgba(103, 232, 249, 0.5);
+  box-shadow:
+    0 0 30px rgba(34, 211, 238, 0.2),
+    inset 0 0 18px rgba(34, 197, 94, 0.08);
+}
+
+.jarvis-card-gradient {
+  background:
+    linear-gradient(135deg, rgba(2, 6, 4, 0.98), rgba(5, 25, 18, 0.92) 54%, rgba(0, 0, 0, 0.98)),
+    repeating-linear-gradient(135deg, rgba(34, 197, 94, 0.06) 0 1px, transparent 1px 11px);
+}
+
+.jarvis-section-header {
+  color: rgba(134, 239, 172, 0.72);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.food-ops-accent {
+  --jarvis-accent: rgb(103, 232, 249);
+  --jarvis-accent-soft: rgba(34, 211, 238, 0.16);
+}
+
+.health-ops-accent {
+  --jarvis-accent: rgb(125, 211, 252);
+  --jarvis-accent-soft: rgba(14, 165, 233, 0.16);
+}
+
+.finance-ops-accent {
+  --jarvis-accent: rgb(251, 191, 36);
+  --jarvis-accent-soft: rgba(251, 191, 36, 0.16);
+}
+
+.goals-accent {
+  --jarvis-accent: rgb(245, 158, 11);
+  --jarvis-accent-soft: rgba(245, 158, 11, 0.16);
+}
+
+.workout-accent {
+  --jarvis-accent: rgb(148, 163, 184);
+  --jarvis-accent-soft: rgba(148, 163, 184, 0.16);
 }
 
 .hud-metric {

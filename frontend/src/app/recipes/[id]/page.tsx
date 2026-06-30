@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { ChefHat, Clock, ListChecks, Pencil } from "lucide-react";
 
@@ -33,6 +33,18 @@ type Recipe = {
   ingredients?: RecipeIngredient[];
 };
 
+type FoodVaultItem = {
+  id: string;
+  name: string;
+  brand?: string | null;
+  calories?: number | null;
+  protein_g?: number | null;
+  carbs_g?: number | null;
+  fat_g?: number | null;
+  estimated_price?: number | null;
+  package_quantity?: number | null;
+};
+
 const emptyIngredient = (): RecipeIngredient => ({
   item_name: "",
   quantity: "",
@@ -45,6 +57,7 @@ export default function RecipeDetailPage() {
   const recipeId = params.id as string;
 
   const [recipe, setRecipe] = useState<Recipe | null>(null);
+  const [foodItems, setFoodItems] = useState<FoodVaultItem[]>([]);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [isEditing, setIsEditing] = useState(false);
@@ -61,7 +74,7 @@ export default function RecipeDetailPage() {
     ingredients: [emptyIngredient()] as RecipeIngredient[],
   });
 
-  async function loadRecipe() {
+  const loadRecipe = useCallback(async () => {
     setError("");
     try {
       const res = await fetch(`${API_BASE}/recipes/${recipeId}`, {
@@ -99,13 +112,27 @@ export default function RecipeDetailPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load recipe.");
     }
-  }
+  }, [recipeId]);
+
+  const loadFoodVault = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/food-vault/items?user_id=john`, {
+        headers: { "x-api-key": API_KEY },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to load Food Vault.");
+      setFoodItems(data.items || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load Food Vault.");
+    }
+  }, []);
 
   useEffect(() => {
     if (recipeId) {
       loadRecipe();
+      loadFoodVault();
     }
-  }, [recipeId]);
+  }, [loadFoodVault, loadRecipe, recipeId]);
 
   function updateFormField(
     key: "title" | "description" | "instructions" | "servings" | "prep_minutes" | "cook_minutes" | "is_favorite",
@@ -201,6 +228,9 @@ export default function RecipeDetailPage() {
       setIsSaving(false);
     }
   }
+
+  const totalMacros = recipe ? calculateRecipeMacros(recipe.ingredients || [], foodItems) : null;
+  const costEstimate = recipe ? estimateRecipeCost(recipe.ingredients || [], foodItems) : null;
 
   return (
     <main className="min-h-screen bg-black text-green-400 px-6 py-10">
@@ -302,6 +332,20 @@ export default function RecipeDetailPage() {
                 </div>
               </div>
             </div>
+
+            {totalMacros && (
+              <div className="mt-6 grid gap-4 md:grid-cols-2">
+                <MacroPanel title="Total Macros" macros={totalMacros} />
+                <MacroPanel title="Per-Serving Macros" macros={divideMacros(totalMacros, recipe.servings || 1)} />
+              </div>
+            )}
+
+            {costEstimate != null && (
+              <div className="hud-row mt-6">
+                <p className="text-sm uppercase tracking-wide text-green-500/60">Estimated Cost</p>
+                <p className="font-semibold text-cyan-100">${costEstimate.toFixed(2)}</p>
+              </div>
+            )}
 
             <div className="mt-8">
               <h3 className="text-2xl font-semibold">Ingredients</h3>
@@ -493,4 +537,103 @@ export default function RecipeDetailPage() {
       </div>
     </main>
   );
+}
+
+function MacroPanel({ title, macros }: { title: string; macros: MacroTotals }) {
+  return (
+    <div className="hud-row flex-col items-stretch">
+      <p className="hud-panel-title text-cyan-200">{title}</p>
+      <div className="mt-2 grid gap-2 sm:grid-cols-4">
+        <MacroChip label="Cal" value={macros.calories} unit="" />
+        <MacroChip label="Protein" value={macros.protein_g} unit="g" />
+        <MacroChip label="Carbs" value={macros.carbs_g} unit="g" />
+        <MacroChip label="Fat" value={macros.fat_g} unit="g" />
+      </div>
+    </div>
+  );
+}
+
+function MacroChip({ label, value, unit }: { label: string; value: number; unit: string }) {
+  return (
+    <div className="rounded-lg border border-cyan-300/20 bg-cyan-300/5 px-3 py-2">
+      <p className="text-[0.72rem] uppercase tracking-[0.14em] text-cyan-200/70">{label}</p>
+      <p className="mt-1 font-semibold text-green-50">{value}{unit}</p>
+    </div>
+  );
+}
+
+type MacroTotals = {
+  calories: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+};
+
+function calculateRecipeMacros(ingredients: RecipeIngredient[], foodItems: FoodVaultItem[]): MacroTotals {
+  const totals = ingredients.reduce(
+    (acc, ingredient) => {
+      const food = findFoodItemForIngredient(ingredient.item_name, foodItems);
+      if (!food) return acc;
+      const quantity = parseServingQuantity(ingredient.quantity);
+      acc.calories += Number(food.calories || 0) * quantity;
+      acc.protein_g += Number(food.protein_g || 0) * quantity;
+      acc.carbs_g += Number(food.carbs_g || 0) * quantity;
+      acc.fat_g += Number(food.fat_g || 0) * quantity;
+      return acc;
+    },
+    { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 }
+  );
+  return roundMacros(totals);
+}
+
+function divideMacros(macros: MacroTotals, servings: number): MacroTotals {
+  return roundMacros({
+    calories: macros.calories / servings,
+    protein_g: macros.protein_g / servings,
+    carbs_g: macros.carbs_g / servings,
+    fat_g: macros.fat_g / servings,
+  });
+}
+
+function roundMacros(macros: MacroTotals): MacroTotals {
+  return {
+    calories: Math.round(macros.calories * 10) / 10,
+    protein_g: Math.round(macros.protein_g * 10) / 10,
+    carbs_g: Math.round(macros.carbs_g * 10) / 10,
+    fat_g: Math.round(macros.fat_g * 10) / 10,
+  };
+}
+
+function estimateRecipeCost(ingredients: RecipeIngredient[], foodItems: FoodVaultItem[]) {
+  const total = ingredients.reduce((sum, ingredient) => {
+    const food = findFoodItemForIngredient(ingredient.item_name, foodItems);
+    if (!food?.estimated_price) return sum;
+    const packageQuantity = Number(food.package_quantity || 1);
+    const quantity = parseServingQuantity(ingredient.quantity);
+    return sum + (Number(food.estimated_price) / packageQuantity) * quantity;
+  }, 0);
+  return total > 0 ? Math.round(total * 100) / 100 : null;
+}
+
+function findFoodItemForIngredient(name: string, foodItems: FoodVaultItem[]) {
+  const normalized = normalizeFoodName(name);
+  return foodItems.find((item) => {
+    const display = normalizeFoodName(foodDisplayName(item));
+    const itemName = normalizeFoodName(item.name);
+    return display === normalized || itemName === normalized || display.includes(normalized) || normalized.includes(itemName);
+  });
+}
+
+function foodDisplayName(item: FoodVaultItem) {
+  return [item.brand, item.name].filter(Boolean).join(" ");
+}
+
+function normalizeFoodName(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function parseServingQuantity(quantity?: string | null) {
+  if (!quantity) return 1;
+  const match = quantity.match(/^\s*(\d+(?:\.\d+)?)/);
+  return match ? Number(match[1]) : 1;
 }

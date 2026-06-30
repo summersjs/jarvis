@@ -112,7 +112,10 @@ def _context_snapshot(user_id: str, target_date: date) -> dict:
         or 0
     )
     completed_meals = completed_meal_count(meals)
-    nutrition_totals = completed_meal_nutrition(meals)
+    nutrition_totals = merge_nutrition(
+        completed_meal_nutrition(meals),
+        (checkin.get("source_data") or {}).get("caffeine_nutrition") or {},
+    )
     workout_completed = bool(workout_summary)
     training_notes = None
     if workout_summary:
@@ -399,3 +402,10 @@ def completed_meal_nutrition(meals: list[dict]) -> dict:
             if value is not None:
                 totals[key] += float(value or 0) * servings
     return {key: round(value, 1) for key, value in totals.items()}
+
+
+def merge_nutrition(base: dict, extra: dict) -> dict:
+    totals = {}
+    for key in ("calories", "protein_g", "carbs_g", "fat_g"):
+        totals[key] = round(float(base.get(key) or 0) + float(extra.get(key) or 0), 1)
+    return totals

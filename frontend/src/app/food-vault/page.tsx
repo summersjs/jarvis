@@ -183,6 +183,25 @@ export default function FoodVaultPage() {
     }
   }
 
+  async function adjustStock(item: FoodItem, delta: number) {
+    setError("");
+    setMessage("");
+    const nextQuantity = Math.max(0, Number(item.current_quantity || 0) + delta);
+    try {
+      const res = await fetch(`${API_BASE}/food-vault/items/${item.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        body: JSON.stringify({ current_quantity: nextQuantity }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to update stock.");
+      setMessage(`${foodDisplayName(item)} stock updated to ${nextQuantity}.`);
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update stock.");
+    }
+  }
+
   async function saveTargets() {
     setError("");
     setMessage("");
@@ -318,6 +337,26 @@ export default function FoodVaultPage() {
                     <span className="rounded-full border border-green-400/30 px-3 py-1 text-xs uppercase tracking-[0.14em]">
                       {item.current_quantity ?? 0} left
                     </span>
+                    <button
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        adjustStock(item, -1);
+                      }}
+                      className="command-action-button border border-cyan-300/30 bg-cyan-400/5 px-2 py-1 text-cyan-100"
+                      aria-label={`Decrease ${item.name} stock`}
+                    >
+                      -
+                    </button>
+                    <button
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        adjustStock(item, 1);
+                      }}
+                      className="command-action-button command-action-green border border-green-400/35 bg-green-400/10 px-2 py-1 text-green-100"
+                      aria-label={`Increase ${item.name} stock`}
+                    >
+                      +
+                    </button>
                     <span
                       role="button"
                       tabIndex={0}

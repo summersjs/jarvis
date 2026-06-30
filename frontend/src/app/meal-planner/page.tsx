@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { type ComponentType, useCallback, useEffect, useState } from "react";
-import { ClipboardList, DollarSign, ShoppingCart, Utensils, Wallet, X } from "lucide-react";
+import { ChevronDown, ClipboardList, DollarSign, ShoppingCart, Utensils, Wallet, X } from "lucide-react";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -113,6 +113,14 @@ const MEAL_TYPE_OPTIONS = [
   { value: "snack", label: "Snack" },
 ];
 
+const MEAL_GROUPS = [
+  { value: "breakfast", label: "Breakfast" },
+  { value: "lunch", label: "Lunch" },
+  { value: "dinner", label: "Dinner" },
+  { value: "snack", label: "Snack" },
+  { value: "other", label: "Other" },
+];
+
 const MEAL_SOURCE_OPTIONS = [
   { value: "custom", label: "Custom Meal" },
   { value: "eat_out", label: "Eat Out" },
@@ -131,6 +139,7 @@ export default function MealPlannerPage() {
   const [nutritionTargets, setNutritionTargets] = useState<NutritionTargets | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [collapsedDays, setCollapsedDays] = useState<Record<string, boolean>>({});
 
   const [mealDate, setMealDate] = useState("");
   const [mealType, setMealType] = useState("breakfast");
@@ -149,20 +158,7 @@ export default function MealPlannerPage() {
   const [saveToFoodVault, setSaveToFoodVault] = useState(false);
 
   function getWeekRange() {
-    const today = new Date();
-    const day = today.getDay(); // Sun=0
-    const diffToMonday = day === 0 ? -6 : 1 - day;
-
-    const start = new Date(today);
-    start.setDate(today.getDate() + diffToMonday);
-
-    const end = new Date(start);
-    end.setDate(start.getDate() + 6);
-
-    const startStr = start.toISOString().split("T")[0];
-    const endStr = end.toISOString().split("T")[0];
-
-    return { startStr, endStr };
+    return getStaticWeekRange();
   }
 
   const loadRecipes = useCallback(async () => {
@@ -414,20 +410,6 @@ export default function MealPlannerPage() {
     }
   }
 
-  function useYogurtCorePowerPreset() {
-    const today = new Date().toISOString().split("T")[0];
-    setMealDate(today);
-    setMealType("snack");
-    setMealSource("leftovers");
-    setRecipeId("");
-    setCustomMealName("Yogurt + Core Power");
-    setCalories("320");
-    setProtein("42");
-    setCarbs("32");
-    setFat("4");
-    setNotes("Quick logged food. Macro estimates are editable.");
-  }
-
   async function consumeFoodVaultItem(itemId: string, quantity: number) {
     const res = await fetch(`${API_BASE}/food-vault/items/${itemId}/consume`, {
       method: "POST",
@@ -500,6 +482,7 @@ export default function MealPlannerPage() {
   const estimatedTotal = estimatedCosts.groceries + estimatedCosts.eatingOut;
   const estimatedOverUnder = weeklyTarget - estimatedTotal;
   const todayNutrition = calculateTodayNutrition(entries);
+  const weeklyBoard = buildWeeklyMealBoard(entries);
 
   return (
     <main className="min-h-screen bg-black text-green-400 px-6 py-10">
@@ -523,10 +506,10 @@ export default function MealPlannerPage() {
               Recipe Vault
             </Link>
             <Link
-            href="/shopping"
-            className="command-nav-link"
+              href="/shopping"
+              className="command-nav-link"
             >
-            🛒 Shopping Lists
+              Shopping Lists
             </Link>
             <Link
               href="/"
@@ -587,18 +570,12 @@ export default function MealPlannerPage() {
           </div>
         )}
 
-        <section className="mb-8 rounded-2xl border border-green-500/30 bg-zinc-950 p-6">
+        <section className="jarvis-card jarvis-card-cyan mb-8 p-6">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-xs uppercase tracking-[0.22em] text-green-500/65">Food Intake</p>
+              <p className="jarvis-section-header food-ops-accent">Food Intake</p>
               <h2 className="mt-1 text-2xl font-semibold">Add Meal</h2>
             </div>
-            <button
-              onClick={useYogurtCorePowerPreset}
-              className="command-action-button command-action-green border border-green-400/40 bg-green-400/10 px-4 py-3 text-green-100"
-            >
-              Yogurt + Core Power
-            </button>
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
@@ -792,91 +769,155 @@ export default function MealPlannerPage() {
           </button>
         </section>
 
-        <section className="rounded-2xl border border-green-500/30 bg-zinc-950 p-6">
-          <h2 className="mb-4 text-2xl font-semibold">This Week</h2>
+        <section className="hud-panel food-ops-accent">
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="section-label text-cyan-200/75">Weekly Intake Board</p>
+              <h2 className="mt-1 text-2xl font-semibold text-green-100">Weekly Meal Board</h2>
+            </div>
+            <span className="rounded-full border border-cyan-300/25 bg-cyan-300/5 px-3 py-1 text-xs uppercase tracking-[0.16em] text-cyan-100">
+              {entries.length} planned entries
+            </span>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => setCollapsedDays(Object.fromEntries(weeklyBoard.map((day) => [day.date, false])))}
+                className="command-action-button command-action-cyan border border-cyan-300/35 px-3 py-2 text-xs uppercase tracking-[0.14em] text-cyan-100"
+              >
+                Expand All
+              </button>
+              <button
+                onClick={() => setCollapsedDays(Object.fromEntries(weeklyBoard.map((day) => [day.date, true])))}
+                className="command-action-button border border-green-500/25 px-3 py-2 text-xs uppercase tracking-[0.14em] text-green-200"
+              >
+                Collapse All
+              </button>
+            </div>
+          </div>
 
-          <div className="space-y-4">
+          <div className="grid gap-4">
             {entries.length === 0 && (
-              <div className="rounded-xl border border-green-500/20 bg-black p-4">
+              <div className="hud-row">
                 No meals planned yet.
               </div>
             )}
 
-            {entries.map((entry) => {
-              const meta = getMealMeta(entry);
+            {weeklyBoard.map((day) => {
+              const collapsed = collapsedDays[day.date] ?? day.date !== todayString();
               return (
-              <div
-                key={entry.id}
-                className={`rounded-xl border p-4 transition ${
-                  meta.completed
-                    ? "border-green-300/45 bg-green-400/10 shadow-[0_0_18px_rgba(34,197,94,0.14)]"
-                    : "border-green-500/20 bg-black"
-                }`}
-              >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="font-semibold">
-                      {entry.meal_date} — {entry.meal_type} — {getMealSourceLabel(meta.source)}
-                    </p>
+                <article key={day.date} className="jarvis-card jarvis-card-cyan p-4">
+                  <button
+                    onClick={() => setCollapsedDays((prev) => ({ ...prev, [day.date]: !collapsed }))}
+                    className="flex w-full flex-wrap items-center justify-between gap-4 text-left"
+                  >
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.2em] text-cyan-200/75">{day.weekday}</p>
+                      <h3 className="mt-1 text-xl font-semibold text-green-50">{formatBoardDate(day.date)}</h3>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <DayStat label="Cal" value={`${day.totals.calories} cal`} />
+                      <DayStat label="Protein" value={`${day.totals.protein_g}g`} />
+                      <DayStat label="Carbs" value={`${day.totals.carbs_g}g`} />
+                      <DayStat label="Fat" value={`${day.totals.fat_g}g`} />
+                      <DayStat label="Cost" value={`$${formatMoney(day.totals.cost)}`} />
+                      <DayStat label="Meals" value={`${day.eatenCount}/${day.entries.length}`} />
+                      <ChevronDown className={`h-5 w-5 text-cyan-100 transition ${collapsed ? "" : "rotate-180"}`} />
+                    </div>
+                  </button>
 
-                    <p className="mt-2 text-green-300/80">
-                      {entry.recipes?.title || entry.custom_meal_name || "Unnamed meal"}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className={`rounded-full border px-3 py-1 text-xs uppercase tracking-[0.16em] ${
-                      meta.completed ? "border-green-300/45 bg-green-300/10 text-green-100" : "border-cyan-300/30 text-cyan-100"
-                    }`}>
-                      {meta.completed ? "Eaten" : "Planned"}
-                    </span>
-                    <button
-                      onClick={() => deleteMeal(entry)}
-                      className="command-action-button border border-red-400/30 bg-red-500/10 p-2 text-red-200"
-                      aria-label={`Delete ${entry.recipes?.title || entry.custom_meal_name || "meal"}`}
-                      title="Delete meal"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
+                  {!collapsed && (
+                    <div className="mt-4 grid gap-4 border-t border-green-500/15 pt-4">
+                      {MEAL_GROUPS.map((group) => {
+                        const groupEntries = day.groups[group.value] || [];
+                        if (groupEntries.length === 0) return null;
+                        return (
+                          <div key={`${day.date}-${group.value}`} className="rounded-xl border border-green-500/15 bg-black/30 p-3">
+                            <p className="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-green-500/70">{group.label}</p>
+                            <div className="grid gap-3">
+                              {groupEntries.map((entry) => {
+                                const meta = getMealMeta(entry);
+                                return (
+                                  <div
+                                    key={entry.id}
+                                    className={`rounded-xl border p-4 transition ${
+                                      meta.completed
+                                        ? "border-green-300/45 bg-green-400/10 shadow-[0_0_18px_rgba(34,197,94,0.14)]"
+                                        : "border-green-500/20 bg-black"
+                                    }`}
+                                  >
+                                    <div className="flex flex-wrap items-start justify-between gap-3">
+                                      <div>
+                                        <p className="text-xs font-bold uppercase tracking-[0.16em] text-cyan-200/75">
+                                          {entry.meal_type} · {getMealSourceLabel(meta.source)}
+                                        </p>
+                                        <p className="mt-2 font-semibold text-green-100">
+                                          {entry.recipes?.title || entry.custom_meal_name || "Unnamed meal"}
+                                        </p>
+                                        <p className="mt-1 text-sm text-green-300/65">
+                                          {mealCostLabel(entry, meta)}
+                                          {entry.vendor || meta.vendor ? ` · ${entry.vendor || meta.vendor}` : ""}
+                                        </p>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <span className={`rounded-full border px-3 py-1 text-xs uppercase tracking-[0.16em] ${
+                                          meta.completed ? "border-green-300/45 bg-green-300/10 text-green-100" : "border-cyan-300/30 text-cyan-100"
+                                        }`}>
+                                          {meta.completed ? "Eaten" : "Planned"}
+                                        </span>
+                                        <button
+                                          onClick={() => deleteMeal(entry)}
+                                          className="command-action-button border border-red-400/30 bg-red-500/10 p-2 text-red-200"
+                                          aria-label={`Delete ${entry.recipes?.title || entry.custom_meal_name || "meal"}`}
+                                          title="Delete meal"
+                                        >
+                                          <X className="h-4 w-4" />
+                                        </button>
+                                      </div>
+                                    </div>
 
-                <p className="mt-1 text-sm text-green-300/65">
-                  {mealCostLabel(entry, meta)}
-                  {entry.vendor || meta.vendor ? ` · ${entry.vendor || meta.vendor}` : ""}
-                </p>
+                                    <div className="mt-3 grid gap-2 sm:grid-cols-4">
+                                      <MacroChip label="Calories" value={macroTotal(meta.calories, meta.servings)} unit="cal" />
+                                      <MacroChip label="Protein" value={macroTotal(meta.protein_g, meta.servings)} unit="g" />
+                                      <MacroChip label="Carbs" value={macroTotal(meta.carbs_g, meta.servings)} unit="g" />
+                                      <MacroChip label="Fat" value={macroTotal(meta.fat_g, meta.servings)} unit="g" />
+                                    </div>
 
-                <div className="mt-3 grid gap-2 sm:grid-cols-4">
-                  <MacroChip label="Calories" value={macroTotal(meta.calories, meta.servings)} unit="cal" />
-                  <MacroChip label="Protein" value={macroTotal(meta.protein_g, meta.servings)} unit="g" />
-                  <MacroChip label="Carbs" value={macroTotal(meta.carbs_g, meta.servings)} unit="g" />
-                  <MacroChip label="Fat" value={macroTotal(meta.fat_g, meta.servings)} unit="g" />
-                </div>
+                                    {entry.notes && (
+                                      <p className="mt-2 text-sm text-green-300/70">{parseMealNote(entry.notes)}</p>
+                                    )}
 
-                {entry.notes && (
-                  <p className="mt-2 text-sm text-green-300/70">{parseMealNote(entry.notes)}</p>
-                )}
-
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {meta.completed ? (
-                    <button
-                      onClick={() => reopenMeal(entry)}
-                      className="command-action-button border border-cyan-300/35 px-4 py-2 text-sm text-cyan-100"
-                    >
-                      Reopen
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => markMealCompleted(entry)}
-                      className="command-action-button command-action-green border border-green-400/40 bg-green-400/10 px-4 py-2 text-sm text-green-100"
-                    >
-                      I Ate This
-                    </button>
+                                    <div className="mt-4 flex flex-wrap gap-2">
+                                      {meta.completed ? (
+                                        <button
+                                          onClick={() => reopenMeal(entry)}
+                                          className="command-action-button command-action-cyan border border-cyan-300/35 px-4 py-2 text-sm text-cyan-100"
+                                        >
+                                          Reopen
+                                        </button>
+                                      ) : (
+                                        <button
+                                          onClick={() => markMealCompleted(entry)}
+                                          className="command-action-button command-action-green border border-green-400/40 bg-green-400/10 px-4 py-2 text-sm text-green-100"
+                                        >
+                                          I Ate This
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {day.entries.length === 0 && (
+                        <div className="hud-row">No meals planned for this day.</div>
+                      )}
+                    </div>
                   )}
-                </div>
-              </div>
+                </article>
               );
             })}
-          </div>
+                </div>
         </section>
       </div>
     </main>
@@ -893,7 +934,7 @@ function SummaryCard({
   value: string;
 }) {
   return (
-    <div className="rounded-2xl border border-green-500/20 bg-zinc-950 p-5">
+    <div className="jarvis-card jarvis-card-cyan p-5">
       <div className="flex items-center gap-3">
         <Icon className="h-5 w-5 text-green-300" />
         <p className="text-xs uppercase tracking-[0.25em] text-green-500/70">{label}</p>
@@ -1058,6 +1099,93 @@ function parseServingQuantity(quantity?: string | null) {
 
 function roundMacro(value: number) {
   return Math.round(value * 10) / 10;
+}
+
+function DayStat({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="rounded-lg border border-cyan-300/20 bg-cyan-300/5 px-2.5 py-1 text-xs text-cyan-50">
+      <span className="mr-1 uppercase tracking-[0.12em] text-cyan-200/65">{label}</span>
+      {value}
+    </span>
+  );
+}
+
+function buildWeeklyMealBoard(entries: MealPlanEntry[]) {
+  const { startStr } = getStaticWeekRange();
+  const start = parseLocalDate(startStr);
+  return Array.from({ length: 7 }, (_unused, index) => {
+    const date = addDays(start, index);
+    const dateStr = formatDateInput(date);
+    const dayEntries = entries.filter((entry) => entry.meal_date === dateStr);
+    const groups = dayEntries.reduce<Record<string, MealPlanEntry[]>>((acc, entry) => {
+      const groupKey = MEAL_GROUPS.some((group) => group.value === entry.meal_type) ? entry.meal_type : "other";
+      acc[groupKey] = [...(acc[groupKey] || []), entry];
+      return acc;
+    }, {});
+    const totals = dayEntries.reduce(
+      (acc, entry) => {
+        const meta = getMealMeta(entry);
+        const servings = Number(meta.servings || 1);
+        acc.calories += Number(meta.calories || 0) * servings;
+        acc.protein_g += Number(meta.protein_g || 0) * servings;
+        acc.carbs_g += Number(meta.carbs_g || 0) * servings;
+        acc.fat_g += Number(meta.fat_g || 0) * servings;
+        acc.cost += Number(meta.estimated_cost || entry.estimated_cost || 0);
+        return acc;
+      },
+      { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0, cost: 0 }
+    );
+    return {
+      date: dateStr,
+      weekday: date.toLocaleDateString(undefined, { weekday: "long" }),
+      entries: dayEntries,
+      groups,
+      eatenCount: dayEntries.filter((entry) => getMealMeta(entry).completed).length,
+      totals: {
+        calories: roundMacro(totals.calories),
+        protein_g: roundMacro(totals.protein_g),
+        carbs_g: roundMacro(totals.carbs_g),
+        fat_g: roundMacro(totals.fat_g),
+        cost: roundMoney(totals.cost),
+      },
+    };
+  });
+}
+
+function getStaticWeekRange() {
+  const today = new Date();
+  const day = today.getDay();
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  const start = new Date(today);
+  start.setDate(today.getDate() + diffToMonday);
+  const end = addDays(start, 6);
+  return { startStr: formatDateInput(start), endStr: formatDateInput(end) };
+}
+
+function parseLocalDate(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(date.getDate() + days);
+  return next;
+}
+
+function formatDateInput(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function todayString() {
+  return formatDateInput(new Date());
+}
+
+function formatBoardDate(value: string) {
+  return parseLocalDate(value).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
 function calculateTodayNutrition(entries: MealPlanEntry[]) {

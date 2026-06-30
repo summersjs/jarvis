@@ -179,7 +179,7 @@ def build_health_dashboard(user_id: str = "john", date_str: str | None = None) -
             "meals_planned": context.get("meals_planned"),
             "meals_completed": context.get("meals_completed"),
             "nutrition_totals": context.get("nutrition_totals"),
-            "current_symptom_count": sum(1 for event in events_today if event.get("event_type") != "custom_event"),
+            "current_symptom_count": len(events_today),
         },
         "event_types": event_cards,
         "events_today": events_today,

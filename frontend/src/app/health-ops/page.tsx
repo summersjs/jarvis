@@ -407,6 +407,15 @@ export default function HealthOpsPage() {
     loadDashboard();
   }, [loadDashboard]);
 
+  useEffect(() => {
+    if (!selectedEvent) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [selectedEvent]);
+
   async function logEvent(eventType: EventType) {
     setError("");
     setMessage("");
@@ -810,93 +819,95 @@ function EventDetailPopup({
   ].filter(Boolean);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/80 px-4 py-6 backdrop-blur-sm sm:items-center">
-      <section className="jarvis-card jarvis-card-health max-h-[90vh] w-full max-w-4xl overflow-y-auto p-5 text-green-300 shadow-[0_0_48px_rgba(56,189,248,0.22)]">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p className="health-ops-form-section-title">
-              Observation Context
-            </p>
-            <h2 className="mt-2 text-2xl font-bold text-green-100">{config.title}</h2>
-            <p className="mt-2 text-sm text-green-300/75">
-              {eventLabel} logged at {formatTime(event.occurred_at)}. {config.prompt}
-            </p>
-          </div>
-          <button
-            onClick={onSkip}
-            className="command-action-button border border-cyan-300/35 px-4 py-2 text-sm uppercase tracking-[0.16em] text-cyan-100"
-          >
-            Skip
-          </button>
-        </div>
-
-        {config.presets && config.presets.length > 0 && (
-          <div className="health-ops-form-section mt-5">
-            <p className="health-ops-form-section-title">Fast Presets</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {config.presets.map((preset) => (
-                <button
-                  key={preset.label}
-                  onClick={() => onApplyPreset(preset.values)}
-                  className="command-action-button command-action-green border border-green-400/35 bg-green-400/10 px-4 py-3 text-sm text-green-100"
-                >
-                  {preset.label}
-                </button>
-              ))}
+    <div className="health-ops-modal-overlay">
+      <section className="jarvis-card jarvis-card-health health-ops-dialog w-[95vw] max-w-4xl text-green-300 shadow-[0_0_48px_rgba(56,189,248,0.22)]">
+        <div className="health-ops-dialog-body">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="health-ops-form-section-title">
+                Observation Context
+              </p>
+              <h2 className="mt-2 text-2xl font-bold text-green-100">{config.title}</h2>
+              <p className="mt-2 text-sm text-green-300/75">
+                {eventLabel} logged at {formatTime(event.occurred_at)}. {config.prompt}
+              </p>
             </div>
+            <button
+              onClick={onSkip}
+              className="command-action-button border border-cyan-300/35 px-4 py-2 text-sm uppercase tracking-[0.16em] text-cyan-100"
+            >
+              Close
+            </button>
           </div>
-        )}
 
-        <div className="mt-5 grid gap-4">
-          {config.sections.map((section) => (
-            <div key={`${section.field}-${section.label}`} className="health-ops-form-section">
-              <p className="health-ops-form-section-title">{section.label}</p>
+          {config.presets && config.presets.length > 0 && (
+            <div className="health-ops-form-section mt-5">
+              <p className="health-ops-form-section-title">Fast Presets</p>
               <div className="mt-3 flex flex-wrap gap-2">
-                {section.options.map((option) => {
-                  const selected = form[section.field] === (section.prefix ? `${section.prefix}: ${option}` : option);
-                  return (
-                    <button
-                      key={option}
-                      onClick={() => onSetField(section.field, option, section.prefix)}
-                      className={`command-action-button border px-4 py-3 text-sm ${
-                        selected
-                          ? "border-sky-300/65 bg-sky-400/15 text-sky-100 shadow-[0_0_16px_rgba(56,189,248,0.18)]"
-                          : "border-green-500/25 text-green-300"
-                      }`}
-                    >
-                      {option}
-                    </button>
-                  );
-                })}
+                {config.presets.map((preset) => (
+                  <button
+                    key={preset.label}
+                    onClick={() => onApplyPreset(preset.values)}
+                    className="command-action-button command-action-green border border-green-400/35 bg-green-400/10 px-4 py-3 text-sm text-green-100"
+                  >
+                    {preset.label}
+                  </button>
+                ))}
               </div>
             </div>
-          ))}
+          )}
+
+          <div className="mt-5 grid gap-4">
+            {config.sections.map((section) => (
+              <div key={`${section.field}-${section.label}`} className="health-ops-form-section">
+                <p className="health-ops-form-section-title">{section.label}</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {section.options.map((option) => {
+                    const selected = form[section.field] === (section.prefix ? `${section.prefix}: ${option}` : option);
+                    return (
+                      <button
+                        key={option}
+                        onClick={() => onSetField(section.field, option, section.prefix)}
+                        className={`command-action-button border px-4 py-3 text-sm ${
+                          selected
+                            ? "border-sky-300/65 bg-sky-400/15 text-sky-100 shadow-[0_0_16px_rgba(56,189,248,0.18)]"
+                            : "border-green-500/25 text-green-300"
+                        }`}
+                      >
+                        {option}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <label className="mt-5 grid gap-2">
+            <span className="text-xs uppercase tracking-[0.16em] text-sky-200/70">Optional note</span>
+            <input
+              value={form.notes}
+              onChange={(event) => onNotesChange(event.target.value)}
+              className="health-ops-input"
+              placeholder="Short factual note"
+            />
+          </label>
+
+          {selectedValues.length > 0 && (
+            <div className="mt-5 rounded-xl border border-cyan-300/25 bg-cyan-300/5 p-4">
+              <p className="text-xs uppercase tracking-[0.18em] text-cyan-200/70">Selected</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {selectedValues.map((value) => (
+                  <span key={value} className="rounded-full border border-cyan-300/30 px-3 py-1 text-xs text-cyan-100">
+                    {value}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
-        <label className="mt-5 grid gap-2">
-          <span className="text-xs uppercase tracking-[0.16em] text-sky-200/70">Optional note</span>
-          <input
-            value={form.notes}
-            onChange={(event) => onNotesChange(event.target.value)}
-            className="health-ops-input"
-            placeholder="Short factual note"
-          />
-        </label>
-
-        {selectedValues.length > 0 && (
-          <div className="mt-5 rounded-xl border border-cyan-300/25 bg-cyan-300/5 p-4">
-            <p className="text-xs uppercase tracking-[0.18em] text-cyan-200/70">Selected</p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {selectedValues.map((value) => (
-                <span key={value} className="rounded-full border border-cyan-300/30 px-3 py-1 text-xs text-cyan-100">
-                  {value}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className="mt-5 flex flex-wrap gap-2">
+        <div className="health-ops-dialog-footer">
           <button
             onClick={onSave}
             className="command-action-button command-action-green border border-green-400/45 bg-green-400/10 px-5 py-3 font-semibold uppercase tracking-[0.16em] text-green-100"
@@ -908,6 +919,12 @@ function EventDetailPopup({
             className="command-action-button border border-cyan-300/35 px-5 py-3 font-semibold uppercase tracking-[0.16em] text-cyan-100"
           >
             Skip
+          </button>
+          <button
+            onClick={onSkip}
+            className="command-action-button border border-sky-300/35 px-5 py-3 font-semibold uppercase tracking-[0.16em] text-sky-100"
+          >
+            Cancel
           </button>
         </div>
       </section>

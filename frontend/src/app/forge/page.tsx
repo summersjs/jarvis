@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import {
   Archive,
   Bot,
@@ -91,14 +91,16 @@ type FormState = {
 const FORGE_CATEGORIES: Array<{
   name: ForgeCategory;
   Icon: LucideIcon;
+  image: string;
+  accent: string;
   description: string;
 }> = [
-  { name: "Games", Icon: Gamepad2, description: "Video games, board games, mechanics, worlds, and interactive ideas." },
-  { name: "Jarvis", Icon: Bot, description: "Systems, modules, improvements, and the Jarvis roadmap." },
-  { name: "Business", Icon: BriefcaseBusiness, description: "Courses, content, merch, income ideas, and experiments." },
-  { name: "Hardware", Icon: Cpu, description: "Devices, setups, labs, servers, networking, and physical builds." },
-  { name: "Writing", Icon: Feather, description: "Stories, scripts, characters, worlds, and written concepts." },
-  { name: "Life", Icon: Compass, description: "Life systems, personal growth, relationships, and future plans." },
+  { name: "Games", Icon: Gamepad2, image: "/images/Forge/cleaned/forge-icon-games.png", accent: "#f0a44d", description: "Video games, board games, mechanics, worlds, and interactive ideas." },
+  { name: "Jarvis", Icon: Bot, image: "/images/Forge/cleaned/forge-icon-jarvis.png", accent: "#8fdc7c", description: "Systems, modules, improvements, and the Jarvis roadmap." },
+  { name: "Business", Icon: BriefcaseBusiness, image: "/images/Forge/cleaned/forge-icon-business.png", accent: "#d4ad65", description: "Courses, content, merch, income ideas, and experiments." },
+  { name: "Hardware", Icon: Cpu, image: "/images/Forge/cleaned/forge-icon-hardware.png", accent: "#62b7c8", description: "Devices, setups, labs, servers, networking, and physical builds." },
+  { name: "Writing", Icon: Feather, image: "/images/Forge/cleaned/forge-icon-writing.png", accent: "#b58cff", description: "Stories, scripts, characters, worlds, and written concepts." },
+  { name: "Life", Icon: Compass, image: "/images/Forge/cleaned/forge-icon-life.png", accent: "#9dbb63", description: "Life systems, personal growth, relationships, and future plans." },
 ];
 
 const FORGE_STATUSES: ForgeStatus[] = ["Active", "Building", "Experiment", "Incubating", "Archived", "Completed"];
@@ -401,14 +403,27 @@ function CategoryFolder({
   onClick: () => void;
 }) {
   const Icon = category.Icon;
+  const shellSrc = active ? "/images/Forge/cleaned/forge-folder-shell-active.png" : "/images/Forge/cleaned/forge-folder-shell.png";
   return (
-    <button type="button" className={`forge-folder ${active ? "active" : ""}`} onClick={onClick}>
-      <Image src="/images/Forge/forge-folder-shell.png" alt="" fill sizes="(max-width: 820px) 100vw, (max-width: 1280px) 33vw, 16vw" className="forge-folder-shell" />
+    <button
+      type="button"
+      className={`forge-folder ${active ? "active" : ""}`}
+      style={{ "--category-accent": category.accent } as CSSProperties}
+      onClick={onClick}
+    >
+      <Image src={shellSrc} alt="" fill sizes="(max-width: 820px) 100vw, (max-width: 1280px) 33vw, 16vw" className="forge-folder-shell" />
       <span className="forge-folder-shade" aria-hidden="true" />
       <span className="forge-folder-tab" aria-hidden="true" />
       <span className="forge-folder-heading">
         <span className="forge-folder-icon">
-          <Icon size={34} strokeWidth={1.65} />
+          <ForgeAssetImage
+            src={category.image}
+            alt={`${category.name} icon`}
+            width={38}
+            height={38}
+            className="forge-category-asset"
+            fallback={<Icon size={29} strokeWidth={1.65} />}
+          />
         </span>
         <span>
           <strong>{category.name}</strong>
@@ -451,14 +466,30 @@ function IncubationShelf({ projects, onSelect }: { projects: ForgeProject[]; onS
     <Panel title="Incubation Shelf" className="incubation-panel">
       {projects.length === 0 ? (
         <div className="incubation-empty">
-          <span className="css-folder-icon"><FolderKanban size={36} /></span>
+          <span className="forge-incubation-folder">
+            <ForgeAssetImage
+              src="/images/Forge/cleaned/forge-incubation-folder-small.png"
+              alt=""
+              width={86}
+              height={62}
+              fallback={<FolderKanban size={36} />}
+            />
+          </span>
           <EmptyState title="No ideas are incubating yet." text="Shelve an idea when it still matters, but it is not time yet." />
         </div>
       ) : (
         <div className="incubation-list">
           {projects.map((project) => (
             <button key={project.id} type="button" onClick={() => onSelect(project)}>
-              <span className="css-folder-icon"><FolderKanban size={28} /></span>
+              <span className="forge-incubation-folder small">
+                <ForgeAssetImage
+                  src="/images/Forge/cleaned/forge-incubation-folder-small.png"
+                  alt=""
+                  width={64}
+                  height={46}
+                  fallback={<FolderKanban size={28} />}
+                />
+              </span>
               <span>
                 <strong>{project.title}</strong>
                 <small>{project.category} · {relativeDate(project.updated_at || project.created_at)}</small>
@@ -467,7 +498,15 @@ function IncubationShelf({ projects, onSelect }: { projects: ForgeProject[]; onS
           ))}
         </div>
       )}
-      <span className="forge-sticky" aria-hidden="true">Finish what you started.</span>
+      <span className="forge-sticky" aria-hidden="true">
+        <ForgeAssetImage
+          src="/images/Forge/cleaned/forge-sticky-finish.png"
+          alt=""
+          width={132}
+          height={132}
+          fallback={<span className="forge-sticky-fallback">Finish what you started.</span>}
+        />
+      </span>
       <button className="forge-text-link">View incubation shelf →</button>
     </Panel>
   );
@@ -477,7 +516,15 @@ function SparkOfDay({ spark }: { spark: { text: string; author: string } }) {
   return (
     <Panel title="Spark of the Day" className="spark-panel">
       <div className="spark-note">
-        <span className="spark-bulb"><Lightbulb size={42} /></span>
+        <span className="spark-bulb">
+          <ForgeAssetImage
+            src="/images/Forge/cleaned/forge-spark-lightbulb.png"
+            alt=""
+            width={58}
+            height={58}
+            fallback={<Lightbulb size={42} />}
+          />
+        </span>
         <blockquote>“{spark.text}”</blockquote>
         <cite>— {spark.author}</cite>
       </div>
@@ -683,8 +730,37 @@ function ProjectDesk({ project, onClose }: { project: ForgeProject | null; onClo
 }
 
 function CategoryMiniIcon({ category }: { category: ForgeCategory }) {
-  const Icon = FORGE_CATEGORIES.find((item) => item.name === category)?.Icon || Hammer;
-  return <Icon className="forge-mini-icon" aria-hidden="true" size={30} strokeWidth={1.7} />;
+  const item = FORGE_CATEGORIES.find((categoryItem) => categoryItem.name === category);
+  const Icon = item?.Icon || Hammer;
+  return (
+    <span className="forge-mini-icon" style={{ "--category-accent": item?.accent || "#f0a44d" } as CSSProperties}>
+      {item ? (
+        <ForgeAssetImage src={item.image} alt="" width={30} height={30} fallback={<Icon size={25} strokeWidth={1.7} />} />
+      ) : (
+        <Icon size={25} strokeWidth={1.7} />
+      )}
+    </span>
+  );
+}
+
+function ForgeAssetImage({
+  src,
+  alt,
+  width,
+  height,
+  className = "",
+  fallback,
+}: {
+  src: string;
+  alt: string;
+  width: number;
+  height: number;
+  className?: string;
+  fallback: ReactNode;
+}) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <>{fallback}</>;
+  return <Image src={src} alt={alt} width={width} height={height} className={className} onError={() => setFailed(true)} />;
 }
 
 function StatusBadge({ status }: { status: ForgeStatus }) {
@@ -1120,7 +1196,7 @@ function ForgeStyles() {
         min-height: 180px;
         isolation: isolate;
         overflow: hidden;
-        padding: 34px 20px 18px;
+        padding: 34px 18px 18px 28px;
         position: relative;
         text-align: left;
         transition: transform 180ms, filter 180ms;
@@ -1128,7 +1204,7 @@ function ForgeStyles() {
 
       .forge-folder:hover,
       .forge-folder.active {
-        filter: drop-shadow(0 0 22px rgba(196, 111, 45, 0.34));
+        filter: drop-shadow(0 0 22px color-mix(in srgb, var(--category-accent) 32%, transparent));
         transform: translateY(-4px);
       }
 
@@ -1156,12 +1232,12 @@ function ForgeStyles() {
 
       .forge-folder-tab {
         background:
-          linear-gradient(90deg, rgba(196, 111, 45, 0.36), rgba(212, 173, 101, 0.12));
-        border: 1px solid rgba(212, 173, 101, 0.22);
+          linear-gradient(90deg, color-mix(in srgb, var(--category-accent) 38%, transparent), rgba(212, 173, 101, 0.12));
+        border: 1px solid color-mix(in srgb, var(--category-accent) 28%, transparent);
         border-bottom: 0;
         border-radius: 8px 8px 0 0;
         height: 15px;
-        left: 26px;
+        left: 38px;
         opacity: 0.58;
         position: absolute;
         top: 20px;
@@ -1172,54 +1248,64 @@ function ForgeStyles() {
         align-items: center;
         border-bottom: 1px solid rgba(212, 173, 101, 0.18);
         display: flex;
-        gap: 10px;
-        padding-bottom: 9px;
+        gap: 9px;
+        margin-left: 12px;
+        padding-bottom: 8px;
       }
 
       .forge-folder-icon {
         align-items: center;
         background:
-          radial-gradient(circle at 40% 35%, rgba(212, 173, 101, 0.22), transparent 68%),
+          radial-gradient(circle at 40% 35%, color-mix(in srgb, var(--category-accent) 24%, transparent), transparent 68%),
           rgba(0, 0, 0, 0.28);
-        border: 1px solid rgba(212, 173, 101, 0.32);
+        border: 1px solid color-mix(in srgb, var(--category-accent) 42%, transparent);
         border-radius: 999px;
-        color: #f0a44d;
+        color: var(--category-accent);
         display: inline-flex;
         flex: 0 0 auto;
-        height: 48px;
+        height: 44px;
         justify-content: center;
-        width: 48px;
+        width: 44px;
       }
 
       .forge-folder.active .forge-folder-icon,
       .forge-folder:hover .forge-folder-icon {
-        color: #8fdc7c;
-        box-shadow: 0 0 18px rgba(196, 111, 45, 0.24);
+        color: var(--category-accent);
+        box-shadow: 0 0 18px color-mix(in srgb, var(--category-accent) 34%, transparent);
+      }
+
+      .forge-category-asset {
+        filter: drop-shadow(0 0 8px color-mix(in srgb, var(--category-accent) 42%, transparent));
+        height: 38px;
+        object-fit: contain;
+        width: 38px;
       }
 
       .forge-folder strong {
-        color: #f4d38f;
+        color: var(--category-accent);
         display: block;
-        font-size: 0.98rem;
-        letter-spacing: 0.09em;
+        font-size: 0.92rem;
+        letter-spacing: 0.08em;
         text-transform: uppercase;
       }
 
       .forge-folder em {
-        color: #f0a44d;
+        color: color-mix(in srgb, var(--category-accent) 72%, #f4d38f);
         display: block;
-        font-size: 0.76rem;
+        font-size: 0.7rem;
         font-style: normal;
-        letter-spacing: 0.09em;
+        letter-spacing: 0.08em;
         margin-top: 2px;
         text-transform: uppercase;
       }
 
       .forge-folder p {
         color: rgba(234, 223, 199, 0.74);
-        font-size: 0.86rem;
-        line-height: 1.32;
-        margin-top: 11px;
+        font-size: 0.74rem;
+        line-height: 1.25;
+        margin-left: 12px;
+        margin-top: 9px;
+        max-width: calc(100% - 10px);
       }
 
       .forge-filter-panel {
@@ -1324,8 +1410,19 @@ function ForgeStyles() {
       }
 
       .forge-mini-icon {
-        color: #f0a44d;
-        filter: drop-shadow(0 0 8px rgba(196, 111, 45, 0.2));
+        align-items: center;
+        color: var(--category-accent);
+        display: inline-flex;
+        filter: drop-shadow(0 0 8px color-mix(in srgb, var(--category-accent) 30%, transparent));
+        height: 34px;
+        justify-content: center;
+        width: 34px;
+      }
+
+      .forge-mini-icon img {
+        height: 30px;
+        object-fit: contain;
+        width: 30px;
       }
 
       .forge-project-row small,
@@ -1428,17 +1525,38 @@ function ForgeStyles() {
         place-items: center;
       }
 
+      .forge-incubation-folder,
       .css-folder-icon {
         align-items: center;
+        color: #f4d38f;
+        display: inline-flex;
+        justify-content: center;
+        position: relative;
+      }
+
+      .forge-incubation-folder {
+        filter: drop-shadow(0 10px 12px rgba(0, 0, 0, 0.42)) drop-shadow(0 0 16px rgba(212, 173, 101, 0.18));
+        min-height: 58px;
+        min-width: 86px;
+      }
+
+      .forge-incubation-folder.small {
+        min-height: 44px;
+        min-width: 64px;
+      }
+
+      .forge-incubation-folder img {
+        height: auto;
+        object-fit: contain;
+        width: 100%;
+      }
+
+      .css-folder-icon {
         background:
           linear-gradient(180deg, rgba(212, 173, 101, 0.26), rgba(82, 50, 20, 0.38));
         border: 1px solid rgba(212, 173, 101, 0.34);
         border-radius: 8px;
-        color: #f4d38f;
-        display: inline-flex;
         height: 52px;
-        justify-content: center;
-        position: relative;
         width: 70px;
       }
 
@@ -1454,31 +1572,31 @@ function ForgeStyles() {
       }
 
       .forge-sticky {
-        background: linear-gradient(160deg, #c99b59, #e5bd77);
-        border: 1px solid rgba(92, 55, 20, 0.38);
-        bottom: -4px;
-        box-shadow: 0 12px 16px rgba(0, 0, 0, 0.42);
-        color: #3b2413;
-        font-family: "Kalam", "Patrick Hand", "Bradley Hand", cursive;
-        font-size: 1.08rem;
-        line-height: 1.08;
-        padding: 15px 12px;
+        bottom: -10px;
+        filter: drop-shadow(0 12px 16px rgba(0, 0, 0, 0.42));
         position: absolute;
-        right: 18px;
+        right: 12px;
         text-align: center;
         transform: rotate(-7deg);
-        width: 112px;
+        width: 128px;
       }
 
-      .forge-sticky::before {
-        background: rgba(255, 242, 181, 0.38);
-        content: "";
-        height: 18px;
-        left: 36px;
-        position: absolute;
-        top: -10px;
-        transform: rotate(5deg);
-        width: 42px;
+      .forge-sticky img {
+        height: auto;
+        object-fit: contain;
+        width: 100%;
+      }
+
+      .forge-sticky-fallback {
+        background: linear-gradient(160deg, #c99b59, #e5bd77);
+        border: 1px solid rgba(92, 55, 20, 0.38);
+        color: #3b2413;
+        display: block;
+        font-family: "Kalam", "Patrick Hand", "Bradley Hand", cursive;
+        font-size: 1.02rem;
+        line-height: 1.08;
+        padding: 15px 12px;
+        width: 112px;
       }
 
       .spark-panel {
@@ -1505,14 +1623,18 @@ function ForgeStyles() {
 
       .spark-bulb {
         align-items: center;
-        border: 1px solid rgba(212, 173, 101, 0.32);
-        border-radius: 999px;
         color: #f4d38f;
         display: inline-flex;
-        height: 62px;
+        filter: drop-shadow(0 0 18px rgba(212, 173, 101, 0.32));
+        height: 64px;
         justify-content: center;
-        width: 62px;
-        box-shadow: 0 0 22px rgba(212, 173, 101, 0.16);
+        width: 64px;
+      }
+
+      .spark-bulb img {
+        height: 58px;
+        object-fit: contain;
+        width: 58px;
       }
 
       .spark-note blockquote {

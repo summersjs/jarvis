@@ -111,6 +111,12 @@ type Goal = {
     monthly_cadence?: string | null;
     recent_milestone_log?: GoalLog | null;
   };
+  forge_project?: {
+    id: string;
+    title: string;
+    category?: string | null;
+    status?: string | null;
+  } | null;
   progress?: {
     percent?: number | null;
     remaining?: number | null;
@@ -1516,6 +1522,15 @@ function CardHeader({
         <h2 className="mt-1 text-2xl font-semibold text-green-100">{goal.title}</h2>
         {goal.description && (
           <p className="mt-2 text-green-300/75">{goal.description}</p>
+        )}
+        {goal.forge_project && (
+          <Link
+            href={`/forge?project=${goal.forge_project.id}`}
+            onClick={(e) => e.stopPropagation()}
+            className="mt-3 inline-flex rounded-full border border-orange-300/35 bg-orange-400/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.18em] text-orange-100 transition hover:border-orange-200/70 hover:bg-orange-400/20"
+          >
+            Forge Project
+          </Link>
         )}
       </div>
 

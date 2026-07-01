@@ -39,6 +39,7 @@ type ModalType = "project" | "spark" | "note" | "file" | "roadmap" | "templates"
 
 type ForgeProject = {
   id: string;
+  goal_id?: string | null;
   title: string;
   category: ForgeCategory;
   status: ForgeStatus;
@@ -49,6 +50,43 @@ type ForgeProject = {
   project_type?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+  linked_goal?: LinkedGoal | null;
+};
+
+type GoalMilestone = {
+  id: string;
+  title: string;
+  status: string;
+  target_date?: string | null;
+  completed_at?: string | null;
+  cost?: number | null;
+  notes?: string | null;
+  sort_order?: number | null;
+};
+
+type LinkedGoal = {
+  id: string;
+  title: string;
+  category?: string | null;
+  mission_type?: string | null;
+  project?: {
+    completed_count?: number;
+    total_count?: number;
+    remaining_count?: number;
+    percent?: number;
+    next_milestone?: GoalMilestone | null;
+    monthly_cadence?: string | null;
+  } | null;
+  milestones?: GoalMilestone[];
+  logs?: Array<{ id: string; notes?: string | null; created_at?: string | null; log_type?: string | null }>;
+};
+
+type ForgeGoalOption = {
+  id: string;
+  title: string;
+  category?: string | null;
+  mission_type?: string | null;
+  project?: LinkedGoal["project"];
 };
 
 type ForgeDashboard = {
@@ -57,6 +95,7 @@ type ForgeDashboard = {
   sparks: unknown[];
   notes: unknown[];
   files: unknown[];
+  goals: ForgeGoalOption[];
   category_counts: Record<ForgeCategory, number>;
   recently_updated: ForgeProject[];
   incubating: ForgeProject[];
@@ -86,6 +125,7 @@ type FormState = {
   file_type: string;
   file_size: string;
   caption: string;
+  goal_id: string;
 };
 
 const FORGE_CATEGORIES: Array<{
@@ -144,6 +184,7 @@ const emptyDashboard: ForgeDashboard = {
   sparks: [],
   notes: [],
   files: [],
+  goals: [],
   category_counts: { Games: 0, Jarvis: 0, Business: 0, Hardware: 0, Writing: 0, Life: 0 },
   recently_updated: [],
   incubating: [],
@@ -167,6 +208,7 @@ const emptyForm: FormState = {
   file_type: "",
   file_size: "",
   caption: "",
+  goal_id: "",
 };
 
 export default function ForgePage() {
@@ -203,6 +245,12 @@ export default function ForgePage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Forge tables are not online yet.");
       setDashboard({ ...emptyDashboard, ...data });
+      const requestedProjectId = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("project") : null;
+      setSelectedProject((current) => {
+        const projects = data.projects || [];
+        if (requestedProjectId) return projects.find((project: ForgeProject) => project.id === requestedProjectId) || current;
+        return current ? projects.find((project: ForgeProject) => project.id === current.id) || current : current;
+      });
       setSetupNotice("");
     } catch (err) {
       setDashboard(emptyDashboard);
@@ -246,6 +294,24 @@ export default function ForgePage() {
       setError(err instanceof Error ? err.message : "Forge save failed.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function completeLinkedMilestone(milestoneId: string) {
+    setError("");
+    setMessage("");
+    try {
+      const res = await fetch(`${API_BASE}/goals/milestones/${milestoneId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        body: JSON.stringify({ status: "complete" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Milestone update failed.");
+      setMessage("Linked goal milestone updated from The Forge.");
+      await loadForge();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Milestone update failed.");
     }
   }
 
@@ -293,17 +359,26 @@ export default function ForgePage() {
           <SparkOfDay spark={spark} />
         </section>
 
-        <ProjectDesk project={selectedProject} onClose={() => setSelectedProject(null)} />
+        <ProjectDesk project={selectedProject} onClose={() => setSelectedProject(null)} onCompleteMilestone={completeLinkedMilestone} />
         <BottomActions onOpen={openModal} />
       </section>
       <ForgeModal
         modal={modal}
         form={form}
         projects={dashboard.projects}
+        goals={dashboard.goals}
         saving={saving}
         onClose={() => setModal(null)}
         onSave={saveModal}
         onChange={(key, value) => setForm((prev) => ({ ...prev, [key]: value }))}
+        onGoalSelect={(goal) => setForm((prev) => ({
+          ...prev,
+          goal_id: goal?.id || "",
+          title: goal?.title || prev.title,
+          category: goal?.title === "Build the Jarvis Workstation" ? "Hardware" : goal?.category?.toLowerCase() === "jarvis" ? "Jarvis" : prev.category,
+          progress_percent: goal?.project?.percent != null ? String(goal.project.percent) : prev.progress_percent,
+          next_milestone: goal?.project?.next_milestone?.title || prev.next_milestone,
+        }))}
       />
       <ForgeStyles />
     </main>
@@ -578,21 +653,26 @@ function ForgeModal({
   modal,
   form,
   projects,
+  goals,
   saving,
   onClose,
   onSave,
   onChange,
+  onGoalSelect,
 }: {
   modal: ModalType;
   form: FormState;
   projects: ForgeProject[];
+  goals: ForgeGoalOption[];
   saving: boolean;
   onClose: () => void;
   onSave: () => void;
   onChange: (key: keyof FormState, value: string) => void;
+  onGoalSelect: (goal: ForgeGoalOption | null) => void;
 }) {
   if (!modal) return null;
   const title = modal === "project" ? "New Project" : modal === "spark" ? "New Spark" : modal === "note" ? "New Note" : modal === "file" ? "Upload File" : modal === "roadmap" ? "Roadmap" : "Templates";
+  const linkedGoal = goals.find((goal) => goal.id === form.goal_id);
 
   return (
     <div className="forge-modal-backdrop" role="presentation" onMouseDown={onClose}>
@@ -615,11 +695,33 @@ function ForgeModal({
             <ForgeInput label="Project Title" value={form.title} onChange={(value) => onChange("title", value)} required />
             <ForgeSelect label="Category" value={form.category} options={FORGE_CATEGORIES.map((item) => item.name)} onChange={(value) => onChange("category", value)} />
             <ForgeSelect label="Status" value={form.status} options={FORGE_STATUSES} onChange={(value) => onChange("status", value)} />
+            <label className="forge-input">
+              <span>Link to Goal</span>
+              <select
+                value={form.goal_id}
+                onChange={(event) => {
+                  const goal = goals.find((item) => item.id === event.target.value) || null;
+                  onGoalSelect(goal);
+                }}
+              >
+                <option value="">No linked goal</option>
+                {goals.map((goal) => (
+                  <option key={goal.id} value={goal.id}>{goal.title}</option>
+                ))}
+              </select>
+            </label>
             <ForgeInput label="Progress %" value={form.progress_percent} onChange={(value) => onChange("progress_percent", value)} type="number" />
             <ForgeInput label="Project Type / Template" value={form.project_type} onChange={(value) => onChange("project_type", value)} />
             <ForgeInput label="Tags" value={form.tags} onChange={(value) => onChange("tags", value)} placeholder="comma, separated, tags" />
             <ForgeTextarea label="Summary" value={form.summary} onChange={(value) => onChange("summary", value)} />
             <ForgeInput label="Next Milestone" value={form.next_milestone} onChange={(value) => onChange("next_milestone", value)} />
+            {linkedGoal && (
+              <div className="forge-linked-preview">
+                <strong>Linked Goal Sync</strong>
+                <span>This Forge project will track progress using the linked goal milestones.</span>
+                <em>{linkedGoal.project?.completed_count ?? 0} / {linkedGoal.project?.total_count ?? 0} milestones · {linkedGoal.project?.percent ?? 0}%</em>
+              </div>
+            )}
           </div>
         ) : modal === "spark" ? (
           <div className="forge-form-grid">
@@ -708,24 +810,97 @@ function ProjectSelect({ projects, value, onChange }: { projects: ForgeProject[]
   );
 }
 
-function ProjectDesk({ project, onClose }: { project: ForgeProject | null; onClose: () => void }) {
+function ProjectDesk({
+  project,
+  onClose,
+  onCompleteMilestone,
+}: {
+  project: ForgeProject | null;
+  onClose: () => void;
+  onCompleteMilestone: (milestoneId: string) => void;
+}) {
   if (!project) return null;
+  const linkedGoal = project.linked_goal;
+  const linkedSnapshot = linkedGoal?.project;
+  const milestones = linkedGoal?.milestones || [];
+  const progress = linkedSnapshot?.percent ?? project.progress_percent;
   return (
     <section className="forge-desk">
       <button type="button" onClick={onClose} aria-label="Close Project Desk"><X size={18} /></button>
       <div>
         <p>Project Desk</p>
         <h2>{project.title}</h2>
-        <span>{project.category} · {project.status}</span>
+        <span>{project.category} · {project.status}{linkedGoal ? " · Synced with Goals" : ""}</span>
         <p>{project.summary || "No summary recorded yet."}</p>
       </div>
-      <ProgressLine value={project.progress_percent} large />
-      <div className="forge-desk-tabs">
-        {["Overview", "Tasks", "Spark Log", "Timeline", "Research", "Notes", "Files", "Images"].map((tab) => <span key={tab}>{tab}</span>)}
-      </div>
-      <strong>Next Milestone: {project.next_milestone || "Not assigned"}</strong>
+      <ProgressLine value={progress} large />
+      {linkedGoal ? (
+        <>
+          <div className="forge-linked-goal-panel">
+            <div>
+              <p>Linked Goal</p>
+              <strong>{linkedGoal.title}</strong>
+              <span>Updates made here also update the linked goal.</span>
+            </div>
+            <Link href={`/goals?focus=${linkedGoal.id}`}>Open Goal</Link>
+          </div>
+          <div className="forge-linked-stats">
+            <MetricLite label="Milestones" value={`${linkedSnapshot?.completed_count ?? 0} / ${linkedSnapshot?.total_count ?? 0}`} />
+            <MetricLite label="Remaining" value={`${linkedSnapshot?.remaining_count ?? 0}`} />
+            <MetricLite label="Next" value={linkedSnapshot?.next_milestone?.title || "None"} />
+          </div>
+          <div className="forge-linked-milestones">
+            {milestones.map((milestone) => {
+              const complete = isForgeMilestoneComplete(milestone);
+              return (
+                <article key={milestone.id} className={complete ? "complete" : ""}>
+                  <div>
+                    <strong>{milestone.title}</strong>
+                    <span>{complete ? getForgeMilestoneLabel(milestone) : (milestone.status || "Open").toUpperCase()}</span>
+                  </div>
+                  {!complete && (
+                    <p>
+                      {milestone.target_date ? `Target: ${milestone.target_date}` : "Open"}
+                      {milestone.cost ? ` · $${milestone.cost}` : ""}
+                      {milestone.notes ? ` · ${milestone.notes}` : ""}
+                    </p>
+                  )}
+                  {complete ? (
+                    <em>Inventory secured</em>
+                  ) : (
+                    <button type="button" onClick={() => onCompleteMilestone(milestone.id)}>Complete</button>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        </>
+      ) : (
+        <div className="forge-desk-tabs">
+          {["Overview", "Tasks", "Spark Log", "Timeline", "Research", "Notes", "Files", "Images"].map((tab) => <span key={tab}>{tab}</span>)}
+        </div>
+      )}
+      <strong>Next Milestone: {linkedSnapshot?.next_milestone?.title || project.next_milestone || "Not assigned"}</strong>
     </section>
   );
+}
+
+function MetricLite({ label, value }: { label: string; value: string }) {
+  return (
+    <span>
+      <small>{label}</small>
+      <strong>{value}</strong>
+    </span>
+  );
+}
+
+function isForgeMilestoneComplete(milestone: GoalMilestone) {
+  return ["complete", "completed", "purchased", "already acquired", "already_acquired"].includes((milestone.status || "").toLowerCase()) || Boolean(milestone.completed_at);
+}
+
+function getForgeMilestoneLabel(milestone: GoalMilestone) {
+  if (milestone.title.trim().toLowerCase() === "gpu") return "Already Acquired";
+  return "Completed";
 }
 
 function CategoryMiniIcon({ category }: { category: ForgeCategory }) {
@@ -768,9 +943,18 @@ function StatusBadge({ status }: { status: ForgeStatus }) {
 
 function ProgressLine({ value, large = false }: { value?: number | null; large?: boolean }) {
   const safeValue = Math.max(0, Math.min(100, Number(value || 0)));
+  const complete = safeValue >= 100;
+  const tone = complete ? "rainbow" : safeValue >= 70 ? "green" : safeValue >= 35 ? "yellow" : "red";
   return (
-    <span className={`forge-progress ${large ? "large" : ""}`} aria-label={`Progress ${safeValue}%`}>
-      <i style={{ width: `${safeValue}%` }} />
+    <span className={`forge-progress goal-progress-shell goal-progress-${tone} ${large ? "large" : ""}`} aria-label={`Progress ${safeValue}%`}>
+      <span className={`goal-progress-track ${complete ? "goal-progress-track-complete" : ""}`}>
+        <span
+          className={`goal-progress-fill ${complete ? "limit-break-bar goal-progress-fill-complete" : `goal-progress-fill-${tone}`}`}
+          style={{ width: `${safeValue}%` }}
+        >
+          {(tone === "green" || complete) && <span className="goal-progress-particles" aria-hidden="true" />}
+        </span>
+      </span>
       <em>{safeValue}%</em>
     </span>
   );
@@ -781,6 +965,7 @@ function buildPayload(modal: Exclude<ModalType, null>, form: FormState) {
   if (modal === "project") {
     return {
       user_id: USER_ID,
+      goal_id: form.goal_id || null,
       title: form.title,
       category: form.category,
       status: form.status,
@@ -1432,50 +1617,36 @@ function ForgeStyles() {
       .forge-status.completed { color: #ffd87a; }
 
       .forge-progress {
-        align-items: center;
-        display: grid;
-        gap: 4px;
-        grid-template-columns: 1fr auto;
-      }
-
-      .forge-progress::before {
-        content: "";
-      }
-
-      .forge-progress {
-        position: relative;
-      }
-
-      .forge-progress i {
-        background: linear-gradient(90deg, #f4d38f, #ff8a34);
-        border-radius: 999px;
         display: block;
-        height: 3px;
-        left: 0;
-        position: absolute;
-        top: 50%;
+        min-width: 92px;
       }
 
-      .forge-progress::after {
-        background: rgba(234, 223, 199, 0.16);
-        border-radius: 999px;
-        content: "";
-        height: 3px;
-        left: 0;
-        position: absolute;
-        right: 32px;
-        top: 50%;
-        z-index: -1;
+      .forge-progress .goal-progress-track,
+      .forge-progress .goal-progress-fill {
+        display: block;
+      }
+
+      .forge-progress .goal-progress-track {
+        width: 100%;
       }
 
       .forge-progress em {
-        color: rgba(234, 223, 199, 0.66);
+        color: rgba(234, 223, 199, 0.74);
+        display: block;
+        font-size: 0.68rem;
         font-style: normal;
+        font-weight: 800;
+        letter-spacing: 0.12em;
+        margin-top: 5px;
+        text-align: center;
       }
 
       .forge-progress.large {
-        min-height: 30px;
         width: min(360px, 100%);
+      }
+
+      .forge-progress.large em {
+        text-align: left;
       }
 
       .incubation-list button {
@@ -1719,6 +1890,137 @@ function ForgeStyles() {
         border-radius: 999px;
         color: #f4d38f;
         padding: 5px 9px;
+      }
+
+      .forge-linked-preview,
+      .forge-linked-goal-panel,
+      .forge-linked-milestones article {
+        border: 1px solid rgba(143, 220, 124, 0.24);
+        border-radius: 10px;
+        background: rgba(143, 220, 124, 0.07);
+        box-shadow: inset 0 0 20px rgba(143, 220, 124, 0.04);
+      }
+
+      .forge-linked-preview {
+        color: #caffbf;
+        display: grid;
+        gap: 5px;
+        grid-column: 1 / -1;
+        padding: 12px;
+      }
+
+      .forge-linked-preview strong,
+      .forge-linked-goal-panel strong,
+      .forge-linked-milestones strong {
+        color: #fff1c8;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .forge-linked-preview span,
+      .forge-linked-preview em,
+      .forge-linked-goal-panel span,
+      .forge-linked-milestones p,
+      .forge-linked-milestones em {
+        color: rgba(234, 223, 199, 0.72);
+        font-style: normal;
+      }
+
+      .forge-linked-goal-panel {
+        align-items: center;
+        display: flex;
+        justify-content: space-between;
+        gap: 14px;
+        padding: 14px;
+      }
+
+      .forge-linked-goal-panel p {
+        color: #8fdc7c;
+        font-size: 0.75rem;
+        font-weight: 800;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      .forge-linked-goal-panel a,
+      .forge-linked-milestones button {
+        border: 1px solid rgba(143, 220, 124, 0.35);
+        border-radius: 8px;
+        background: rgba(143, 220, 124, 0.08);
+        color: #caffbf;
+        cursor: pointer;
+        padding: 8px 11px;
+        text-decoration: none;
+        transition: transform 180ms, border-color 180ms, box-shadow 180ms;
+        white-space: nowrap;
+      }
+
+      .forge-linked-goal-panel a:hover,
+      .forge-linked-milestones button:hover {
+        border-color: rgba(143, 220, 124, 0.65);
+        box-shadow: 0 0 20px rgba(143, 220, 124, 0.16);
+        transform: translateY(-1px);
+      }
+
+      .forge-linked-stats {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .forge-linked-stats span {
+        border: 1px solid rgba(212, 173, 101, 0.16);
+        border-radius: 9px;
+        background: rgba(0, 0, 0, 0.24);
+        display: grid;
+        gap: 5px;
+        padding: 10px;
+      }
+
+      .forge-linked-stats small {
+        color: rgba(234, 223, 199, 0.58);
+        font-size: 0.68rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .forge-linked-stats strong {
+        color: #f4d38f;
+      }
+
+      .forge-linked-milestones {
+        display: grid;
+        gap: 9px;
+      }
+
+      .forge-linked-milestones article {
+        align-items: center;
+        display: grid;
+        gap: 10px;
+        grid-template-columns: 1fr auto;
+        padding: 11px;
+      }
+
+      .forge-linked-milestones article.complete {
+        border-color: rgba(143, 220, 124, 0.42);
+        background: rgba(143, 220, 124, 0.11);
+      }
+
+      .forge-linked-milestones article > p {
+        grid-column: 1 / -1;
+        margin: 0;
+      }
+
+      .forge-linked-milestones span {
+        border: 1px solid currentColor;
+        border-radius: 999px;
+        color: #f4d38f;
+        display: inline-block;
+        font-size: 0.66rem;
+        letter-spacing: 0.12em;
+        margin-top: 5px;
+        padding: 3px 7px;
+        text-transform: uppercase;
       }
 
       .forge-modal-backdrop {

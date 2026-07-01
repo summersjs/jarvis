@@ -25,7 +25,7 @@ LIFT_GOAL_KEYWORDS = {
 PERIODIC_GOAL_TYPES = {"habit", "count", "binary"}
 PERIODIC_FREQUENCIES = {"daily", "weekly"}
 MISSION_TYPES = {"objective", "standard", "project"}
-PROJECT_MILESTONE_COMPLETE_STATUSES = {"complete", "purchased"}
+PROJECT_MILESTONE_COMPLETE_STATUSES = {"complete", "completed", "purchased", "already acquired", "already_acquired"}
 STANDARD_ACTION_LOG_TYPES = {"progress", "completed", "milestone"}
 STANDARD_PLAN_LOG_TYPES = {"planned"}
 STANDARD_MISS_LOG_TYPES = {"missed"}
@@ -369,6 +369,7 @@ def enrich_goal(goal: dict):
         milestones = list_goal_milestones(goal["id"])
         enriched["milestones"] = milestones
         enriched["project"] = build_project_snapshot(enriched, milestones, logs)
+        enriched["forge_project"] = get_linked_forge_project(goal["id"])
 
     enriched["logs"] = logs[:5]
     enriched["progress"] = calculate_progress(enriched)
@@ -377,6 +378,21 @@ def enrich_goal(goal: dict):
     else:
         enriched["eta"] = None
     return enriched
+
+
+def get_linked_forge_project(goal_id: str) -> dict | None:
+    try:
+        response = (
+            supabase
+            .table("forge_projects")
+            .select("id, title, category, status, progress_percent, next_milestone")
+            .eq("goal_id", goal_id)
+            .limit(1)
+            .execute()
+        )
+        return response.data[0] if response.data else None
+    except Exception:
+        return None
 
 
 def calculate_progress(goal: dict) -> dict:

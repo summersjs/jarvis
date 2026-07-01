@@ -192,5 +192,90 @@
       "win": "I changed deadlift so that i would be lifting heavier weight. I smashed my old record. "
     },
     "weekly_score": 93
+  },
+  {
+    "completed_at": null,
+    "created_at": "2026-06-30T19:59:38.083628-04:00",
+    "daily_score": 92,
+    "date": "2026-06-30",
+    "finance": {
+      "category": "Food",
+      "money_spent_today": 7.72,
+      "notes": null,
+      "spending_status": "WATCH",
+      "unexpected_expense": false
+    },
+    "is_finalized": false,
+    "lessons": {
+      "adjust_tomorrow": "Wake up earlier and ask myself if I'm dreaming more often. Brainstorm Jarvis prompts before Codex.",
+      "did_not_work": "I wasn't logging my symptoms as often as I should. I also did not ask myself if i was dreaming enough.",
+      "worked": "I took my time and spaced out my work. I was able to accomplish a lot without feeling overwhelmed."
+    },
+    "lifetime_rank": "Legend",
+    "lifetime_score": 100,
+    "mission_score": 92,
+    "notes": null,
+    "nutrition": {
+      "ate_out_today": false,
+      "estimated_food_spend": 7.72,
+      "meals_completed": 8,
+      "meals_planned_today": 8,
+      "notes": null
+    },
+    "objectives": [
+      {
+        "blocker": "",
+        "completed": true,
+        "id": "f79cc1ef-de5a-41ac-98e2-d07a44ebb797",
+        "notes": "Completed Insider Threat Training",
+        "title": "Finish 1 training module a day"
+      },
+      {
+        "blocker": "",
+        "completed": true,
+        "id": "4c49d748-15e0-462e-8811-ba12f2345e81",
+        "notes": "Polish food and recipe screens",
+        "title": "Ship 3 Features Weekly"
+      }
+    ],
+    "overall_status": "ok",
+    "summary": "Evening debrief, John. Today was recovery. Daily score 92. Weekly score 95. Lifetime rank Legend. Today was a recovery day. You completed 2 of 2 goal impacts today. Daily goals moved: 1 completed, 1 above and beyond. Weekly goals moved: 1 completed, 1 above and beyond. No workout log was found today. Stayed watch on spending. Planned standard: 1 Date weekly is planned for Friday, July 3. Next protocol is bench on Thursday. Tomorrow looks like a rest day. Main lesson: Do the first important thing earlier and keep tomorrow simple. Top priority tomorrow is Prepare for bench.",
+    "tomorrow": {
+      "calendar": [
+        "Recovery day",
+        "Keep the calendar clear",
+        "Protect energy"
+      ],
+      "meal_prep": "You have no events scheduled for tomorrow.",
+      "priorities": [
+        "Prepare for bench"
+      ],
+      "reminder": "Next protocol: bench",
+      "shopping_items": [],
+      "top_priorities": [
+        "Prepare for bench"
+      ],
+      "workout": {
+        "label": "bench",
+        "lift": "bench",
+        "weekday": "Thursday"
+      }
+    },
+    "training": {
+      "energy_level": null,
+      "lift_completed": null,
+      "pain_notes": null,
+      "top_set_reps": null,
+      "top_set_weight": null,
+      "training_notes": null,
+      "workout_completed": false
+    },
+    "updated_at": "2026-06-30T19:59:38.083628-04:00",
+    "user_id": "john",
+    "victory": {
+      "category": "App Build",
+      "win": "I added lots to Jarvis today. The thing I'm most proud of is the Dream Journal that I added. "
+    },
+    "weekly_score": 95
   }
 ]

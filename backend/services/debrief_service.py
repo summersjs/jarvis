@@ -799,6 +799,8 @@ def _clean_meal_note(notes: str | None) -> str | None:
 def _today_meal_snapshot(user_id: str, date_str: str) -> dict:
     meals = _today_meals(user_id, date_str)
     completed = [meal for meal in meals if meal.get("completed")]
+    normal_meals = [meal for meal in meals if (meal.get("source") or "") != "caffeine"]
+    normal_completed = [meal for meal in completed if (meal.get("source") or "") != "caffeine"]
     spend = round(sum(_safe_float(meal.get("estimated_cost")) for meal in completed), 2)
     totals = {
         "calories": round(sum(_safe_float(meal.get("calories")) * _safe_float(meal.get("servings") or 1) for meal in completed), 1),
@@ -809,8 +811,8 @@ def _today_meal_snapshot(user_id: str, date_str: str) -> dict:
     return {
         "meals": meals,
         "completed": completed,
-        "meals_planned_today": len(meals),
-        "meals_completed": len(completed),
+        "meals_planned_today": len(normal_meals),
+        "meals_completed": len(normal_completed),
         "ate_out_today": any((meal.get("source") or "") == "eat_out" for meal in completed),
         "estimated_food_spend": spend,
         "nutrition_totals": totals,

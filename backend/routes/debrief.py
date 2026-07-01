@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from backend.core.security import verify_api_key
 from backend.schemas.debrief import DailyDebriefEntryCreate
+from backend.services.archive_service import build_or_update_chronicle_from_debrief
 from backend.services.debrief_service import (
     build_daily_debrief_summary,
     list_daily_debrief_entries,
@@ -31,9 +32,19 @@ def daily_debrief_history(user_id: str = "john"):
 @router.post("/daily")
 def save_daily_debrief(payload: DailyDebriefEntryCreate):
     try:
+        entry = save_daily_debrief_entry(payload.model_dump())
+        chronicle = None
+        chronicle_error = None
+        if entry.get("is_finalized") or entry.get("completed_at"):
+            try:
+                chronicle = build_or_update_chronicle_from_debrief(entry.get("user_id") or "john")
+            except Exception as exc:
+                chronicle_error = str(exc)
         return {
             "status": "ok",
-            "entry": save_daily_debrief_entry(payload.model_dump()),
+            "entry": entry,
+            "chronicle": chronicle,
+            "chronicle_error": chronicle_error,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

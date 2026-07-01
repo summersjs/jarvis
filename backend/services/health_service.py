@@ -111,11 +111,14 @@ def _context_snapshot(user_id: str, target_date: date) -> dict:
         or (finance.get("dashboard_cards") or {}).get("food_spend_today")
         or 0
     )
+    caffeine_items = caffeine_meal_items(meals)
     planned_meals = planned_meal_count(meals)
     completed_meals = completed_meal_count(meals)
+    caffeine_fallback_items = (checkin.get("source_data") or {}).get("caffeine_items") or []
+    caffeine_nutrition_fallback = (checkin.get("source_data") or {}).get("caffeine_nutrition") or {}
     nutrition_totals = merge_nutrition(
         completed_meal_nutrition(meals),
-        (checkin.get("source_data") or {}).get("caffeine_nutrition") or {},
+        caffeine_nutrition_fallback if not caffeine_items else {},
     )
     workout_completed = bool(workout_summary)
     training_notes = None
@@ -129,6 +132,8 @@ def _context_snapshot(user_id: str, target_date: date) -> dict:
         "workout": workout_summary,
         "meals_planned": planned_meals,
         "meals_completed": completed_meals,
+        "caffeine_item_count": len(caffeine_items) or len(caffeine_fallback_items),
+        "caffeine_items": caffeine_items or caffeine_fallback_items,
         "nutrition_totals": nutrition_totals,
         "meals": meals,
         "food_spend": food_spend,
@@ -179,6 +184,7 @@ def build_health_dashboard(user_id: str = "john", date_str: str | None = None) -
             "workout_completed": context.get("workout_completed"),
             "meals_planned": context.get("meals_planned"),
             "meals_completed": context.get("meals_completed"),
+            "caffeine_item_count": context.get("caffeine_item_count"),
             "nutrition_totals": context.get("nutrition_totals"),
             "current_symptom_count": len(events_today),
         },
@@ -386,13 +392,29 @@ def completed_meal_count(meals: list[dict]) -> int:
     completed_slots = {
         meal_slot_key(meal)
         for meal in meals
-        if meal_meta(meal).get("completed")
+        if meal_meta(meal).get("completed") and not is_caffeine_meal(meal)
     }
     return len(completed_slots)
 
 
 def planned_meal_count(meals: list[dict]) -> int:
-    return len({meal_slot_key(meal) for meal in meals})
+    return len({meal_slot_key(meal) for meal in meals if not is_caffeine_meal(meal)})
+
+
+def caffeine_meal_items(meals: list[dict]) -> list[dict]:
+    return [
+        {
+            "id": meal.get("id"),
+            "name": meal.get("custom_meal_name") or "Caffeine",
+            "meal_date": meal.get("meal_date"),
+        }
+        for meal in meals
+        if is_caffeine_meal(meal) and meal_meta(meal).get("completed")
+    ]
+
+
+def is_caffeine_meal(meal: dict) -> bool:
+    return (meal_meta(meal).get("source") or "").lower() == "caffeine"
 
 
 def meal_slot_key(meal: dict) -> str:

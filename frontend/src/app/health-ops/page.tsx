@@ -340,6 +340,13 @@ const CAFFEINE_NUTRITION: Record<string, { calories: number; protein_g: number; 
   "C4 Powder": { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 },
 };
 
+type CaffeineNutrition = {
+  calories: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+};
+
 const EVENT_ICONS: Record<string, LucideIcon> = {
   deep_breath_awareness: Activity,
   brain_fog: Brain,
@@ -541,12 +548,41 @@ export default function HealthOpsPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Failed to save daily check-in.");
+      if (pendingCaffeineButtons.length) {
+        await addCaffeineItemsToMealPlanner(pendingCaffeineButtons);
+      }
       setMessage("Daily health check-in saved.");
       setPendingCaffeineButtons([]);
       await loadDashboard();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save daily check-in.");
     }
+  }
+
+  async function addCaffeineItemsToMealPlanner(labels: string[]) {
+    await Promise.all(
+      labels.map((label) => {
+        const nutrition = CAFFEINE_NUTRITION[label] || { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 };
+        return fetch(`${API_BASE}/meal-planner`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": API_KEY,
+          },
+          body: JSON.stringify({
+            user_id: USER_ID,
+            meal_date: today,
+            meal_type: "snack1",
+            recipe_id: null,
+            custom_meal_name: label,
+            notes: buildCaffeineMealNotes(label, nutrition),
+          }),
+        }).then(async (res) => {
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.detail || `Failed to add ${label} to Meal Planner.`);
+        });
+      })
+    );
   }
 
   const summary = dashboard?.doctor_summaries?.[doctorRange];
@@ -630,7 +666,12 @@ export default function HealthOpsPage() {
 
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   <SnapshotMetric icon={Utensils} label="Meals Planned" value={String(dashboard.snapshot.meals_planned || 0)} tone="amber" />
-                  <SnapshotMetric icon={CheckCircle2} label="Meals Completed" value={`${dashboard.snapshot.meals_completed || 0} from Meal Planner`} tone="green" />
+                  <div className="grid gap-2">
+                    <SnapshotMetric icon={CheckCircle2} label="Meals Completed" value={`${dashboard.snapshot.meals_completed || 0} from Meal Planner`} tone="green" />
+                    <p className="rounded-lg border border-sky-300/20 bg-sky-300/5 px-3 py-2 text-xs uppercase tracking-[0.14em] text-sky-100">
+                      {Number(dashboard.snapshot.caffeine_item_count || 0)} added from caffeine buttons
+                    </p>
+                  </div>
                   <ToggleField label="Ate Out?" checked={checkin.ate_out} onChange={(value) => setCheckin((prev) => ({ ...prev, ate_out: value }))} />
                   <TextField label="Food Spend" value={checkin.food_spend} onChange={(value) => setCheckin((prev) => ({ ...prev, food_spend: value }))} />
                 </div>
@@ -1099,6 +1140,27 @@ function calculateCaffeineNutrition(labels: string[]) {
     },
     { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 }
   );
+}
+
+function buildCaffeineMealNotes(label: string, nutrition: CaffeineNutrition) {
+  return `JARVIS_META:${JSON.stringify({
+    source: "caffeine",
+    estimated_cost: 0,
+    vendor: null,
+    note: `Added from caffeine button: ${label}`,
+    count_toward_eating_out: false,
+    calories: nutrition.calories,
+    protein_g: nutrition.protein_g,
+    carbs_g: nutrition.carbs_g,
+    fat_g: nutrition.fat_g,
+    completed: true,
+    completed_at: new Date().toISOString(),
+    food_vault_item_id: null,
+    servings: 1,
+    package_quantity: null,
+    unit_cost: null,
+    save_to_food_vault: false,
+  })}`;
 }
 
 function labelForEvent(eventType: string, eventTypes: EventType[]) {

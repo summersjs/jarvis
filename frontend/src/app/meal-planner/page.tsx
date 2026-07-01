@@ -1200,6 +1200,7 @@ function getMealSourceLabel(source?: string) {
   if (source === "skip") return "Skip";
   if (source === "event_family_meal") return "Event / Family Meal";
   if (source === "custom") return "Custom Meal";
+  if (source === "caffeine") return "Added from Caffeine";
   return "Recipe Vault Meal";
 }
 

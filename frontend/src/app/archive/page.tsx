@@ -3,12 +3,15 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Caveat, Cinzel, Cormorant_Garamond, Inter } from "next/font/google";
+import { Activity, Cloud, CloudDrizzle, CloudFog, CloudLightning, CloudRain, CloudSnow, HelpCircle, Sun, type LucideIcon } from "lucide-react";
+import { Caveat, Cinzel, Cormorant_Garamond, Great_Vibes, Inter, Kalam } from "next/font/google";
 import { Suspense, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 
 const cinzel = Cinzel({ subsets: ["latin"], weight: ["400", "600", "700"] });
 const cormorant = Cormorant_Garamond({ subsets: ["latin"], weight: ["400", "500", "600", "700"] });
 const caveat = Caveat({ subsets: ["latin"], weight: ["400", "600", "700"] });
+const kalam = Kalam({ subsets: ["latin"], weight: ["400", "700"] });
+const greatVibes = Great_Vibes({ subsets: ["latin"], weight: "400" });
 const inter = Inter({ subsets: ["latin"], weight: ["400", "500", "600", "700"] });
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -48,6 +51,56 @@ type DreamForm = {
   lucid: string;
   recurring: string;
   intensity: string;
+  notes: string;
+};
+
+type Chronicle = {
+  id: string;
+  user_id: string;
+  entry_date: string;
+  title?: string | null;
+  status: "draft" | "in_progress" | "filed";
+  started_at?: string | null;
+  filed_at?: string | null;
+  daily_score?: number | null;
+  weekly_score?: number | null;
+  mission_rank?: string | null;
+  overall_status?: string | null;
+  workout_status?: string | null;
+  workout_summary?: string | null;
+  next_protocol?: string | null;
+  calories?: number | null;
+  protein_g?: number | null;
+  water_oz?: number | null;
+  sleep_hours?: number | null;
+  temperature?: string | null;
+  health_event_count?: number | null;
+  deep_breath_event_count?: number | null;
+  goal_impacts?: ChronicleGoalImpact[] | null;
+  victory_log?: string | null;
+  lessons_worked?: string | null;
+  lessons_not_worked?: string | null;
+  lessons_adjust_tomorrow?: string | null;
+  tomorrow_focus?: string | null;
+  story_text?: string | null;
+  future_me_message?: string | null;
+  notes?: string | null;
+};
+
+type ChronicleGoalImpact = {
+  id?: string | null;
+  title?: string | null;
+  state?: string | null;
+  detail?: string | null;
+  achievement_label?: string | null;
+  completed?: boolean | null;
+};
+
+type ChronicleForm = {
+  id?: string;
+  title: string;
+  story_text: string;
+  future_me_message: string;
   notes: string;
 };
 
@@ -109,6 +162,15 @@ function emptyForm(prompt: string): DreamForm {
   };
 }
 
+function emptyChronicleForm(): ChronicleForm {
+  return {
+    title: "",
+    story_text: "",
+    future_me_message: "",
+    notes: "",
+  };
+}
+
 export default function ArchivePage() {
   return (
     <Suspense fallback={<main className={`archive-shell ${inter.className}`} />}>
@@ -124,11 +186,19 @@ function ArchivePageContent() {
     return DREAM_PROMPTS[dayIndex];
   }, []);
   const [dreams, setDreams] = useState<Dream[]>([]);
+  const [chronicles, setChronicles] = useState<Chronicle[]>([]);
   const [form, setForm] = useState<DreamForm>(() => emptyForm(prompt));
+  const [chronicle, setChronicle] = useState<Chronicle | null>(null);
+  const [chronicleForm, setChronicleForm] = useState<ChronicleForm>(() => emptyChronicleForm());
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [chroniclesLoading, setChroniclesLoading] = useState(false);
+  const [chronicleFilter, setChronicleFilter] = useState<"all" | "draft" | "in_progress" | "filed">("all");
+  const [chronicleSearch, setChronicleSearch] = useState("");
+  const [weatherSnapshot, setWeatherSnapshot] = useState("Weather unavailable");
   const section = normalizeSection(searchParams.get("section"));
+  const selectedChronicleDate = searchParams.get("date");
 
   const loadDreams = useCallback(async () => {
     setLoading(true);
@@ -150,6 +220,83 @@ function ArchivePageContent() {
   useEffect(() => {
     loadDreams();
   }, [loadDreams]);
+
+  const loadChronicles = useCallback(async () => {
+    setChroniclesLoading(true);
+    setError("");
+    try {
+      const [listRes, todayRes] = await Promise.all([
+        fetch(`${API_BASE}/archive/chronicles?user_id=${USER_ID}`, {
+          headers: { "x-api-key": API_KEY },
+        }),
+        fetch(`${API_BASE}/archive/chronicles/today?user_id=${USER_ID}`, {
+          headers: { "x-api-key": API_KEY },
+        }),
+      ]);
+      const listData = await listRes.json();
+      const todayData = await todayRes.json();
+      if (!listRes.ok) throw new Error(listData.detail || "Failed to open Chronicles.");
+      if (!todayRes.ok) throw new Error(todayData.detail || "Failed to build today's Chronicle.");
+      const nextChronicles = listData.chronicles || [];
+      const todayChronicle = todayData.chronicle as Chronicle;
+      const merged = [todayChronicle, ...nextChronicles.filter((item: Chronicle) => item.id !== todayChronicle.id)];
+      setChronicles(merged);
+      const selected = selectedChronicleDate
+        ? merged.find((item) => item.entry_date === selectedChronicleDate)
+        : todayChronicle;
+      selectChronicle(selected || todayChronicle);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to open Chronicles.");
+    } finally {
+      setChroniclesLoading(false);
+    }
+  }, [selectedChronicleDate]);
+
+  useEffect(() => {
+    if (section === "daily") {
+      loadChronicles();
+    }
+  }, [loadChronicles, section]);
+
+  const loadChronicleWeather = useCallback(async () => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setWeatherSnapshot("Weather unavailable");
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const { latitude, longitude } = position.coords;
+          const params = new URLSearchParams({
+            latitude: String(latitude),
+            longitude: String(longitude),
+            daily: "temperature_2m_max,weathercode",
+            temperature_unit: "fahrenheit",
+            timezone: "auto",
+            forecast_days: "1",
+          });
+          const res = await fetch(`https://api.open-meteo.com/v1/forecast?${params.toString()}`);
+          const data = await res.json();
+          if (!res.ok) throw new Error("Weather unavailable");
+          const high = Math.round(Number(data.daily?.temperature_2m_max?.[0]));
+          const code = Number(data.daily?.weathercode?.[0]);
+          if (!Number.isFinite(high)) throw new Error("Weather unavailable");
+          setWeatherSnapshot(`${weatherCodeLabel(code)}, ${high}° high`);
+        } catch {
+          setWeatherSnapshot("Weather unavailable");
+        }
+      },
+      () => setWeatherSnapshot("Weather unavailable"),
+      { timeout: 8000, maximumAge: 900000 }
+    );
+  }, []);
+
+  useEffect(() => {
+    if (section === "daily") {
+      loadChronicleWeather();
+    }
+  }, [loadChronicleWeather, section]);
 
   function updateForm<K extends keyof DreamForm>(key: K, value: DreamForm[K]) {
     setForm((prev) => ({
@@ -184,6 +331,57 @@ function ArchivePageContent() {
     setMessage("");
     setError("");
     setForm(emptyForm(prompt));
+  }
+
+  function selectChronicle(nextChronicle: Chronicle) {
+    setMessage("");
+    setError("");
+    setChronicle(nextChronicle);
+    setChronicleForm({
+      id: nextChronicle.id,
+      title: nextChronicle.title || "",
+      story_text: nextChronicle.story_text || "",
+      future_me_message: nextChronicle.future_me_message || "",
+      notes: nextChronicle.notes || "",
+    });
+  }
+
+  function updateChronicleForm<K extends keyof ChronicleForm>(key: K, value: ChronicleForm[K]) {
+    setChronicleForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function saveChronicle(options?: { file?: boolean }) {
+    if (!chronicleForm.id) return;
+    const file = !!options?.file;
+    setMessage("");
+    setError("");
+    try {
+      const res = await fetch(`${API_BASE}/archive/chronicles/${chronicleForm.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": API_KEY,
+        },
+        body: JSON.stringify({
+          title: chronicleForm.title || null,
+          story_text: chronicleForm.story_text || null,
+          future_me_message: chronicleForm.future_me_message || null,
+          notes: chronicleForm.notes || null,
+          status: file || chronicle?.status === "filed" ? "filed" : "in_progress",
+          filed_at: file && chronicle?.status !== "filed" ? new Date().toISOString() : chronicle?.filed_at || null,
+          temperature: file ? (chronicle?.temperature || weatherSnapshot) : chronicle?.temperature || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to save Chronicle.");
+      setMessage(file ? "Chronicle filed." : "Chronicle saved.");
+      if (data.chronicle) {
+        selectChronicle(data.chronicle);
+        setChronicles((prev) => prev.map((item) => item.id === data.chronicle.id ? data.chronicle : item));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save Chronicle.");
+    }
   }
 
   async function createDream() {
@@ -235,10 +433,12 @@ function ArchivePageContent() {
     <main className={`archive-shell ${inter.className}`}>
       <ArchiveSidebar activeSection={section} />
       <section className="archive-main">
-        <div className="archive-hero-grid">
-          <ArchiveBanner />
-          <ArchiveStatsPanel dreams={dreams} activeSection={section} />
-        </div>
+        {section !== "daily" && (
+          <div className="archive-hero-grid">
+            <ArchiveBanner />
+            <ArchiveStatsPanel dreams={dreams} activeSection={section} />
+          </div>
+        )}
 
         {error && <div className="archive-alert archive-error">{error}</div>}
         {message && <div className="archive-alert archive-message">{message}</div>}
@@ -255,6 +455,23 @@ function ArchivePageContent() {
               onCopyPrompt={copyPrompt}
             />
           </section>
+        ) : section === "daily" ? (
+          <ChroniclesWorkspace
+            chronicles={chronicles}
+            current={chronicle}
+            form={chronicleForm}
+            loading={chroniclesLoading}
+            filter={chronicleFilter}
+            search={chronicleSearch}
+            onFilter={setChronicleFilter}
+            onSearch={setChronicleSearch}
+            onSelect={selectChronicle}
+            onChange={updateChronicleForm}
+            onSave={() => saveChronicle()}
+            onFile={() => saveChronicle({ file: true })}
+            onToday={loadChronicles}
+            weather={weatherSnapshot}
+          />
         ) : (
           <ComingSoonPanel section={section} />
         )}
@@ -489,6 +706,355 @@ function DreamBookEditor({
   );
 }
 
+function ChroniclesWorkspace({
+  chronicles,
+  current,
+  form,
+  loading,
+  filter,
+  search,
+  onFilter,
+  onSearch,
+  onSelect,
+  onChange,
+  onSave,
+  onFile,
+  onToday,
+  weather,
+}: {
+  chronicles: Chronicle[];
+  current: Chronicle | null;
+  form: ChronicleForm;
+  loading: boolean;
+  filter: "all" | "draft" | "in_progress" | "filed";
+  search: string;
+  onFilter: (filter: "all" | "draft" | "in_progress" | "filed") => void;
+  onSearch: (search: string) => void;
+  onSelect: (chronicle: Chronicle) => void;
+  onChange: <K extends keyof ChronicleForm>(key: K, value: ChronicleForm[K]) => void;
+  onSave: () => void;
+  onFile: () => void;
+  onToday: () => void;
+  weather: string;
+}) {
+  const filteredChronicles = chronicles.filter((item) => {
+    const matchesFilter = filter === "all" || item.status === filter;
+    const searchText = `${item.entry_date} ${item.title || ""} ${item.victory_log || ""}`.toLowerCase();
+    return matchesFilter && searchText.includes(search.toLowerCase());
+  });
+
+  return (
+    <section className="chronicles-shell">
+      <div className="chronicles-topbar">
+        <p className={cinzel.className}>The Archive <span>/ Chronicles / {formatDate(current?.entry_date)}</span></p>
+        <strong>Status: {statusLabel(current?.status)}</strong>
+      </div>
+      <aside className="chronicle-list-panel">
+        <div className="chronicles-title-block">
+          <p className={cinzel.className}>Chronicles</p>
+          <span>The official record of what happened, what mattered, and what should be remembered.</span>
+        </div>
+        <button type="button" className="chronicle-today-button" onClick={onToday}>Today&apos;s Chronicle</button>
+        <input
+          value={search}
+          onChange={(event) => onSearch(event.target.value)}
+          className="chronicle-search"
+          placeholder="Search date or title..."
+        />
+        <div className="chronicle-filter-row">
+          {(["all", "draft", "in_progress", "filed"] as const).map((option) => (
+            <button key={option} type="button" className={filter === option ? "active" : ""} onClick={() => onFilter(option)}>
+              {option === "in_progress" ? "In Progress" : option}
+            </button>
+          ))}
+        </div>
+        <div className="chronicle-list">
+          {loading && <p className="archive-muted">Opening the ledgers...</p>}
+          {!loading && filteredChronicles.length === 0 && <p className="archive-muted">No Chronicle entries found.</p>}
+          {filteredChronicles.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => onSelect(item)}
+              className={`chronicle-card ${current?.id === item.id ? "selected" : ""} ${item.status === "filed" ? "filed" : ""}`}
+            >
+              <span>{formatDate(item.entry_date)}</span>
+              <strong>{item.title || `Chronicle for ${formatDate(item.entry_date)}`}</strong>
+              <em><b>{statusLabel(item.status)}</b>{item.daily_score != null ? ` · Score ${item.daily_score}` : ""}</em>
+              <small>{item.victory_log || "Awaiting the day's record."}</small>
+            </button>
+          ))}
+        </div>
+      </aside>
+
+      {current ? (
+        <ChronicleEditor current={current} form={form} onChange={onChange} onSave={onSave} onFile={onFile} weather={weather} />
+      ) : (
+        <section className="chronicle-empty">
+          <p className={cinzel.className}>Chronicles</p>
+          <span>Select or create today&apos;s Chronicle to begin the record.</span>
+        </section>
+      )}
+    </section>
+  );
+}
+
+function ChronicleEditor({
+  current,
+  form,
+  onChange,
+  onSave,
+  onFile,
+  weather,
+}: {
+  current: Chronicle;
+  form: ChronicleForm;
+  onChange: <K extends keyof ChronicleForm>(key: K, value: ChronicleForm[K]) => void;
+  onSave: () => void;
+  onFile: () => void;
+  weather: string;
+}) {
+  const filed = current.status === "filed";
+  const goalImpacts = current.goal_impacts || [];
+  const [showGoalImpacts, setShowGoalImpacts] = useState(false);
+  const goalSummary = summarizeGoalImpacts(goalImpacts);
+  const displayedWeather = filed ? current.temperature || "Weather unavailable" : current.temperature || weather || "Weather unavailable";
+  return (
+    <section className="chronicle-editor-wrap">
+      <div className="chronicle-book">
+        <div className="chronicle-page official-record">
+          <div className="chronicle-official-header">
+            <div>
+              <h2 className={cormorant.className}>{formatDate(current.entry_date)}</h2>
+              <p>{weekdayForDate(current.entry_date)}</p>
+              <WeatherDisplay weather={displayedWeather} />
+            </div>
+            <div className="chronicle-draft-times">
+              <strong>Today&apos;s Chronicle</strong>
+              <span>Drafted {formatTimeOnly(current.started_at)}</span>
+              <span>Filed {filed ? formatTimeOnly(current.filed_at) : "Pending"}</span>
+            </div>
+          </div>
+
+          <label className="chronicle-title-compact">
+            <span>Archive Title</span>
+            <input
+              value={form.title}
+              onChange={(event) => onChange("title", event.target.value)}
+              placeholder={`Chronicle for ${formatDate(current.entry_date)}`}
+            />
+          </label>
+
+          <RecordSection title="Mission Overview">
+            <RecordRow label="Mission Score" value={valueOrPending(current.daily_score)} fallbackIcon={Activity} />
+            <RecordRow label="Weekly Score" value={valueOrPending(current.weekly_score)} iconSrc="/icons/weekly_score.png" />
+            <RecordRow label="Mission Rank" value={current.mission_rank || "Pending"} iconSrc="/icons/mission_rank.png" />
+            <RecordRow label="Overall Status" value={current.overall_status || "Pending"} iconSrc="/icons/overall_status.png" strong />
+          </RecordSection>
+
+          <RecordSection title="Performance">
+            <RecordRow label="Workout" value={current.workout_status || current.workout_summary || "Pending"} iconSrc="/icons/workout.png" />
+            <RecordRow label="Next Protocol" value={current.next_protocol || "Pending"} iconSrc="/icons/next_protocol.png" />
+            <div className="performance-stat-grid">
+              <PerformanceStat
+                label="Nutrition"
+                iconSrc="/icons/nutrition.png"
+                lines={[
+                  current.calories != null ? `${current.calories.toLocaleString()} calories` : "Calories pending",
+                  current.protein_g != null ? `${current.protein_g}g protein` : "Protein pending",
+                ]}
+              />
+              <PerformanceStat label="Water" iconSrc="/icons/water.png" lines={[current.water_oz != null ? `${current.water_oz} oz` : "Pending"]} />
+              <PerformanceStat label="Sleep" iconSrc="/icons/sleep.png" lines={[current.sleep_hours != null ? `${current.sleep_hours} hr` : "Pending"]} />
+              <PerformanceStat
+                label="Health Events"
+                iconSrc="/icons/health.png"
+                lines={[current.health_event_count != null ? `${current.health_event_count} symptoms` : "0 symptoms"]}
+              />
+            </div>
+          </RecordSection>
+
+          <div className="chronicle-goal-impact">
+            <button type="button" className="chronicle-goal-toggle" onClick={() => setShowGoalImpacts((prev) => !prev)}>
+              <span>Goal Impact</span>
+              <strong>{goalSummary}</strong>
+            </button>
+            {goalImpacts.length === 0 && <p>Pending</p>}
+            {showGoalImpacts && goalImpacts.map((impact, index) => (
+                <div key={impact.id || `${impact.title}-${index}`} className="chronicle-impact-card">
+                  <strong>{impact.title || "Objective"}</strong>
+                  <em>{impact.achievement_label || impact.state || (impact.completed ? "Completed" : "Active")}</em>
+                  {impact.detail && <small>{impact.detail}</small>}
+                </div>
+              ))}
+          </div>
+        </div>
+
+        <div className="chronicle-page john-record">
+          <div className="chronicle-page-heading">
+            <p className={`${cinzel.className} chronicle-page-label`}>Today&apos;s Chronicle</p>
+            <ChronicleStamp chronicle={current} />
+          </div>
+          <label className="chronicle-writing-field">
+            <span>Story of Today</span>
+            <textarea
+              value={form.story_text}
+              onChange={(event) => onChange("story_text", event.target.value)}
+              placeholder="Write the historical record of the day..."
+            />
+          </label>
+          <div className="chronicle-reflection-grid">
+            <ChronicleReadOnly label="Victory Log" value={current.victory_log} />
+            <ChronicleReadOnly label="Lessons Learned" value={current.lessons_worked} />
+            <ChronicleReadOnly label="What Did Not Work" value={current.lessons_not_worked} />
+            <ChronicleReadOnly label="Adjust Tomorrow" value={current.lessons_adjust_tomorrow} />
+            <ChronicleReadOnly label="Tomorrow Focus" value={current.tomorrow_focus} />
+          </div>
+          <label className="chronicle-writing-field compact">
+            <span>Message to Future Me</span>
+            <textarea
+              value={form.future_me_message}
+              onChange={(event) => onChange("future_me_message", event.target.value)}
+              placeholder="What should future John remember?"
+            />
+          </label>
+          <label className="chronicle-writing-field compact">
+            <span>Notes</span>
+            <textarea
+              value={form.notes}
+              onChange={(event) => onChange("notes", event.target.value)}
+              placeholder="Optional archival notes..."
+            />
+          </label>
+          <div className="chronicle-signature-block">
+            <span className="signature-label">Recorded By</span>
+            <strong className={`${greatVibes.className} chronicle-signature-name`}>John Summers</strong>
+            <span>{formatDate(current.entry_date)} · {current.mission_rank || "Rank Pending"}</span>
+            <em>Every day becomes history.</em>
+          </div>
+        </div>
+      </div>
+      <div className="chronicle-actions">
+        <button type="button" onClick={onSave}>Save Progress</button>
+        <button type="button" className="file" onClick={onFile}>{filed ? "Update Filed Chronicle" : "File Chronicle"}</button>
+      </div>
+    </section>
+  );
+}
+
+function ChronicleStamp({ chronicle }: { chronicle: Chronicle }) {
+  const filed = chronicle.status === "filed";
+  const inProgress = chronicle.status === "in_progress";
+  return (
+    <span className={`chronicle-stamp ${filed ? "filed" : inProgress ? "progress" : "draft"}`}>
+      {filed ? "FILED" : inProgress ? "IN PROGRESS" : "DRAFT"}
+      <small>{formatDate(chronicle.entry_date)}</small>
+      {filed ? (
+        <>
+          <em>Mission Score</em>
+          <strong>{valueOrPending(chronicle.daily_score)}</strong>
+        </>
+      ) : (
+        <em>{inProgress ? "Mission in motion." : "Mission still unfolding."}</em>
+      )}
+    </span>
+  );
+}
+
+function RecordSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="chronicle-record-section">
+      <p>{title}</p>
+      <div>{children}</div>
+    </section>
+  );
+}
+
+function RecordRow({
+  label,
+  value,
+  iconSrc,
+  fallbackIcon: FallbackIcon,
+  strong,
+}: {
+  label: string;
+  value: ReactNode;
+  iconSrc?: string;
+  fallbackIcon?: LucideIcon;
+  strong?: boolean;
+}) {
+  return (
+    <div className={`record-row ${strong ? "strong" : ""}`}>
+      <span className="record-row-label">
+        <ArchiveRecordIcon src={iconSrc} fallbackIcon={FallbackIcon} />
+        {label}
+      </span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function PerformanceStat({ label, lines, iconSrc }: { label: string; lines: string[]; iconSrc: string }) {
+  return (
+    <article className="performance-stat-card">
+      <span>
+        <ArchiveRecordIcon src={iconSrc} />
+        {label}
+      </span>
+      <strong>
+        {lines.map((line) => (
+          <em key={line}>{line}</em>
+        ))}
+      </strong>
+    </article>
+  );
+}
+
+function ArchiveRecordIcon({ src, fallbackIcon: FallbackIcon }: { src?: string; fallbackIcon?: LucideIcon }) {
+  if (src) {
+    return <Image className="archive-record-icon" src={src} alt="" width={22} height={22} />;
+  }
+  if (FallbackIcon) {
+    return <FallbackIcon className="archive-record-lucide" aria-hidden="true" size={21} strokeWidth={1.8} />;
+  }
+  return null;
+}
+
+function WeatherDisplay({ weather }: { weather: string }) {
+  const parsed = parseWeatherSnapshot(weather);
+
+  return (
+    <span className="chronicle-weather-line" title={parsed.condition === "Unavailable" ? "Weather unavailable" : weather}>
+      <WeatherIcon condition={parsed.condition} />
+      {parsed.temperatureText}
+    </span>
+  );
+}
+
+function WeatherIcon({ condition }: { condition: string }) {
+  const normalized = condition.toLowerCase();
+  const props = { "aria-hidden": true, size: 18, strokeWidth: 1.9 };
+  if (normalized.includes("sunny")) return <Sun {...props} />;
+  if (normalized.includes("partly")) return <Cloud {...props} />;
+  if (normalized.includes("cloud")) return <Cloud {...props} />;
+  if (normalized.includes("fog")) return <CloudFog {...props} />;
+  if (normalized.includes("drizzle")) return <CloudDrizzle {...props} />;
+  if (normalized.includes("rain") || normalized.includes("shower")) return <CloudRain {...props} />;
+  if (normalized.includes("snow")) return <CloudSnow {...props} />;
+  if (normalized.includes("thunder")) return <CloudLightning {...props} />;
+  return <HelpCircle {...props} />;
+}
+
+function ChronicleReadOnly({ label, value }: { label: string; value?: string | null }) {
+  return (
+    <div className="chronicle-readonly">
+      <span>{label}</span>
+      <p>{value || "Pending"}</p>
+      <small>Pulled from Daily Debrief.</small>
+    </div>
+  );
+}
+
 function ComingSoonPanel({ section }: { section: ArchiveSection }) {
   const copy = {
     daily: {
@@ -595,6 +1161,64 @@ function formatDate(value?: string | null) {
   return new Date(`${value}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
+function formatTimeOnly(value?: string | null) {
+  if (!value) return "Pending";
+  return new Date(value).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+function weekdayForDate(value?: string | null) {
+  if (!value) return "";
+  return new Date(`${value}T12:00:00`).toLocaleDateString(undefined, { weekday: "long" });
+}
+
+function statusLabel(value?: string | null) {
+  if (value === "filed") return "Filed";
+  if (value === "in_progress") return "In Progress";
+  return "Draft";
+}
+
+function valueOrPending(value?: number | string | null) {
+  return value == null || value === "" ? "Pending" : value;
+}
+
+function summarizeGoalImpacts(impacts: ChronicleGoalImpact[]) {
+  if (!impacts.length) return "0 recorded";
+  const completed = impacts.filter((impact) => impact.completed || (impact.state || "").toLowerCase().includes("complete")).length;
+  const above = impacts.filter((impact) => {
+    const label = `${impact.achievement_label || ""} ${impact.state || ""}`.toLowerCase();
+    return label.includes("above") || label.includes("beyond");
+  }).length;
+  const parts = [
+    `${completed} completed`,
+    above ? `${above} above & beyond` : null,
+  ].filter(Boolean);
+  return parts.join(", ") || `${impacts.length} recorded`;
+}
+
+function weatherCodeLabel(code: number) {
+  if (code === 0) return "Sunny";
+  if ([1, 2, 3].includes(code)) return code === 3 ? "Cloudy" : "Partly cloudy";
+  if ([45, 48].includes(code)) return "Fog";
+  if ([51, 53, 55, 56, 57].includes(code)) return "Drizzle";
+  if ([61, 63, 65, 66, 67].includes(code)) return "Rain";
+  if ([71, 73, 75, 77].includes(code)) return "Snow";
+  if ([80, 81, 82].includes(code)) return "Showers";
+  if ([95, 96, 99].includes(code)) return "Thunderstorm";
+  return "Weather";
+}
+
+function parseWeatherSnapshot(weather?: string | null) {
+  if (!weather || weather === "Weather unavailable") {
+    return { condition: "Unavailable", temperatureText: "Weather unavailable" };
+  }
+  const [rawCondition, ...rest] = weather.split(",");
+  const temperatureText = rest.join(",").trim() || weather.replace(rawCondition, "").trim() || weather;
+  return {
+    condition: rawCondition.trim() || "Weather",
+    temperatureText: temperatureText || "Weather unavailable",
+  };
+}
+
 function normalizeSection(value: string | null): ArchiveSection {
   if (value === "daily" || value === "lessons" || value === "moments") return value;
   return "dreams";
@@ -623,6 +1247,13 @@ function ArchiveStyles() {
   return (
     <style jsx global>{`
       .archive-shell {
+        --archive-bg: #050912;
+        --archive-green: #31533a;
+        --archive-gold: #d6a85f;
+        --parchment: #e8d3a5;
+        --ink: #25190f;
+        --muted-ink: rgba(62, 48, 28, 0.68);
+        --line: rgba(62, 48, 28, 0.18);
         min-height: 100vh;
         background:
           radial-gradient(circle at 45% 0%, rgba(47, 111, 179, 0.28), transparent 32rem),
@@ -1094,6 +1725,654 @@ function ArchiveStyles() {
         text-transform: uppercase;
       }
 
+      .chronicles-shell {
+        display: grid;
+        grid-template-columns: 288px minmax(0, 1fr);
+        gap: 16px 24px;
+        min-height: calc(100vh - 80px);
+      }
+
+      .chronicles-topbar {
+        align-items: center;
+        border-bottom: 1px solid rgba(214, 168, 95, 0.18);
+        display: flex;
+        grid-column: 1 / -1;
+        justify-content: space-between;
+        padding-bottom: 12px;
+      }
+
+      .chronicles-topbar p {
+        color: #d6a85f;
+        font-size: 1.05rem;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      .chronicles-topbar span,
+      .chronicles-topbar strong {
+        color: rgba(232, 211, 165, 0.72);
+        font-family: ${inter.style.fontFamily};
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .chronicle-list-panel,
+      .chronicle-empty {
+        border: 1px solid rgba(214, 168, 95, 0.28);
+        border-radius: 18px;
+        background:
+          linear-gradient(135deg, rgba(11, 34, 25, 0.9), rgba(7, 12, 11, 0.96)),
+          repeating-linear-gradient(135deg, rgba(232, 211, 165, 0.04) 0 1px, transparent 1px 12px);
+        box-shadow: inset 0 0 28px rgba(214, 168, 95, 0.06), 0 22px 60px rgba(0, 0, 0, 0.32);
+      }
+
+      .chronicle-list-panel {
+        align-self: start;
+        padding: 18px;
+      }
+
+      .chronicles-title-block {
+        display: grid;
+        gap: 8px;
+      }
+
+      .chronicles-title-block p {
+        color: var(--archive-gold);
+        font-size: 1.2rem;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      .chronicles-title-block span {
+        color: rgba(232, 211, 165, 0.72);
+        font-size: 0.92rem;
+        line-height: 1.45;
+      }
+
+      .chronicle-today-button,
+      .chronicle-search,
+      .chronicle-filter-row button,
+      .chronicle-actions button {
+        border: 1px solid rgba(214, 168, 95, 0.34);
+        border-radius: 12px;
+        background: rgba(17, 49, 37, 0.76);
+        color: #f4ead2;
+        transition: transform 200ms, border-color 200ms, box-shadow 200ms, background 200ms;
+      }
+
+      .chronicle-today-button,
+      .chronicle-search {
+        margin-top: 14px;
+        width: 100%;
+        padding: 10px 12px;
+      }
+
+      .chronicle-today-button:hover,
+      .chronicle-filter-row button:hover,
+      .chronicle-filter-row button.active,
+      .chronicle-actions button:hover {
+        transform: translateY(-2px);
+        border-color: rgba(214, 168, 95, 0.72);
+        background: rgba(29, 75, 55, 0.82);
+        box-shadow: 0 0 20px rgba(214, 168, 95, 0.18);
+      }
+
+      .chronicle-search::placeholder {
+        color: rgba(232, 211, 165, 0.45);
+      }
+
+      .chronicle-filter-row {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .chronicle-filter-row button {
+        padding: 8px;
+        font-size: 0.68rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .chronicle-list {
+        display: grid;
+        gap: 10px;
+        margin-top: 16px;
+        max-height: calc(100vh - 270px);
+        overflow-y: auto;
+        padding-right: 6px;
+      }
+
+      .chronicle-card {
+        display: grid;
+        gap: 6px;
+        border: 1px solid rgba(214, 168, 95, 0.18);
+        border-radius: 14px;
+        background:
+          linear-gradient(135deg, rgba(28, 72, 52, 0.32), rgba(5, 9, 18, 0.36)),
+          rgba(4, 10, 8, 0.52);
+        padding: 13px;
+        text-align: left;
+        transition: transform 200ms, border-color 200ms, box-shadow 200ms, background 200ms;
+      }
+
+      .chronicle-card:hover,
+      .chronicle-card.selected {
+        transform: translateY(-2px);
+        border-color: rgba(214, 168, 95, 0.82);
+        box-shadow: 0 0 24px rgba(214, 168, 95, 0.2), inset 0 0 18px rgba(49, 83, 58, 0.16);
+      }
+
+      .chronicle-card.filed {
+        border-color: rgba(214, 168, 95, 0.34);
+      }
+
+      .chronicle-card span,
+      .chronicle-card em,
+      .chronicle-card small {
+        color: rgba(232, 211, 165, 0.68);
+        font-size: 0.78rem;
+        font-style: normal;
+      }
+
+      .chronicle-card strong {
+        color: #f4ead2;
+        line-height: 1.25;
+      }
+
+      .chronicle-card em b {
+        border: 1px solid rgba(214, 168, 95, 0.24);
+        border-radius: 999px;
+        color: var(--archive-gold);
+        font-size: 0.64rem;
+        letter-spacing: 0.1em;
+        padding: 2px 7px;
+        text-transform: uppercase;
+      }
+
+      .chronicle-editor-wrap {
+        min-width: 0;
+      }
+
+      .chronicle-book {
+        position: relative;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: clamp(44px, 5vw, 86px);
+        min-height: 900px;
+        border-radius: 24px;
+        background:
+          url("/images/daily_journal.png") top center / 100% 100% no-repeat,
+          linear-gradient(90deg, rgba(232, 211, 165, 0.9), rgba(216, 188, 127, 0.82));
+        padding: clamp(54px, 4.4vw, 78px) clamp(62px, 6.4vw, 122px) 74px;
+        box-shadow: 0 28px 80px rgba(0, 0, 0, 0.5), 0 0 42px rgba(20, 78, 48, 0.18);
+      }
+
+      .chronicle-page {
+        min-width: 0;
+        color: var(--ink);
+      }
+
+      .chronicle-page.official-record {
+        padding-left: clamp(24px, 2.2vw, 40px);
+        padding-right: 6px;
+      }
+
+      .chronicle-page-label {
+        color: var(--archive-green);
+        font-size: 0.92rem;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+      }
+
+      .chronicle-official-header {
+        align-items: start;
+        border-bottom: 1px solid var(--line);
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 14px;
+        padding: 8px 0 12px;
+      }
+
+      .chronicle-official-header h2 {
+        color: var(--ink);
+        font-size: clamp(1.75rem, 2.4vw, 2.6rem);
+        font-weight: 700;
+        line-height: 1;
+      }
+
+      .chronicle-official-header p,
+      .chronicle-official-header span,
+      .chronicle-draft-times span {
+        color: var(--muted-ink);
+        display: block;
+        font-size: 0.9rem;
+        margin-top: 5px;
+      }
+
+      .chronicle-official-header .chronicle-weather-line {
+        align-items: center;
+        color: #6f4214;
+        display: inline-flex;
+        gap: 7px;
+        font-size: 0.88rem;
+        font-weight: 700;
+        margin-top: 7px;
+      }
+
+      .chronicle-weather-line svg {
+        color: #8a5b19;
+        filter: drop-shadow(0 0 5px rgba(214, 168, 95, 0.22));
+        flex: 0 0 auto;
+      }
+
+      .chronicle-draft-times {
+        color: var(--ink);
+        display: grid;
+        gap: 4px;
+        min-width: 150px;
+        text-align: right;
+      }
+
+      .chronicle-draft-times strong {
+        color: var(--archive-green);
+        font-family: ${kalam.style.fontFamily};
+        font-size: 1.2rem;
+        font-weight: 700;
+      }
+
+      .chronicle-title-compact {
+        display: grid;
+        gap: 4px;
+        margin-top: 10px;
+      }
+
+      .chronicle-title-compact input {
+        border: 0;
+        border-bottom: 1px solid var(--line);
+        background: transparent;
+        color: var(--ink);
+        font-family: ${cormorant.style.fontFamily};
+        font-size: 1.08rem;
+        font-weight: 700;
+        outline: none;
+        padding: 4px 0 6px;
+        transition: border-color 180ms, background 180ms;
+      }
+
+      .chronicle-title-compact input:focus {
+        border-bottom-color: rgba(138, 91, 25, 0.62);
+        background: linear-gradient(180deg, transparent, rgba(214, 168, 95, 0.08));
+      }
+
+      .chronicle-title-compact span,
+      .chronicle-goal-impact > span,
+      .chronicle-readonly span,
+      .chronicle-writing-field span,
+      .chronicle-record-section > p {
+        color: rgba(49, 83, 58, 0.88);
+        display: block;
+        font-size: 0.66rem;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .chronicle-record-section {
+        margin-top: 14px;
+      }
+
+      .chronicle-record-section > div {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(244, 234, 210, 0.16);
+        margin-top: 8px;
+      }
+
+      .record-row {
+        align-items: center;
+        border-bottom: 1px solid var(--line);
+        display: grid;
+        grid-template-columns: minmax(145px, 0.88fr) minmax(120px, 1fr);
+        gap: 10px;
+        min-height: 38px;
+        padding: 7px 12px;
+      }
+
+      .record-row:last-child {
+        border-bottom: 0;
+      }
+
+      .record-row .record-row-label {
+        align-items: center;
+        color: var(--muted-ink);
+        display: inline-flex;
+        font-size: 0.84rem;
+        gap: 8px;
+        justify-content: center;
+        line-height: 1.15;
+        text-align: center;
+      }
+
+      .record-row strong {
+        color: var(--ink);
+        font-family: ${cormorant.style.fontFamily};
+        font-size: 1.18rem;
+        font-weight: 700;
+        line-height: 1.05;
+        text-align: left;
+      }
+
+      .record-row.strong strong {
+        color: var(--archive-green);
+        text-transform: uppercase;
+      }
+
+      .archive-record-icon,
+      .archive-record-lucide {
+        flex: 0 0 auto;
+        height: 22px;
+        object-fit: contain;
+        opacity: 0.9;
+        width: 22px;
+      }
+
+      .archive-record-icon {
+        filter: sepia(0.14) saturate(0.8) drop-shadow(0 0 5px rgba(138, 91, 25, 0.12));
+      }
+
+      .archive-record-lucide {
+        color: #6f4214;
+        filter: drop-shadow(0 0 5px rgba(214, 168, 95, 0.18));
+      }
+
+      .performance-stat-grid {
+        display: grid;
+        gap: 8px;
+        grid-template-columns: 1fr 1fr;
+        padding: 9px;
+      }
+
+      .performance-stat-card {
+        border: 1px solid rgba(62, 48, 28, 0.16);
+        border-radius: 9px;
+        background:
+          linear-gradient(145deg, rgba(244, 234, 210, 0.26), rgba(214, 168, 95, 0.06)),
+          rgba(49, 83, 58, 0.05);
+        min-height: 78px;
+        padding: 9px 10px;
+      }
+
+      .performance-stat-card span {
+        align-items: center;
+        color: rgba(49, 83, 58, 0.88);
+        display: inline-flex;
+        font-size: 0.68rem;
+        font-weight: 800;
+        gap: 7px;
+        letter-spacing: 0.11em;
+        text-transform: uppercase;
+      }
+
+      .performance-stat-card strong {
+        display: grid;
+        gap: 2px;
+        margin-top: 7px;
+      }
+
+      .performance-stat-card em {
+        color: #25190f;
+        font-family: ${cormorant.style.fontFamily};
+        font-size: 1.05rem;
+        font-style: normal;
+        font-weight: 700;
+        line-height: 1.05;
+      }
+
+      .chronicle-goal-impact {
+        display: grid;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .chronicle-goal-toggle {
+        align-items: center;
+        border: 1px solid rgba(49, 83, 58, 0.28);
+        border-radius: 10px;
+        background: rgba(49, 83, 58, 0.08);
+        display: flex;
+        justify-content: space-between;
+        padding: 10px 12px;
+        text-align: left;
+        transition: background 180ms, border-color 180ms, transform 180ms;
+      }
+
+      .chronicle-goal-toggle:hover {
+        border-color: rgba(49, 83, 58, 0.55);
+        background: rgba(49, 83, 58, 0.14);
+        transform: translateY(-1px);
+      }
+
+      .chronicle-goal-toggle strong {
+        color: #8a5b19;
+        font-size: 0.78rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .chronicle-goal-impact p,
+      .chronicle-impact-card small,
+      .chronicle-readonly small {
+        color: rgba(37, 25, 15, 0.58);
+        font-size: 0.76rem;
+      }
+
+      .chronicle-impact-card strong,
+      .chronicle-impact-card em {
+        display: block;
+      }
+
+      .chronicle-impact-card strong {
+        color: #25190f;
+        font-size: 0.9rem;
+      }
+
+      .chronicle-impact-card em {
+        color: #8a5b19;
+        font-size: 0.7rem;
+        font-style: normal;
+        font-weight: 800;
+        letter-spacing: 0.1em;
+        margin-top: 2px;
+        text-transform: uppercase;
+      }
+
+      .chronicle-page-heading {
+        min-height: 116px;
+        padding-right: 150px;
+        position: relative;
+      }
+
+      .chronicle-stamp {
+        border: 2px solid rgba(138, 91, 25, 0.78);
+        border-radius: 10px;
+        color: #8a5b19;
+        display: grid;
+        font-size: 1rem;
+        font-weight: 900;
+        letter-spacing: 0.13em;
+        min-width: 128px;
+        padding: 10px 12px;
+        position: absolute;
+        right: 0;
+        top: -6px;
+        text-align: center;
+        text-transform: uppercase;
+        transform: rotate(-4deg);
+        background: rgba(216, 168, 83, 0.13);
+        box-shadow: inset 0 0 18px rgba(138, 91, 25, 0.1);
+      }
+
+      .chronicle-stamp small {
+        color: rgba(62, 48, 28, 0.7);
+        font-size: 0.54rem;
+        letter-spacing: 0.06em;
+        margin-top: 2px;
+      }
+
+      .chronicle-stamp em {
+        color: rgba(62, 48, 28, 0.7);
+        font-size: 0.52rem;
+        font-style: normal;
+        letter-spacing: 0.08em;
+        margin-top: 5px;
+      }
+
+      .chronicle-stamp strong {
+        color: #25190f;
+        font-size: 1.25rem;
+        line-height: 1;
+      }
+
+      .chronicle-stamp.draft {
+        border-color: rgba(49, 83, 58, 0.46);
+        color: #31533a;
+      }
+
+      .chronicle-stamp.progress {
+        border-color: rgba(49, 83, 58, 0.58);
+        color: #31533a;
+      }
+
+      .chronicle-readonly {
+        margin-top: 0;
+        border: 1px solid rgba(62, 48, 28, 0.16);
+        border-radius: 8px;
+        background: rgba(244, 234, 210, 0.2);
+        padding: 8px 10px;
+      }
+
+      .chronicle-readonly p {
+        color: #25190f;
+        font-size: 0.92rem;
+        line-height: 1.35;
+        margin-top: 3px;
+      }
+
+      .chronicle-writing-field {
+        display: grid;
+        gap: 5px;
+        margin-top: 10px;
+      }
+
+      .chronicle-writing-field textarea {
+        min-height: 238px;
+        resize: vertical;
+        border: 1px solid rgba(62, 48, 28, 0.16);
+        border-radius: 10px;
+        background:
+          repeating-linear-gradient(transparent 0 29px, rgba(37, 25, 15, 0.07) 30px 31px),
+          rgba(244, 234, 210, 0.2);
+        color: #2b1d12;
+        font-family: ${kalam.style.fontFamily};
+        font-size: 1.12rem;
+        line-height: 1.5;
+        outline: none;
+        padding: 10px 12px;
+      }
+
+      .chronicle-writing-field.compact textarea {
+        min-height: 76px;
+      }
+
+      .chronicle-reflection-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .chronicle-reflection-grid .chronicle-readonly:last-child {
+        grid-column: 1 / -1;
+      }
+
+      .chronicle-signature-block {
+        border-top: 1px solid var(--line);
+        color: var(--muted-ink);
+        display: grid;
+        gap: 3px;
+        margin-top: 12px;
+        padding-top: 10px;
+      }
+
+      .chronicle-signature-block span {
+        font-size: 0.82rem;
+      }
+
+      .chronicle-signature-block .signature-label {
+        color: rgba(49, 83, 58, 0.82);
+        font-size: 0.66rem;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .chronicle-signature-name {
+        color: #25190f;
+        font-size: clamp(2rem, 3vw, 2.8rem);
+        font-weight: 400;
+        line-height: 0.98;
+      }
+
+      .chronicle-signature-block em {
+        color: #8a5b19;
+        font-family: ${cormorant.style.fontFamily};
+        font-size: 1rem;
+      }
+
+      .chronicle-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      .chronicle-actions button {
+        padding: 12px 16px;
+        font-size: 0.78rem;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .chronicle-actions button.file {
+        border-color: rgba(214, 168, 95, 0.58);
+        background: rgba(214, 168, 95, 0.16);
+        color: #f4ead2;
+      }
+
+      .chronicle-empty {
+        display: grid;
+        min-height: 420px;
+        place-content: center;
+        text-align: center;
+      }
+
+      .chronicle-empty p {
+        color: #d6a85f;
+        font-size: 1.4rem;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      .chronicle-empty span {
+        color: rgba(232, 211, 165, 0.72);
+        margin-top: 8px;
+      }
+
       .archive-choice div,
       .star-row {
         display: flex;
@@ -1245,7 +2524,8 @@ function ArchiveStyles() {
 
       @media (max-width: 1100px) {
         .archive-hero-grid,
-        .archive-workspace {
+        .archive-workspace,
+        .chronicles-shell {
           grid-template-columns: 1fr;
         }
 
@@ -1266,6 +2546,18 @@ function ArchiveStyles() {
           background-size: cover;
           min-height: 0;
           padding: 32px;
+        }
+
+        .chronicle-book {
+          grid-template-columns: 1fr;
+          background-image: linear-gradient(rgba(232, 211, 165, 0.92), rgba(216, 188, 127, 0.84)), url("/images/Parchment Paper Texture.png");
+          background-size: cover;
+          min-height: 0;
+          padding: 32px;
+        }
+
+        .chronicle-list {
+          max-height: 420px;
         }
 
         .dream-title-input,
@@ -1323,6 +2615,30 @@ function ArchiveStyles() {
         .open-book-editor {
           min-height: 0;
           padding: 28px 18px;
+        }
+
+        .chronicle-book {
+          padding: 24px 18px;
+        }
+
+        .chronicle-ledger-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .chronicle-page-heading {
+          display: grid;
+          min-height: 132px;
+          padding-right: 0;
+        }
+
+        .chronicle-stamp {
+          position: static;
+          margin-top: 12px;
+          max-width: 160px;
+        }
+
+        .chronicle-reflection-grid {
+          grid-template-columns: 1fr;
         }
 
         .dream-title-input,

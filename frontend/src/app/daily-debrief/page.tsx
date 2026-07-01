@@ -379,6 +379,7 @@ export default function DailyDebriefPage() {
   const [message, setMessage] = useState("");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [isFinalizing, setIsFinalizing] = useState(false);
+  const [chronicleLink, setChronicleLink] = useState("");
   const loadedRef = useRef(false);
   const autosaveTimerRef = useRef<number | null>(null);
   const lastSavedSignatureRef = useRef("");
@@ -447,6 +448,8 @@ export default function DailyDebriefPage() {
         lastSavedSignatureRef.current = signature;
         setSummary(data.summary || summary);
         if (finalize) {
+          const chronicleDate = data.chronicle?.entry_date || payload.date;
+          setChronicleLink(`/archive?section=daily&date=${chronicleDate}`);
           setMessage(
             `Mission Logged. Daily Score: ${data.entry?.daily_score ?? payload.daily_score ?? payload.mission_score ?? 0}.`
           );
@@ -472,7 +475,7 @@ export default function DailyDebriefPage() {
     }
 
     try {
-      await saveEntry({ finalize: false, quiet: true });
+      await saveEntry({ finalize: true, quiet: true });
       await loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save debrief.");
@@ -543,8 +546,13 @@ export default function DailyDebriefPage() {
         )}
 
         {message && (
-          <div className="mb-6 rounded-xl border border-green-500/30 bg-green-500/10 p-4 text-green-300">
-            {message}
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-green-500/30 bg-green-500/10 p-4 text-green-300">
+            <span>{message}</span>
+            {chronicleLink && (
+              <Link href={chronicleLink} className="command-nav-link">
+                Open Chronicle
+              </Link>
+            )}
           </div>
         )}
 
@@ -1305,8 +1313,8 @@ function toPayload(form: DebriefForm, summary: DailyDebriefSummary | null, final
     weekly_score: summary?.weekly_score ?? summary?.mission_scores?.weekly?.score ?? null,
     lifetime_score: summary?.lifetime_score ?? summary?.mission_scores?.lifetime?.score ?? null,
     lifetime_rank: summary?.lifetime_rank ?? summary?.mission_scores?.lifetime?.rank ?? null,
-    is_finalized: finalize,
-    completed_at: finalize ? new Date().toISOString() : null,
+    is_finalized: finalize || !!summary?.saved_entry?.is_finalized,
+    completed_at: finalize ? new Date().toISOString() : summary?.saved_entry?.completed_at || null,
     summary: form.summary,
     objectives: form.objectives,
     training: {

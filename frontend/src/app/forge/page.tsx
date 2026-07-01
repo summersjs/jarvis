@@ -406,7 +406,7 @@ function CategoryFolder({
   return (
     <button
       type="button"
-      className={`forge-folder ${active ? "active" : ""}`}
+      className={`forge-folder forge-folder-${category.name.toLowerCase()} ${active ? "active" : ""}`}
       style={{ "--category-accent": category.accent } as CSSProperties}
       onClick={onClick}
     >
@@ -424,12 +424,12 @@ function CategoryFolder({
             fallback={<Icon size={29} strokeWidth={1.65} />}
           />
         </span>
-        <span>
+        <span className="forge-folder-title-block">
           <strong>{category.name}</strong>
           <em>{count} project{count === 1 ? "" : "s"}</em>
         </span>
       </span>
-      <p>{category.description}</p>
+      <p className="forge-folder-description">{category.description}</p>
     </button>
   );
 }
@@ -1020,7 +1020,7 @@ function ForgeStyles() {
       .forge-plaque {
         filter: drop-shadow(0 14px 24px rgba(0, 0, 0, 0.5)) drop-shadow(0 0 20px rgba(196, 111, 45, 0.18));
         height: 94px;
-        left: 55.8%;
+        left: 49.65%;
         position: absolute;
         top: 14px;
         transform: translateX(-50%);
@@ -1215,9 +1215,11 @@ function ForgeStyles() {
       .forge-folder-heading {
         align-items: center;
         border-bottom: 1px solid rgba(212, 173, 101, 0.18);
-        display: flex;
-        gap: 10px;
-        margin-left: 18px;
+        display: grid;
+        gap: 8px;
+        grid-template-columns: 40px minmax(0, 1fr);
+        margin-left: 15px;
+        max-width: calc(100% - 44px);
         padding-bottom: 8px;
       }
 
@@ -1243,31 +1245,51 @@ function ForgeStyles() {
         width: 36px;
       }
 
+      .forge-folder-jarvis .forge-category-asset,
+      .forge-folder-business .forge-category-asset,
+      .forge-folder-hardware .forge-category-asset,
+      .forge-folder-writing .forge-category-asset,
+      .forge-folder-life .forge-category-asset {
+        transform: translateY(-3px);
+      }
+
       .forge-folder strong {
         color: var(--category-accent);
         display: block;
-        font-size: 0.92rem;
-        letter-spacing: 0.08em;
+        font-size: 0.84rem;
+        letter-spacing: 0.075em;
         text-transform: uppercase;
+        white-space: nowrap;
       }
 
       .forge-folder em {
         color: color-mix(in srgb, var(--category-accent) 72%, #f4d38f);
         display: block;
-        font-size: 0.7rem;
+        font-size: 0.66rem;
         font-style: normal;
-        letter-spacing: 0.08em;
+        letter-spacing: 0.075em;
         margin-top: 2px;
         text-transform: uppercase;
+        white-space: nowrap;
       }
 
-      .forge-folder p {
+      .forge-folder-title-block {
+        align-self: center;
+        display: grid;
+        min-width: 0;
+        transform: translateY(-1px);
+        width: 86px;
+      }
+
+      .forge-folder-description {
         color: rgba(234, 223, 199, 0.74);
-        font-size: 0.72rem;
-        line-height: 1.23;
-        margin-left: 18px;
-        margin-top: 9px;
-        max-width: calc(100% - 20px);
+        font-size: 0.65rem;
+        line-height: 1.14;
+        margin-left: 15px;
+        margin-top: 8px;
+        max-width: calc(100% - 68px);
+        overflow-wrap: normal;
+        width: 116px;
       }
 
       .forge-filter-panel {

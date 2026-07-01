@@ -1548,6 +1548,10 @@ function ForgeStyles() {
         margin-top: 14px;
       }
 
+      .incubation-list {
+        margin-top: 36px;
+      }
+
       .forge-project-row {
         align-items: center;
         border: 1px solid rgba(212, 173, 101, 0.13);
@@ -1814,9 +1818,25 @@ function ForgeStyles() {
       }
 
       .forge-text-link {
-        bottom: 16px;
+        bottom: 0;
         left: 16px;
+        overflow: hidden;
         position: absolute;
+        isolation: isolate;
+      }
+
+      .forge-text-link::after {
+        background: linear-gradient(90deg, transparent, rgba(244, 211, 143, 0.34), transparent);
+        content: "";
+        inset: 0;
+        position: absolute;
+        transform: translateX(-120%) skewX(-18deg);
+        transition: transform 420ms ease;
+        z-index: -1;
+      }
+
+      .forge-text-link:hover::after {
+        transform: translateX(120%) skewX(-18deg);
       }
 
       .forge-action-bar {

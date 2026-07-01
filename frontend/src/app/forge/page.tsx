@@ -353,8 +353,7 @@ function ForgeHero({ stats }: { stats: ForgeDashboard["stats"] }) {
         <strong>A workshop for projects, inventions, stories, systems, and sparks of inspiration.</strong>
       </div>
       <div className="forge-plaque" aria-hidden="true">
-        <b>The Forge</b>
-        <small>Where ideas become reality</small>
+        <Image src="/images/Forge/new_forge_plaque.png" alt="" fill sizes="280px" className="forge-plaque-image" />
       </div>
       <div className="forge-stat-strip">
         <Stat label="Active Projects" value={stats.active_projects} Icon={FolderKanban} />
@@ -835,6 +834,12 @@ function relativeDate(value?: string | null) {
 function ForgeStyles() {
   return (
     <style jsx global>{`
+      @font-face {
+        font-family: "Iron And Brine Hero";
+        src: url("/fonts/iron-and-brine/Iron & Brine.ttf") format("truetype");
+        font-display: swap;
+      }
+
       .forge-shell {
         --forge-bg: #030404;
         --forge-panel: rgba(6, 8, 7, 0.88);
@@ -968,10 +973,11 @@ function ForgeStyles() {
 
       .forge-hero-copy h1 {
         color: #f1d8a3;
-        font-size: clamp(3rem, 5.6vw, 6.1rem);
-        font-weight: 900;
-        letter-spacing: 0.03em;
-        line-height: 0.88;
+        font-family: "Iron And Brine Hero", Georgia, serif;
+        font-size: clamp(3.25rem, 5.55vw, 6.15rem);
+        font-weight: 400;
+        letter-spacing: 0.01em;
+        line-height: 0.96;
         text-shadow: 0 4px 0 rgba(58, 31, 15, 0.82), 0 0 24px rgba(212, 173, 101, 0.28);
         text-transform: uppercase;
       }
@@ -1012,56 +1018,18 @@ function ForgeStyles() {
       }
 
       .forge-plaque {
-        align-items: center;
-        background:
-          linear-gradient(180deg, rgba(50, 42, 31, 0.94), rgba(13, 15, 14, 0.94)),
-          repeating-linear-gradient(90deg, rgba(255,255,255,0.04) 0 1px, transparent 1px 16px);
-        border: 1px solid rgba(212, 173, 101, 0.48);
-        border-radius: 8px;
-        box-shadow:
-          inset 0 0 24px rgba(212, 173, 101, 0.08),
-          0 12px 30px rgba(0, 0, 0, 0.46),
-          0 0 24px rgba(196, 111, 45, 0.14);
-        color: #f4d38f;
-        display: grid;
-        justify-items: center;
-        left: 51%;
-        min-width: 250px;
-        padding: 11px 22px 9px;
+        filter: drop-shadow(0 14px 24px rgba(0, 0, 0, 0.5)) drop-shadow(0 0 20px rgba(196, 111, 45, 0.18));
+        height: 94px;
+        left: 55.8%;
         position: absolute;
-        top: 18px;
+        top: 14px;
         transform: translateX(-50%);
+        width: min(306px, 22vw);
+        z-index: 2;
       }
 
-      .forge-plaque::before,
-      .forge-plaque::after {
-        background: #1c130b;
-        border: 1px solid rgba(212, 173, 101, 0.38);
-        border-radius: 999px;
-        content: "";
-        height: 8px;
-        position: absolute;
-        top: 10px;
-        width: 8px;
-      }
-
-      .forge-plaque::before { left: 12px; }
-      .forge-plaque::after { right: 12px; }
-
-      .forge-plaque b {
-        font-size: 1.42rem;
-        letter-spacing: 0.09em;
-        line-height: 1;
-        text-transform: uppercase;
-      }
-
-      .forge-plaque small {
-        color: #f0a44d;
-        font-size: 0.72rem;
-        font-weight: 700;
-        letter-spacing: 0.14em;
-        margin-top: 4px;
-        text-transform: uppercase;
+      .forge-plaque-image {
+        object-fit: contain;
       }
 
       .forge-stat-strip {
@@ -1196,7 +1164,7 @@ function ForgeStyles() {
         min-height: 180px;
         isolation: isolate;
         overflow: hidden;
-        padding: 34px 18px 18px 28px;
+        padding: 34px 16px 18px 32px;
         position: relative;
         text-align: left;
         transition: transform 180ms, filter 180ms;
@@ -1237,7 +1205,7 @@ function ForgeStyles() {
         border-bottom: 0;
         border-radius: 8px 8px 0 0;
         height: 15px;
-        left: 38px;
+        left: 42px;
         opacity: 0.58;
         position: absolute;
         top: 20px;
@@ -1248,37 +1216,31 @@ function ForgeStyles() {
         align-items: center;
         border-bottom: 1px solid rgba(212, 173, 101, 0.18);
         display: flex;
-        gap: 9px;
-        margin-left: 12px;
+        gap: 10px;
+        margin-left: 18px;
         padding-bottom: 8px;
       }
 
       .forge-folder-icon {
         align-items: center;
-        background:
-          radial-gradient(circle at 40% 35%, color-mix(in srgb, var(--category-accent) 24%, transparent), transparent 68%),
-          rgba(0, 0, 0, 0.28);
-        border: 1px solid color-mix(in srgb, var(--category-accent) 42%, transparent);
-        border-radius: 999px;
         color: var(--category-accent);
         display: inline-flex;
         flex: 0 0 auto;
-        height: 44px;
+        height: 40px;
         justify-content: center;
-        width: 44px;
+        width: 40px;
       }
 
       .forge-folder.active .forge-folder-icon,
       .forge-folder:hover .forge-folder-icon {
         color: var(--category-accent);
-        box-shadow: 0 0 18px color-mix(in srgb, var(--category-accent) 34%, transparent);
       }
 
       .forge-category-asset {
         filter: drop-shadow(0 0 8px color-mix(in srgb, var(--category-accent) 42%, transparent));
-        height: 38px;
+        height: 36px;
         object-fit: contain;
-        width: 38px;
+        width: 36px;
       }
 
       .forge-folder strong {
@@ -1301,11 +1263,11 @@ function ForgeStyles() {
 
       .forge-folder p {
         color: rgba(234, 223, 199, 0.74);
-        font-size: 0.74rem;
-        line-height: 1.25;
-        margin-left: 12px;
+        font-size: 0.72rem;
+        line-height: 1.23;
+        margin-left: 18px;
         margin-top: 9px;
-        max-width: calc(100% - 10px);
+        max-width: calc(100% - 20px);
       }
 
       .forge-filter-panel {
@@ -1617,7 +1579,8 @@ function ForgeStyles() {
         margin: 16px auto 0;
         max-width: 430px;
         min-height: 246px;
-        padding: 24px 28px;
+        padding: 34px 30px 24px 76px;
+        position: relative;
         text-align: center;
       }
 
@@ -1626,22 +1589,26 @@ function ForgeStyles() {
         color: #f4d38f;
         display: inline-flex;
         filter: drop-shadow(0 0 18px rgba(212, 173, 101, 0.32));
-        height: 64px;
+        height: 58px;
         justify-content: center;
-        width: 64px;
+        left: 30px;
+        position: absolute;
+        top: 45px;
+        transform: rotate(-43deg);
+        width: 58px;
       }
 
       .spark-bulb img {
-        height: 58px;
+        height: 52px;
         object-fit: contain;
-        width: 58px;
+        width: 52px;
       }
 
       .spark-note blockquote {
         color: #e9c590;
         font-size: clamp(1.22rem, 1.7vw, 1.85rem);
         line-height: 1.32;
-        margin-top: 10px;
+        margin-top: 20px;
         transform: rotate(-2deg);
         text-shadow: 0 2px 8px rgba(0, 0, 0, 0.58);
       }

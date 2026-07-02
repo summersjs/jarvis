@@ -732,6 +732,7 @@ function ForgeModal({
   onSave,
   onChange,
   onGoalSelect,
+  onProjectSelect,
 }: {
   modal: ModalType;
   form: FormState;
@@ -742,6 +743,7 @@ function ForgeModal({
   onSave: () => void;
   onChange: (key: keyof FormState, value: string) => void;
   onGoalSelect: (goal: ForgeGoalOption | null) => void;
+  onProjectSelect: (project: ForgeProject | null) => void;
 }) {
   if (!modal) return null;
   const title = modal === "project" ? "New Project" : modal === "spark" ? "New Spark" : modal === "note" ? "New Note" : modal === "file" ? "Upload File" : modal === "roadmap" ? "Roadmap" : "Templates";

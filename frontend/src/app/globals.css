@@ -1274,6 +1274,14 @@ body {
   color: rgb(220, 252, 231);
 }
 
+.system-status-card span {
+  display: block;
+  margin-top: 0.25rem;
+  color: rgba(134, 239, 172, 0.58);
+  font-size: 0.74rem;
+  line-height: 1.25;
+}
+
 .system-status-card.is-pending {
   border-color: rgba(250, 204, 21, 0.26);
 }
@@ -1281,6 +1289,63 @@ body {
 .system-status-card.is-pending svg,
 .system-status-card.is-pending strong {
   color: rgb(253, 224, 71);
+}
+
+.system-status-card.is-offline {
+  border-color: rgba(248, 113, 113, 0.3);
+  background: rgba(127, 29, 29, 0.14);
+}
+
+.system-status-card.is-offline svg,
+.system-status-card.is-offline strong {
+  color: rgb(252, 165, 165);
+}
+
+.animate-food-vault-drawer-left {
+  animation: food-vault-drawer-left 220ms ease-out;
+}
+
+.animate-food-vault-drawer-right {
+  animation: food-vault-drawer-right 220ms ease-out;
+}
+
+.food-vault-out-stock-badge {
+  border-color: rgba(248, 113, 113, 0.75);
+  background: rgba(127, 29, 29, 0.18);
+  color: rgb(254, 202, 202);
+  box-shadow: 0 0 18px rgba(248, 113, 113, 0.22);
+  animation: food-vault-red-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes food-vault-drawer-left {
+  from {
+    opacity: 0;
+    transform: translateX(-28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes food-vault-drawer-right {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes food-vault-red-pulse {
+  0%, 100% {
+    box-shadow: 0 0 14px rgba(248, 113, 113, 0.18);
+  }
+  50% {
+    box-shadow: 0 0 26px rgba(248, 113, 113, 0.42);
+  }
 }
 
 .history-badge {

@@ -34,6 +34,8 @@ type NutritionTargets = {
   daily_fat_target?: number | null;
 };
 
+type DrawerSide = "left" | "right";
+
 const emptyItem = {
   name: "",
   brand: "",
@@ -52,11 +54,16 @@ const emptyItem = {
   is_favorite: false,
 };
 
+type FoodItemForm = typeof emptyItem;
+
 export default function FoodVaultPage() {
   const [items, setItems] = useState<FoodItem[]>([]);
   const [targets, setTargets] = useState<NutritionTargets | null>(null);
   const [form, setForm] = useState(emptyItem);
+  const [editForm, setEditForm] = useState(emptyItem);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [editingItem, setEditingItem] = useState<FoodItem | null>(null);
+  const [drawerSide, setDrawerSide] = useState<DrawerSide>("right");
   const [targetForm, setTargetForm] = useState({
     daily_calorie_target: "",
     daily_protein_target: "",
@@ -137,26 +144,42 @@ export default function FoodVaultPage() {
     }
   }
 
-  function editItem(item: FoodItem) {
+  async function saveEditedItem() {
+    setError("");
+    setMessage("");
+    if (!editingItemId) return;
+    if (!editForm.name.trim()) {
+      setError("Food item name is required.");
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/food-vault/items/${editingItemId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        body: JSON.stringify(foodFormPayload(editForm)),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to save food item.");
+      closeEditDrawer();
+      setMessage("Food Vault item updated.");
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save food item.");
+    }
+  }
+
+  function editItem(item: FoodItem, side: DrawerSide) {
     setEditingItemId(item.id);
-    setForm({
-      name: item.name || "",
-      brand: item.brand || "",
-      serving_size: item.serving_size || "",
-      calories: valueString(item.calories),
-      protein_g: valueString(item.protein_g),
-      carbs_g: valueString(item.carbs_g),
-      fat_g: valueString(item.fat_g),
-      package_quantity: valueString(item.package_quantity ?? 1),
-      current_quantity: valueString(item.current_quantity ?? 0),
-      low_stock_threshold: valueString(item.low_stock_threshold ?? 0),
-      estimated_price: valueString(item.estimated_price),
-      default_store: item.default_store || "",
-      shopping_category: item.shopping_category || "",
-      notes: item.notes || "",
-      is_favorite: Boolean(item.is_favorite),
-    });
-    setMessage("Food item loaded for editing.");
+    setEditingItem(item);
+    setDrawerSide(side);
+    setEditForm(foodItemToForm(item));
+    setMessage("");
+  }
+
+  function closeEditDrawer() {
+    setEditingItemId(null);
+    setEditingItem(null);
+    setEditForm(emptyItem);
   }
 
   async function deleteItem(item: FoodItem) {
@@ -173,8 +196,7 @@ export default function FoodVaultPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Failed to delete food item.");
       if (editingItemId === item.id) {
-        setEditingItemId(null);
-        setForm(emptyItem);
+        closeEditDrawer();
       }
       setMessage("Food Vault item deleted.");
       await loadData();
@@ -270,7 +292,7 @@ export default function FoodVaultPage() {
         <section className="mb-6 rounded-2xl border border-green-500/30 bg-zinc-950 p-5">
           <div className="mb-4 flex items-center gap-3">
             <Plus className="h-5 w-5 text-green-300" />
-            <h2 className="text-sm font-bold uppercase tracking-[0.22em] text-green-200">{editingItemId ? "Edit Food Item" : "Add Food Item"}</h2>
+            <h2 className="text-sm font-bold uppercase tracking-[0.22em] text-green-200">Add Food Item</h2>
           </div>
           <div className="grid gap-3 md:grid-cols-4">
             {Object.entries({
@@ -292,19 +314,7 @@ export default function FoodVaultPage() {
               <Input key={key} label={label} value={String(form[key as keyof typeof form])} onChange={(value) => setForm((prev) => ({ ...prev, [key]: value }))} />
             ))}
             <button onClick={() => setForm((prev) => ({ ...prev, is_favorite: !prev.is_favorite }))} className={`command-action-button border px-4 py-3 ${form.is_favorite ? "border-green-300/60 bg-green-400/15 text-green-100" : "border-green-500/25 text-green-300"}`}>Favorite: {form.is_favorite ? "Yes" : "No"}</button>
-            <button onClick={saveItem} className="command-action-button command-action-green border border-green-400/40 bg-green-400/10 px-4 py-3 text-green-100">{editingItemId ? "Update Food" : "Save Food"}</button>
-            {editingItemId && (
-              <button
-                onClick={() => {
-                  setEditingItemId(null);
-                  setForm(emptyItem);
-                  setMessage("");
-                }}
-                className="command-action-button border border-cyan-300/35 px-4 py-3 text-cyan-100"
-              >
-                Cancel Edit
-              </button>
-            )}
+            <button onClick={saveItem} className="command-action-button command-action-green border border-green-400/40 bg-green-400/10 px-4 py-3 text-green-100">Save Food</button>
           </div>
         </section>
 
@@ -314,19 +324,23 @@ export default function FoodVaultPage() {
             <h2 className="text-sm font-bold uppercase tracking-[0.22em] text-green-200">Inventory</h2>
           </div>
           <div className="grid gap-3 lg:grid-cols-2">
-            {sortFoodItemsByName(items).map((item) => (
+            {sortFoodItemsByName(items).map((item, index) => {
+              const side: DrawerSide = index % 2 === 0 ? "left" : "right";
+              const itemStateClass = foodItemCardStateClass(item);
+              const outOfStock = Number(item.current_quantity || 0) <= 0;
+              return (
               <div
                 key={item.id}
                 role="button"
                 tabIndex={0}
-                onClick={() => editItem(item)}
+                onClick={() => editItem(item, side)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
-                    editItem(item);
+                    editItem(item, side);
                   }
                 }}
-                className={`rounded-xl border bg-black p-4 text-left transition hover:border-green-300/50 hover:shadow-[0_0_22px_rgba(34,197,94,0.18)] ${Number(item.current_quantity || 0) <= Number(item.low_stock_threshold || 0) ? "border-amber-300/45" : "border-green-500/20"}`}
+                className={`rounded-xl border bg-black p-4 text-left transition hover:border-green-300/50 hover:shadow-[0_0_22px_rgba(34,197,94,0.18)] ${itemStateClass}`}
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
@@ -334,7 +348,7 @@ export default function FoodVaultPage() {
                     <p className="mt-1 text-sm text-green-300/65">{item.serving_size || "Serving not set"}</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="rounded-full border border-green-400/30 px-3 py-1 text-xs uppercase tracking-[0.14em]">
+                    <span className={`rounded-full border px-3 py-1 text-xs uppercase tracking-[0.14em] ${outOfStock ? "food-vault-out-stock-badge" : "border-green-400/30"}`}>
                       {item.current_quantity ?? 0} left
                     </span>
                     <button
@@ -389,10 +403,23 @@ export default function FoodVaultPage() {
                   {item.estimated_price ? ` · $${Number(item.estimated_price).toFixed(2)}` : ""}
                 </p>
               </div>
-            ))}
+            )})}
           </div>
         </section>
       </div>
+
+      {editingItem && (
+        <FoodItemEditDrawer
+          item={editingItem}
+          side={drawerSide}
+          form={editForm}
+          onChange={(key, value) => setEditForm((prev) => ({ ...prev, [key]: value }))}
+          onToggleFavorite={() => setEditForm((prev) => ({ ...prev, is_favorite: !prev.is_favorite }))}
+          onSave={saveEditedItem}
+          onCancel={closeEditDrawer}
+          onDelete={() => deleteItem(editingItem)}
+        />
+      )}
     </main>
   );
 }
@@ -418,6 +445,118 @@ function TargetCard({ label, value, unit }: { label: string; value?: number | nu
   );
 }
 
+function FoodItemEditDrawer({
+  item,
+  side,
+  form,
+  onChange,
+  onToggleFavorite,
+  onSave,
+  onCancel,
+  onDelete,
+}: {
+  item: FoodItem;
+  side: DrawerSide;
+  form: FoodItemForm;
+  onChange: (key: keyof FoodItemForm, value: string) => void;
+  onToggleFavorite: () => void;
+  onSave: () => void;
+  onCancel: () => void;
+  onDelete: () => void;
+}) {
+  const fields: Array<[keyof FoodItemForm, string]> = [
+    ["name", "Name"],
+    ["brand", "Brand"],
+    ["serving_size", "Serving Size"],
+    ["calories", "Calories"],
+    ["protein_g", "Protein g"],
+    ["carbs_g", "Carbs g"],
+    ["fat_g", "Fat g"],
+    ["package_quantity", "Package Qty"],
+    ["current_quantity", "Current Qty"],
+    ["low_stock_threshold", "Low Stock"],
+    ["estimated_price", "Price"],
+    ["default_store", "Store"],
+    ["shopping_category", "Category"],
+    ["notes", "Notes"],
+  ];
+  const sideClass = side === "left"
+    ? "left-0 border-r animate-food-vault-drawer-left"
+    : "right-0 border-l animate-food-vault-drawer-right";
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm" onClick={onCancel}>
+      <aside
+        className={`absolute top-0 h-full w-full max-w-md overflow-y-auto border-cyan-300/35 bg-[linear-gradient(145deg,rgba(6,12,10,0.98),rgba(10,20,18,0.96)_45%,rgba(3,7,7,0.98))] p-6 text-green-200 shadow-[0_0_55px_rgba(34,211,238,0.18)] ${sideClass}`}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.26em] text-cyan-200/70">
+              Food Vault Record
+            </p>
+            <h2 className="mt-3 text-2xl font-bold text-green-100">{foodDisplayName(item)}</h2>
+            <p className="mt-2 text-sm text-green-300/65">
+              Edit macros, inventory, shopping metadata, and notes.
+            </p>
+          </div>
+          <button
+            onClick={onCancel}
+            className="command-action-button border border-cyan-300/35 bg-cyan-300/10 p-2 text-cyan-100"
+            aria-label="Close food edit drawer"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="grid gap-4">
+          {fields.map(([key, label]) => (
+            <Input
+              key={key}
+              label={label}
+              value={String(form[key])}
+              onChange={(value) => onChange(key, value)}
+            />
+          ))}
+          <button
+            onClick={onToggleFavorite}
+            className={`command-action-button border px-4 py-3 ${form.is_favorite ? "border-green-300/60 bg-green-400/15 text-green-100" : "border-green-500/25 text-green-300"}`}
+          >
+            Favorite: {form.is_favorite ? "Yes" : "No"}
+          </button>
+        </div>
+
+        <div className="mt-6 grid gap-3 sm:grid-cols-2">
+          <button
+            onClick={onSave}
+            className="command-action-button command-action-green border border-green-400/40 bg-green-400/10 px-4 py-3 text-sm font-bold uppercase tracking-[0.16em] text-green-100"
+          >
+            Save Changes
+          </button>
+          <button
+            onClick={onCancel}
+            className="command-action-button border border-cyan-300/35 bg-cyan-300/10 px-4 py-3 text-sm font-bold uppercase tracking-[0.16em] text-cyan-100"
+          >
+            Cancel
+          </button>
+        </div>
+
+        <div className="mt-8 rounded-2xl border border-red-400/25 bg-red-500/10 p-4">
+          <p className="text-xs font-bold uppercase tracking-[0.22em] text-red-200/75">
+            Danger Zone
+          </p>
+          <button
+            onClick={onDelete}
+            className="command-action-button mt-4 w-full border border-red-400/40 bg-red-500/10 px-4 py-3 text-sm font-bold uppercase tracking-[0.16em] text-red-100"
+          >
+            Delete Food Item
+          </button>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
 function Mini({ label, value, unit = "" }: { label: string; value?: number | null; unit?: string }) {
   return (
     <div className="rounded-lg border border-green-500/20 bg-zinc-950 px-3 py-2">
@@ -429,6 +568,73 @@ function Mini({ label, value, unit = "" }: { label: string; value?: number | nul
 
 function foodDisplayName(item: FoodItem) {
   return [item.brand, item.name].filter(Boolean).join(" ");
+}
+
+function foodItemToForm(item: FoodItem): FoodItemForm {
+  return {
+    name: item.name || "",
+    brand: item.brand || "",
+    serving_size: item.serving_size || "",
+    calories: valueString(item.calories),
+    protein_g: valueString(item.protein_g),
+    carbs_g: valueString(item.carbs_g),
+    fat_g: valueString(item.fat_g),
+    package_quantity: valueString(item.package_quantity ?? 1),
+    current_quantity: valueString(item.current_quantity ?? 0),
+    low_stock_threshold: valueString(item.low_stock_threshold ?? 0),
+    estimated_price: valueString(item.estimated_price),
+    default_store: item.default_store || "",
+    shopping_category: item.shopping_category || "",
+    notes: item.notes || "",
+    is_favorite: Boolean(item.is_favorite),
+  };
+}
+
+function foodFormPayload(itemForm: FoodItemForm) {
+  return {
+    user_id: USER_ID,
+    name: itemForm.name.trim(),
+    brand: itemForm.brand.trim() || null,
+    serving_size: itemForm.serving_size.trim() || null,
+    calories: numberOrNull(itemForm.calories),
+    protein_g: numberOrNull(itemForm.protein_g),
+    carbs_g: numberOrNull(itemForm.carbs_g),
+    fat_g: numberOrNull(itemForm.fat_g),
+    package_quantity: numberOrNull(itemForm.package_quantity) ?? 1,
+    current_quantity: numberOrNull(itemForm.current_quantity) ?? 0,
+    low_stock_threshold: numberOrNull(itemForm.low_stock_threshold) ?? 0,
+    estimated_price: numberOrNull(itemForm.estimated_price),
+    default_store: itemForm.default_store.trim() || null,
+    shopping_category: itemForm.shopping_category.trim() || null,
+    notes: itemForm.notes.trim() || null,
+    is_favorite: itemForm.is_favorite,
+  };
+}
+
+function isFoodItemComplete(item: FoodItem) {
+  const requiredValues = [
+    item.name,
+    item.brand,
+    item.serving_size,
+    item.calories,
+    item.protein_g,
+    item.carbs_g,
+    item.fat_g,
+    item.package_quantity,
+    item.current_quantity,
+    item.low_stock_threshold,
+    item.estimated_price,
+    item.default_store,
+    item.shopping_category,
+  ];
+  return requiredValues.every((value) => value !== null && value !== undefined && String(value).trim() !== "");
+}
+
+function foodItemCardStateClass(item: FoodItem) {
+  if (isFoodItemComplete(item)) {
+    return "border-green-400/55 shadow-[0_0_18px_rgba(34,197,94,0.12)]";
+  }
+  return "border-amber-300/55 shadow-[0_0_18px_rgba(250,204,21,0.1)]";
 }
 
 function sortFoodItemsByName(items: FoodItem[]) {

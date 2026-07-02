@@ -56,7 +56,8 @@ def summarize_event_for_speech(event: dict, include_date: bool = False) -> str:
 
     if include_date:
         start_dt = event.get("start", {}).get("dateTime")
-        date_text = format_date_local(start_dt)
+        start_date = event.get("start", {}).get("date")
+        date_text = format_date_local(start_dt) if start_dt else (start_date or "unknown date")
         return f"{summary} on {date_text} from {time_range}{location_text}"
 
     return f"{summary} from {time_range}{location_text}"

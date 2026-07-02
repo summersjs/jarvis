@@ -27,7 +27,6 @@ import {
   Utensils,
   UserRound,
   Wifi,
-  WifiOff,
   Zap,
   type LucideIcon,
 } from "lucide-react";
@@ -206,6 +205,14 @@ type StatusResponse = {
   brain: string;
   user: string;
   clearance: string;
+  checked_at?: string;
+  uptime_seconds?: number;
+  checks?: {
+    label: string;
+    state: "online" | "pending" | "offline";
+    detail?: string | null;
+    latency_ms?: number | null;
+  }[];
 };
 
 type CalendarEvent = {
@@ -1278,23 +1285,47 @@ function SystemStatusPanel({
   status: StatusResponse;
   dashboard: DashboardResponse | null;
 }) {
-  // TODO: Replace mock/pending values with real backend health checks.
-  const statusItems = [
-    { label: "Systems", value: status.systems || "Online", Icon: Server, state: "online" },
-    { label: "Brain", value: status.brain || "Gemini 1.5 Flash", Icon: BrainCircuit, state: "online" },
-    { label: "User", value: status.user || "John Summers Sr", Icon: UserRound, state: "online" },
-    { label: "Clearance", value: status.clearance || "Active", Icon: ShieldCheck, state: "online" },
-    { label: "Local API", value: "Online", Icon: Wifi, state: "online" },
-    { label: "Ollama", value: "Pending", Icon: WifiOff, state: "pending" },
-    {
-      label: "Calendar Sync",
-      value: dashboard?.calendar.today.status === "ok" ? "Online" : "Offline",
-      Icon: CalendarDays,
-      state: dashboard?.calendar.today.status === "ok" ? "online" : "pending",
-    },
-    { label: "Meal Planner", value: "Ready", Icon: DatabaseZap, state: "online" },
-    { label: "Shopping List", value: "Ready", Icon: CheckCircle2, state: "online" },
-  ];
+  const realChecks = status.checks || [];
+  const checkIcon = (label: string) => {
+    const normalized = label.toLowerCase();
+    if (normalized.includes("api")) return Server;
+    if (normalized.includes("environment")) return ShieldCheck;
+    if (normalized.includes("database") || normalized.includes("supabase")) return DatabaseZap;
+    if (normalized.includes("goal")) return Target;
+    if (normalized.includes("forge")) return Hammer;
+    if (normalized.includes("calendar")) return CalendarDays;
+    if (normalized.includes("meal")) return Utensils;
+    if (normalized.includes("health")) return HeartPulse;
+    if (normalized.includes("food")) return DatabaseZap;
+    if (normalized.includes("shopping")) return ShoppingCart;
+    return Wifi;
+  };
+  const statusItems = realChecks.length
+    ? [
+        { label: "Systems", value: status.systems || "Online", Icon: Server, state: status.systems === "Online" ? "online" : "pending", detail: `${realChecks.filter((check) => check.state === "online").length}/${realChecks.length} checks online` },
+        { label: "LLM Layer", value: status.brain || "Pending", Icon: BrainCircuit, state: "pending", detail: "Kept planned for 07/20/2026" },
+        { label: "Clearance", value: status.clearance || "Active", Icon: ShieldCheck, state: "online", detail: status.user || "John Summers Sr" },
+        ...realChecks.map((check) => ({
+          label: check.label,
+          value: check.state === "online" ? "Online" : check.state === "pending" ? "Pending" : "Offline",
+          Icon: checkIcon(check.label),
+          state: check.state,
+          detail: `${check.detail || "No detail"}${check.latency_ms != null ? ` · ${check.latency_ms}ms` : ""}`,
+        })),
+      ]
+    : [
+        { label: "Systems", value: status.systems || "Online", Icon: Server, state: "online", detail: "Backend online" },
+        { label: "LLM Layer", value: status.brain || "Pending", Icon: BrainCircuit, state: "pending", detail: "Kept planned for 07/20/2026" },
+        { label: "User", value: status.user || "John Summers Sr", Icon: UserRound, state: "online", detail: "Profile loaded" },
+        { label: "Clearance", value: status.clearance || "Active", Icon: ShieldCheck, state: "online", detail: "API key accepted" },
+        {
+          label: "Calendar Sync",
+          value: dashboard?.calendar.today.status === "ok" ? "Online" : "Offline",
+          Icon: CalendarDays,
+          state: dashboard?.calendar.today.status === "ok" ? "online" : "pending",
+          detail: dashboard?.calendar.today.spoken_response || "Calendar status unavailable",
+        },
+      ];
 
   return (
     <section className="hud-panel mb-6">
@@ -1306,18 +1337,20 @@ function SystemStatusPanel({
       </div>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {statusItems.map((item) => (
-          <div key={item.label} className={`system-status-card ${item.state === "pending" ? "is-pending" : ""}`}>
+          <div key={item.label} className={`system-status-card ${item.state === "pending" ? "is-pending" : ""} ${item.state === "offline" ? "is-offline" : ""}`}>
             <item.Icon className="h-5 w-5" />
             <div>
               <p>{item.label}</p>
               <strong>{item.value}</strong>
+              {item.detail && <span>{item.detail}</span>}
             </div>
           </div>
         ))}
       </div>
       <p className="mt-4 flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-yellow-300/70">
         <AlertTriangle className="h-4 w-4" />
-        Some health checks are mocked pending backend probes.
+        LLM reasoning remains pending until the planned 07/20/2026 milestone.
+        {status.checked_at ? ` Last check: ${new Date(status.checked_at).toLocaleTimeString()}.` : ""}
       </p>
     </section>
   );

@@ -3,7 +3,11 @@ from math import ceil
 
 from backend.core.config import LOCAL_TZ
 from backend.db.supabase_client import supabase
-from backend.integrations.google_calendar import create_calendar_event
+from backend.integrations.google_calendar import (
+    create_calendar_event,
+    delete_calendar_event,
+    update_calendar_event,
+)
 from backend.schemas.goal import (
     GoalCreate,
     GoalLogCreate,
@@ -138,6 +142,8 @@ def create_goal_log(goal_id: str, payload: GoalLogCreate):
         return None
 
     value = payload.value if payload.value is not None else 1
+    mission_type = normalize_goal_mission_type(goal)
+    prior_logs = list_goal_logs(goal_id)
     response = (
         supabase
         .table("goal_logs")
@@ -157,28 +163,27 @@ def create_goal_log(goal_id: str, payload: GoalLogCreate):
 
     created_log = response.data[0]
     metadata = payload.metadata or {}
-    mission_type = normalize_goal_mission_type(goal)
-    if mission_type == "standard" and payload.log_type == "planned" and payload.planned_for:
-        planned_time = metadata.get("planned_time") or goal.get("planned_time")
-        try:
-            event = create_calendar_event(
-                summary=goal.get("title") or "Jarvis planned standard",
-                date_str=payload.planned_for,
-                time_str=planned_time,
-                notes=payload.notes or goal.get("description"),
+    log_type = (payload.log_type or "").lower()
+    if mission_type == "standard" and payload.planned_for:
+        if log_type == "planned":
+            metadata = sync_planned_standard_calendar_event(
+                goal=goal,
+                log=created_log,
+                prior_logs=prior_logs,
+                planned_for=payload.planned_for,
+                planned_time=metadata.get("planned_time") or goal.get("planned_time"),
+                notes=payload.notes,
+                metadata=metadata,
             )
-            metadata = {
-                **metadata,
-                "calendar_event_id": event.get("id"),
-                "calendar_event_link": event.get("htmlLink"),
-            }
-            supabase.table("goal_logs").update({"metadata": metadata}).eq("id", created_log["id"]).execute()
             created_log["metadata"] = metadata
-        except Exception as exc:
-            metadata = {
-                **metadata,
-                "calendar_error": str(exc),
-            }
+        elif log_type in {"completed", "missed"}:
+            metadata = resolve_planned_standard_calendar_event(
+                goal=goal,
+                action=log_type,
+                planned_for=payload.planned_for,
+                logs=prior_logs,
+                metadata=metadata,
+            )
             supabase.table("goal_logs").update({"metadata": metadata}).eq("id", created_log["id"]).execute()
             created_log["metadata"] = metadata
 
@@ -193,13 +198,18 @@ def create_goal_log(goal_id: str, payload: GoalLogCreate):
         next_value = sum_log_values_for_period(logs, period_start, period_end)
         update_fields = {"current_value": next_value}
         if payload.log_type == "planned":
+            planned_time = (payload.metadata or {}).get("planned_time") or goal.get("planned_time")
             update_fields["status"] = "planned"
             update_fields["planned_date"] = payload.planned_for
+            update_fields["planned_time"] = planned_time
         elif payload.log_type == "missed":
             update_fields["status"] = "active"
             update_fields["planned_date"] = None
+            update_fields["planned_time"] = None
         elif float(goal.get("target_value") or 0) > 0 and next_value >= float(goal.get("target_value") or 0):
             update_fields["status"] = "complete"
+            update_fields["planned_date"] = None
+            update_fields["planned_time"] = None
         else:
             update_fields["status"] = "active"
         supabase.table("goals").update(update_fields).eq("id", goal_id).execute()
@@ -229,6 +239,181 @@ def update_goal_log(log_id: str, payload: GoalLogUpdate):
 def delete_goal_log(log_id: str):
     response = supabase.table("goal_logs").delete().eq("id", log_id).execute()
     return response.data or []
+
+
+def sync_planned_standard_calendar_event(
+    goal: dict,
+    log: dict,
+    prior_logs: list[dict],
+    planned_for: str,
+    planned_time: str | None,
+    notes: str | None,
+    metadata: dict,
+) -> dict:
+    metadata = dict(metadata or {})
+    previous_plan = latest_planned_log_for_date(prior_logs, planned_for)
+    previous_metadata = previous_plan.get("metadata") if previous_plan else {}
+    previous_event_id = (previous_metadata or {}).get("calendar_event_id")
+    summary = f"Jarvis Planned Standard: {goal.get('title') or 'Planned standard'}"
+    description = build_planned_standard_calendar_description(goal, notes)
+    common_metadata = {
+        **metadata,
+        "planned_time": planned_time,
+        "calendar_sync_attempted_at": datetime.now(LOCAL_TZ).isoformat(),
+        "calendar_reminders": [1440, 60],
+    }
+
+    try:
+        if previous_event_id:
+            event = update_calendar_event(
+                event_id=previous_event_id,
+                summary=summary,
+                date_str=planned_for,
+                time_str=planned_time,
+                notes=description,
+                reminders=[1440, 60],
+                extended_properties={
+                    "jarvis_type": "planned_standard",
+                    "goal_id": goal.get("id"),
+                    "goal_log_id": log.get("id"),
+                },
+            )
+            action = "updated"
+        else:
+            event = create_calendar_event(
+                summary=summary,
+                date_str=planned_for,
+                time_str=planned_time,
+                notes=description,
+                reminders=[1440, 60],
+                extended_properties={
+                    "jarvis_type": "planned_standard",
+                    "goal_id": goal.get("id"),
+                    "goal_log_id": log.get("id"),
+                },
+            )
+            action = "created"
+
+        synced_metadata = {
+            **common_metadata,
+            "calendar_sync_status": "synced",
+            "calendar_action": action,
+            "calendar_event_id": event.get("id"),
+            "calendar_event_link": event.get("htmlLink"),
+            "calendar_event_summary": event.get("summary"),
+            "calendar_error": None,
+        }
+        supabase.table("goal_logs").update({"metadata": synced_metadata}).eq("id", log["id"]).execute()
+
+        if previous_plan and previous_plan.get("id") != log.get("id"):
+            mark_planned_log_superseded(previous_plan, log.get("id"), event.get("id"))
+
+        return synced_metadata
+    except Exception as exc:
+        failed_metadata = {
+            **common_metadata,
+            "calendar_sync_status": "failed",
+            "calendar_error": str(exc),
+        }
+        supabase.table("goal_logs").update({"metadata": failed_metadata}).eq("id", log["id"]).execute()
+        return failed_metadata
+
+
+def resolve_planned_standard_calendar_event(
+    goal: dict,
+    action: str,
+    planned_for: str,
+    logs: list[dict],
+    metadata: dict,
+) -> dict:
+    metadata = dict(metadata or {})
+    planned_log = latest_planned_log_for_date(logs, planned_for)
+    planned_metadata = planned_log.get("metadata") if planned_log else {}
+    event_id = (planned_metadata or {}).get("calendar_event_id")
+
+    if not event_id:
+        return {
+            **metadata,
+            "calendar_sync_status": "skipped",
+            "calendar_note": "No linked planned calendar event found.",
+        }
+
+    try:
+        if action == "completed":
+            update_calendar_event(
+                event_id=event_id,
+                summary=f"Completed: {goal.get('title') or 'Planned standard'}",
+                date_str=planned_for,
+                time_str=(planned_metadata or {}).get("planned_time") or goal.get("planned_time"),
+                notes=build_planned_standard_calendar_description(goal, "Completed in Jarvis."),
+                reminders=[],
+                extended_properties={
+                    "jarvis_type": "planned_standard",
+                    "goal_id": goal.get("id"),
+                    "calendar_resolution": "completed",
+                },
+            )
+            resolved_metadata = {
+                **metadata,
+                "calendar_sync_status": "synced",
+                "calendar_action": "marked_completed",
+                "calendar_event_id": event_id,
+            }
+        else:
+            delete_calendar_event(event_id)
+            resolved_metadata = {
+                **metadata,
+                "calendar_sync_status": "synced",
+                "calendar_action": "deleted",
+                "calendar_event_id": event_id,
+            }
+
+        mark_planned_log_resolved(planned_log, action)
+        return resolved_metadata
+    except Exception as exc:
+        return {
+            **metadata,
+            "calendar_sync_status": "failed",
+            "calendar_action": f"{action}_resolution_failed",
+            "calendar_event_id": event_id,
+            "calendar_error": str(exc),
+        }
+
+
+def build_planned_standard_calendar_description(goal: dict, notes: str | None) -> str:
+    description_parts = [
+        "Jarvis planned standard.",
+        f"Goal: {goal.get('title') or 'Unnamed standard'}",
+    ]
+    if notes:
+        description_parts.append(f"Notes: {notes}")
+    if goal.get("description"):
+        description_parts.append(f"Context: {goal.get('description')}")
+    description_parts.append("Reminders: 24 hours and 60 minutes before.")
+    return "\n".join(description_parts)
+
+
+def mark_planned_log_superseded(planned_log: dict, superseded_by_log_id: str | None, event_id: str | None) -> None:
+    if not planned_log:
+        return
+    metadata = dict(planned_log.get("metadata") or {})
+    metadata.update({
+        "calendar_sync_status": "superseded",
+        "superseded_by_log_id": superseded_by_log_id,
+        "calendar_event_id": event_id or metadata.get("calendar_event_id"),
+    })
+    supabase.table("goal_logs").update({"metadata": metadata}).eq("id", planned_log["id"]).execute()
+
+
+def mark_planned_log_resolved(planned_log: dict | None, action: str) -> None:
+    if not planned_log:
+        return
+    metadata = dict(planned_log.get("metadata") or {})
+    metadata.update({
+        "calendar_resolution": action,
+        "calendar_resolved_at": datetime.now(LOCAL_TZ).isoformat(),
+    })
+    supabase.table("goal_logs").update({"metadata": metadata}).eq("id", planned_log["id"]).execute()
 
 
 def list_goal_milestones(goal_id: str):
@@ -705,6 +890,21 @@ def latest_planned_log_for_period(logs: list[dict], period_start: datetime, peri
             continue
         planned_for = parse_date(log.get("planned_for"))
         if planned_for and period_start.date() <= planned_for < period_end.date():
+            planned_logs.append(log)
+    return sorted(planned_logs, key=lambda row: row.get("created_at") or "", reverse=True)[0] if planned_logs else None
+
+
+def latest_planned_log_for_date(logs: list[dict], planned_for: str | None):
+    planned_date = parse_date(planned_for)
+    if not planned_date:
+        return None
+
+    planned_logs = []
+    for log in logs:
+        if (log.get("log_type") or "").lower() not in STANDARD_PLAN_LOG_TYPES:
+            continue
+        log_planned_for = parse_date(log.get("planned_for"))
+        if log_planned_for == planned_date:
             planned_logs.append(log)
     return sorted(planned_logs, key=lambda row: row.get("created_at") or "", reverse=True)[0] if planned_logs else None
 

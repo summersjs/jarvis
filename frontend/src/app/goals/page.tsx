@@ -33,6 +33,7 @@ type GoalLog = {
   notes?: string | null;
   log_type?: string | null;
   planned_for?: string | null;
+  metadata?: Record<string, unknown> | null;
   created_at: string;
 };
 
@@ -146,6 +147,14 @@ type GoalForm = {
   milestones: string;
 };
 
+type MilestoneDrawerState = {
+  goal: Goal;
+  milestone: GoalMilestone;
+  targetDate: string;
+  cost: string;
+  notes: string;
+};
+
 const emptyForm: GoalForm = {
   mission_type: "objective",
   title: "",
@@ -182,11 +191,9 @@ function GoalsPageInner() {
   const [planTimes, setPlanTimes] = useState<Record<string, string>>({});
   const [planNotes, setPlanNotes] = useState<Record<string, string>>({});
   const [milestoneTitles, setMilestoneTitles] = useState<Record<string, string>>({});
-  const [milestonePlanDates, setMilestonePlanDates] = useState<Record<string, string>>({});
-  const [milestoneCosts, setMilestoneCosts] = useState<Record<string, string>>({});
-  const [milestoneNotes, setMilestoneNotes] = useState<Record<string, string>>({});
   const [historyGoal, setHistoryGoal] = useState<Goal | null>(null);
   const [focusedGoalId, setFocusedGoalId] = useState<string | null>(null);
+  const [milestoneDrawer, setMilestoneDrawer] = useState<MilestoneDrawerState | null>(null);
 
   async function loadGoals() {
     try {
@@ -331,7 +338,7 @@ function GoalsPageInner() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Failed to plan standard.");
 
-      setMessage("Standard planned.");
+      setMessage(`Standard planned.${formatCalendarSyncMessage(data.calendar)}`);
       setPlanDates((prev) => ({ ...prev, [goal.id]: "" }));
       setPlanTimes((prev) => ({ ...prev, [goal.id]: "" }));
       setPlanNotes((prev) => ({ ...prev, [goal.id]: "" }));
@@ -369,7 +376,7 @@ function GoalsPageInner() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Failed to complete planned standard.");
 
-      setMessage("Planned standard completed and logged.");
+      setMessage(`Planned standard completed and logged.${formatCalendarSyncMessage(data.calendar)}`);
       await loadGoals();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to complete planned standard.");
@@ -404,7 +411,7 @@ function GoalsPageInner() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Failed to remove planned standard.");
 
-      setMessage("Planned standard removed and logged as missed.");
+      setMessage(`Planned standard removed and logged as missed.${formatCalendarSyncMessage(data.calendar)}`);
       await loadGoals();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to remove planned standard.");
@@ -449,9 +456,6 @@ function GoalsPageInner() {
   async function updateMilestone(milestoneId: string, status: string) {
     setError("");
     setMessage("");
-    const targetDate = milestonePlanDates[milestoneId];
-    const cost = milestoneCosts[milestoneId];
-    const notes = milestoneNotes[milestoneId];
 
     try {
       const res = await fetch(apiUrl(`/goals/milestones/${milestoneId}`), {
@@ -462,9 +466,6 @@ function GoalsPageInner() {
         },
         body: JSON.stringify({
           status,
-          target_date: targetDate || undefined,
-          cost: cost ? Number(cost) : undefined,
-          notes: notes?.trim() || undefined,
         }),
       });
 
@@ -481,6 +482,75 @@ function GoalsPageInner() {
       await loadGoals();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update milestone.");
+    }
+  }
+
+  function openMilestoneDrawer(goal: Goal, milestone: GoalMilestone) {
+    setMilestoneDrawer({
+      goal,
+      milestone,
+      targetDate: milestone.target_date || "",
+      cost: milestone.cost == null ? "" : String(milestone.cost),
+      notes: milestone.notes || "",
+    });
+  }
+
+  async function saveMilestoneDrawer(status?: string) {
+    if (!milestoneDrawer) return;
+    setError("");
+    setMessage("");
+
+    const nextStatus = status || milestoneDrawer.milestone.status || "planned";
+    const costValue = milestoneDrawer.cost.trim();
+    try {
+      const res = await fetch(apiUrl(`/goals/milestones/${milestoneDrawer.milestone.id}`), {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": API_KEY,
+        },
+        body: JSON.stringify({
+          status: nextStatus,
+          target_date: milestoneDrawer.targetDate || null,
+          cost: costValue ? Number(costValue) : null,
+          notes: milestoneDrawer.notes.trim() || null,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to save milestone.");
+
+      setMessage(nextStatus === "complete" ? "Milestone completed and logged." : "Milestone updated.");
+      setMilestoneDrawer(null);
+      await loadGoals();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save milestone.");
+    }
+  }
+
+  async function deleteMilestoneFromDrawer() {
+    if (!milestoneDrawer) return;
+    const confirmed = window.confirm(`Delete "${milestoneDrawer.milestone.title}"? This cannot be undone.`);
+    if (!confirmed) return;
+
+    setError("");
+    setMessage("");
+    try {
+      const res = await fetch(apiUrl(`/goals/milestones/${milestoneDrawer.milestone.id}`), {
+        method: "DELETE",
+        headers: {
+          "x-api-key": API_KEY,
+        },
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to delete milestone.");
+
+      setMessage("Milestone deleted.");
+      setMilestoneDrawer(null);
+      await loadGoals();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete milestone.");
     }
   }
 
@@ -790,12 +860,7 @@ function GoalsPageInner() {
                 onMilestoneTitleChange={(value) => setMilestoneTitles((prev) => ({ ...prev, [goal.id]: value }))}
                 onAddMilestone={() => addMilestone(goal)}
                 onUpdateMilestone={updateMilestone}
-                milestonePlanDates={milestonePlanDates}
-                milestoneCosts={milestoneCosts}
-                milestoneNotes={milestoneNotes}
-                onMilestonePlanDateChange={(milestoneId, value) => setMilestonePlanDates((prev) => ({ ...prev, [milestoneId]: value }))}
-                onMilestoneCostChange={(milestoneId, value) => setMilestoneCosts((prev) => ({ ...prev, [milestoneId]: value }))}
-                onMilestoneNoteChange={(milestoneId, value) => setMilestoneNotes((prev) => ({ ...prev, [milestoneId]: value }))}
+                onEditMilestone={(milestone) => openMilestoneDrawer(goal, milestone)}
                 onArchive={() => archiveGoal(goal.id)}
                 onOpenHistory={() => setHistoryGoal(goal)}
               />
@@ -808,6 +873,16 @@ function GoalsPageInner() {
 
       {historyGoal && (
         <GoalHistoryModal goal={historyGoal} onClose={() => setHistoryGoal(null)} />
+      )}
+      {milestoneDrawer && (
+        <MilestoneEditDrawer
+          drawer={milestoneDrawer}
+          onChange={(patch) => setMilestoneDrawer((prev) => prev ? { ...prev, ...patch } : prev)}
+          onSave={() => saveMilestoneDrawer()}
+          onComplete={() => saveMilestoneDrawer("complete")}
+          onDelete={deleteMilestoneFromDrawer}
+          onCancel={() => setMilestoneDrawer(null)}
+        />
       )}
     </main>
   );
@@ -833,6 +908,119 @@ function GoalsFocusTracker({
   }, [focusGoalId, goals, onFocusGoalId]);
 
   return null;
+}
+
+function MilestoneEditDrawer({
+  drawer,
+  onChange,
+  onSave,
+  onComplete,
+  onDelete,
+  onCancel,
+}: {
+  drawer: MilestoneDrawerState;
+  onChange: (patch: Partial<MilestoneDrawerState>) => void;
+  onSave: () => void;
+  onComplete: () => void;
+  onDelete: () => void;
+  onCancel: () => void;
+}) {
+  const complete = isMilestoneComplete(drawer.milestone);
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/70 backdrop-blur-sm" onClick={onCancel}>
+      <aside
+        className="h-full w-full max-w-md overflow-y-auto border-l border-cyan-300/35 bg-[linear-gradient(145deg,rgba(6,12,10,0.98),rgba(10,20,18,0.96)_45%,rgba(3,7,7,0.98))] p-6 text-green-200 shadow-[-18px_0_55px_rgba(34,211,238,0.18)]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-6">
+          <p className="text-xs font-bold uppercase tracking-[0.26em] text-cyan-200/70">
+            Planned Goal Protocol
+          </p>
+          <h2 className="mt-3 text-2xl font-bold text-green-100">{drawer.milestone.title}</h2>
+          <p className="mt-2 text-sm text-green-300/65">{drawer.goal.title}</p>
+          <span className={`mt-4 inline-flex rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-[0.18em] ${complete ? "border-green-300/45 bg-green-300/10 text-green-100" : "border-cyan-300/40 bg-cyan-300/10 text-cyan-100"}`}>
+            Status: {getMilestoneStatusLabel(drawer.milestone)}
+          </span>
+        </div>
+
+        <div className="grid gap-4">
+          <label className="block">
+            <span className="mb-2 block text-xs font-bold uppercase tracking-[0.18em] text-cyan-200/70">
+              Due Date
+            </span>
+            <input
+              type="date"
+              value={drawer.targetDate}
+              onChange={(e) => onChange({ targetDate: e.target.value })}
+              className="w-full rounded-xl border border-cyan-300/30 bg-black/70 px-4 py-3 text-green-100 outline-none transition focus:border-cyan-200/70 focus:shadow-[0_0_20px_rgba(34,211,238,0.16)]"
+            />
+          </label>
+
+          <label className="block">
+            <span className="mb-2 block text-xs font-bold uppercase tracking-[0.18em] text-cyan-200/70">
+              Cost
+            </span>
+            <input
+              type="number"
+              value={drawer.cost}
+              onChange={(e) => onChange({ cost: e.target.value })}
+              className="w-full rounded-xl border border-cyan-300/30 bg-black/70 px-4 py-3 text-green-100 outline-none transition focus:border-cyan-200/70 focus:shadow-[0_0_20px_rgba(34,211,238,0.16)]"
+              placeholder="Estimated cost"
+            />
+          </label>
+
+          <label className="block">
+            <span className="mb-2 block text-xs font-bold uppercase tracking-[0.18em] text-cyan-200/70">
+              Notes
+            </span>
+            <textarea
+              value={drawer.notes}
+              onChange={(e) => onChange({ notes: e.target.value })}
+              className="min-h-32 w-full rounded-xl border border-cyan-300/30 bg-black/70 px-4 py-3 text-green-100 outline-none transition focus:border-cyan-200/70 focus:shadow-[0_0_20px_rgba(34,211,238,0.16)]"
+              placeholder="Add deterministic-safe details, links, parts, or reminders..."
+            />
+          </label>
+        </div>
+
+        <div className="mt-6 grid gap-3 sm:grid-cols-2">
+          <button
+            onClick={onSave}
+            className="command-action-button command-action-green border border-green-400/40 bg-green-400/10 px-4 py-3 text-sm font-bold uppercase tracking-[0.16em] text-green-100"
+          >
+            Save Changes
+          </button>
+          <button
+            onClick={onCancel}
+            className="command-action-button border border-cyan-300/35 bg-cyan-300/10 px-4 py-3 text-sm font-bold uppercase tracking-[0.16em] text-cyan-100"
+          >
+            Cancel
+          </button>
+        </div>
+
+        <div className="mt-8 rounded-2xl border border-red-400/25 bg-red-500/10 p-4">
+          <p className="text-xs font-bold uppercase tracking-[0.22em] text-red-200/75">
+            Danger Zone
+          </p>
+          <div className="mt-4 grid gap-3">
+            {!complete && (
+              <button
+                onClick={onComplete}
+                className="command-action-button command-action-green border border-green-400/40 bg-green-400/10 px-4 py-3 text-sm font-bold uppercase tracking-[0.16em] text-green-100"
+              >
+                Mark Complete
+              </button>
+            )}
+            <button
+              onClick={onDelete}
+              className="command-action-button border border-red-400/40 bg-red-500/10 px-4 py-3 text-sm font-bold uppercase tracking-[0.16em] text-red-100"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      </aside>
+    </div>
+  );
 }
 
 function GoalHistoryModal({ goal, onClose }: { goal: Goal; onClose: () => void }) {
@@ -923,12 +1111,7 @@ function GoalCard({
   onMilestoneTitleChange,
   onAddMilestone,
   onUpdateMilestone,
-  milestonePlanDates,
-  milestoneCosts,
-  milestoneNotes,
-  onMilestonePlanDateChange,
-  onMilestoneCostChange,
-  onMilestoneNoteChange,
+  onEditMilestone,
   onArchive,
   onOpenHistory,
 }: {
@@ -952,12 +1135,7 @@ function GoalCard({
   onMilestoneTitleChange: (value: string) => void;
   onAddMilestone: () => void;
   onUpdateMilestone: (milestoneId: string, status: string) => void;
-  milestonePlanDates: Record<string, string>;
-  milestoneCosts: Record<string, string>;
-  milestoneNotes: Record<string, string>;
-  onMilestonePlanDateChange: (milestoneId: string, value: string) => void;
-  onMilestoneCostChange: (milestoneId: string, value: string) => void;
-  onMilestoneNoteChange: (milestoneId: string, value: string) => void;
+  onEditMilestone: (milestone: GoalMilestone) => void;
   onArchive: () => void;
   onOpenHistory: () => void;
 }) {
@@ -996,12 +1174,7 @@ function GoalCard({
         onMilestoneTitleChange={onMilestoneTitleChange}
         onAddMilestone={onAddMilestone}
         onUpdateMilestone={onUpdateMilestone}
-        milestonePlanDates={milestonePlanDates}
-        milestoneCosts={milestoneCosts}
-        milestoneNotes={milestoneNotes}
-        onMilestonePlanDateChange={onMilestonePlanDateChange}
-        onMilestoneCostChange={onMilestoneCostChange}
-        onMilestoneNoteChange={onMilestoneNoteChange}
+        onEditMilestone={onEditMilestone}
         onArchive={onArchive}
       />
     );
@@ -1205,6 +1378,7 @@ function StandardCard({
   const plannedFor = standard?.planned_for || goal.planned_date;
   const plannedTime = standard?.planned_time || goal.planned_time;
   const hasActivePlan = Boolean(plannedFor && standard?.status === "PLANNED");
+  const calendarSync = getPlannedStandardCalendarSync(goal);
 
   return (
     <article
@@ -1256,6 +1430,11 @@ function StandardCard({
               <p className="mt-1 text-sm text-green-300/70">
                 Mark complete when it happens, even if you log it later.
               </p>
+              {calendarSync && (
+                <p className={`mt-2 inline-flex rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] ${calendarSync.className}`}>
+                  {calendarSync.label}
+                </p>
+              )}
             </div>
             <div className="flex flex-wrap gap-2">
               <button
@@ -1322,12 +1501,7 @@ function ProjectCard({
   onMilestoneTitleChange,
   onAddMilestone,
   onUpdateMilestone,
-  milestonePlanDates,
-  milestoneCosts,
-  milestoneNotes,
-  onMilestonePlanDateChange,
-  onMilestoneCostChange,
-  onMilestoneNoteChange,
+  onEditMilestone,
   onArchive,
 }: {
   goal: Goal;
@@ -1336,12 +1510,7 @@ function ProjectCard({
   onMilestoneTitleChange: (value: string) => void;
   onAddMilestone: () => void;
   onUpdateMilestone: (milestoneId: string, status: string) => void;
-  milestonePlanDates: Record<string, string>;
-  milestoneCosts: Record<string, string>;
-  milestoneNotes: Record<string, string>;
-  onMilestonePlanDateChange: (milestoneId: string, value: string) => void;
-  onMilestoneCostChange: (milestoneId: string, value: string) => void;
-  onMilestoneNoteChange: (milestoneId: string, value: string) => void;
+  onEditMilestone: (milestone: GoalMilestone) => void;
   onArchive: () => void;
 }) {
   const project = goal.project;
@@ -1383,39 +1552,24 @@ function ProjectCard({
           milestones={completedMilestones}
           emptyText="No completed milestones yet."
           tone="green"
-          milestonePlanDates={milestonePlanDates}
-          milestoneCosts={milestoneCosts}
-          milestoneNotes={milestoneNotes}
-          onMilestonePlanDateChange={onMilestonePlanDateChange}
-          onMilestoneCostChange={onMilestoneCostChange}
-          onMilestoneNoteChange={onMilestoneNoteChange}
           onUpdateMilestone={onUpdateMilestone}
+          onEditMilestone={onEditMilestone}
         />
         <MilestoneGroup
           label="Planned"
           milestones={plannedMilestones}
           emptyText="No planned milestones."
           tone="cyan"
-          milestonePlanDates={milestonePlanDates}
-          milestoneCosts={milestoneCosts}
-          milestoneNotes={milestoneNotes}
-          onMilestonePlanDateChange={onMilestonePlanDateChange}
-          onMilestoneCostChange={onMilestoneCostChange}
-          onMilestoneNoteChange={onMilestoneNoteChange}
           onUpdateMilestone={onUpdateMilestone}
+          onEditMilestone={onEditMilestone}
         />
         <MilestoneGroup
           label="Open"
           milestones={openMilestones}
           emptyText="No open milestones."
           tone="purple"
-          milestonePlanDates={milestonePlanDates}
-          milestoneCosts={milestoneCosts}
-          milestoneNotes={milestoneNotes}
-          onMilestonePlanDateChange={onMilestonePlanDateChange}
-          onMilestoneCostChange={onMilestoneCostChange}
-          onMilestoneNoteChange={onMilestoneNoteChange}
           onUpdateMilestone={onUpdateMilestone}
+          onEditMilestone={onEditMilestone}
         />
       </div>
 
@@ -1444,25 +1598,15 @@ function MilestoneGroup({
   milestones,
   emptyText,
   tone,
-  milestonePlanDates,
-  milestoneCosts,
-  milestoneNotes,
-  onMilestonePlanDateChange,
-  onMilestoneCostChange,
-  onMilestoneNoteChange,
   onUpdateMilestone,
+  onEditMilestone,
 }: {
   label: string;
   milestones: GoalMilestone[];
   emptyText: string;
   tone: "green" | "cyan" | "purple";
-  milestonePlanDates: Record<string, string>;
-  milestoneCosts: Record<string, string>;
-  milestoneNotes: Record<string, string>;
-  onMilestonePlanDateChange: (milestoneId: string, value: string) => void;
-  onMilestoneCostChange: (milestoneId: string, value: string) => void;
-  onMilestoneNoteChange: (milestoneId: string, value: string) => void;
   onUpdateMilestone: (milestoneId: string, status: string) => void;
+  onEditMilestone: (milestone: GoalMilestone) => void;
 }) {
   const toneClass = {
     green: "border-green-300/30 bg-green-400/5 text-green-100",
@@ -1481,13 +1625,8 @@ function MilestoneGroup({
           <MilestoneRow
             key={milestone.id}
             milestone={milestone}
-            milestonePlanDates={milestonePlanDates}
-            milestoneCosts={milestoneCosts}
-            milestoneNotes={milestoneNotes}
-            onMilestonePlanDateChange={onMilestonePlanDateChange}
-            onMilestoneCostChange={onMilestoneCostChange}
-            onMilestoneNoteChange={onMilestoneNoteChange}
             onUpdateMilestone={onUpdateMilestone}
+            onEditMilestone={onEditMilestone}
           />
         )) : (
           <p className="rounded-lg border border-current/10 bg-black/40 px-3 py-2 text-sm opacity-70">{emptyText}</p>
@@ -1499,22 +1638,12 @@ function MilestoneGroup({
 
 function MilestoneRow({
   milestone,
-  milestonePlanDates,
-  milestoneCosts,
-  milestoneNotes,
-  onMilestonePlanDateChange,
-  onMilestoneCostChange,
-  onMilestoneNoteChange,
   onUpdateMilestone,
+  onEditMilestone,
 }: {
   milestone: GoalMilestone;
-  milestonePlanDates: Record<string, string>;
-  milestoneCosts: Record<string, string>;
-  milestoneNotes: Record<string, string>;
-  onMilestonePlanDateChange: (milestoneId: string, value: string) => void;
-  onMilestoneCostChange: (milestoneId: string, value: string) => void;
-  onMilestoneNoteChange: (milestoneId: string, value: string) => void;
   onUpdateMilestone: (milestoneId: string, status: string) => void;
+  onEditMilestone: (milestone: GoalMilestone) => void;
 }) {
   const complete = isMilestoneComplete(milestone);
   const planned = (milestone.status || "").toLowerCase() === "planned";
@@ -1565,25 +1694,37 @@ function MilestoneRow({
           <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-1">
             <input
               type="date"
-              value={milestonePlanDates[milestone.id] ?? milestone.target_date ?? ""}
-              onChange={(e) => onMilestonePlanDateChange(milestone.id, e.target.value)}
-              className="rounded-lg border border-purple-300/25 bg-black px-3 py-2 text-sm"
+              value={milestone.target_date ?? ""}
+              readOnly
+              onClick={() => onEditMilestone(milestone)}
+              className="cursor-pointer rounded-lg border border-purple-300/25 bg-black px-3 py-2 text-sm text-green-100 transition hover:border-cyan-300/45 hover:shadow-[0_0_16px_rgba(34,211,238,0.12)]"
+              aria-label={`${milestone.title} due date`}
             />
             <input
               type="number"
-              value={milestoneCosts[milestone.id] ?? (milestone.cost ? String(milestone.cost) : "")}
-              onChange={(e) => onMilestoneCostChange(milestone.id, e.target.value)}
-              className="rounded-lg border border-purple-300/25 bg-black px-3 py-2 text-sm"
+              value={milestone.cost ? String(milestone.cost) : ""}
+              readOnly
+              onClick={() => onEditMilestone(milestone)}
+              className="cursor-pointer rounded-lg border border-purple-300/25 bg-black px-3 py-2 text-sm text-green-100 transition hover:border-cyan-300/45 hover:shadow-[0_0_16px_rgba(34,211,238,0.12)]"
               placeholder="Cost"
+              aria-label={`${milestone.title} cost`}
             />
             <input
-              value={milestoneNotes[milestone.id] ?? milestone.notes ?? ""}
-              onChange={(e) => onMilestoneNoteChange(milestone.id, e.target.value)}
-              className="rounded-lg border border-purple-300/25 bg-black px-3 py-2 text-sm"
+              value={milestone.notes ?? ""}
+              readOnly
+              onClick={() => onEditMilestone(milestone)}
+              className="cursor-pointer rounded-lg border border-purple-300/25 bg-black px-3 py-2 text-sm text-green-100 transition hover:border-cyan-300/45 hover:shadow-[0_0_16px_rgba(34,211,238,0.12)]"
               placeholder="Plan, price, link, or detail"
+              aria-label={`${milestone.title} notes`}
             />
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => onEditMilestone(milestone)}
+              className="command-action-button command-action-purple border border-purple-300/30 px-3 py-2 text-sm text-purple-100"
+            >
+              Edit
+            </button>
             <button
               onClick={() => onUpdateMilestone(milestone.id, planned ? "open" : "planned")}
               className="command-action-button command-action-cyan border border-cyan-300/30 px-3 py-2 text-sm text-cyan-100"
@@ -1772,6 +1913,63 @@ function FrequencySelect({
 function formatPlannedDate(dateValue?: string | null, timeValue?: string | null) {
   if (!dateValue) return "Not planned";
   return `${new Date(`${dateValue}T12:00:00`).toLocaleDateString()}${timeValue ? ` at ${timeValue}` : ""}`;
+}
+
+function formatCalendarSyncMessage(calendar?: Record<string, unknown> | null) {
+  if (!calendar) return "";
+  const status = calendar.calendar_sync_status;
+  const action = calendar.calendar_action;
+  const error = calendar.calendar_error;
+
+  if (status === "synced") {
+    if (action === "created") return " Calendar event created with reminders.";
+    if (action === "updated") return " Calendar event updated with reminders.";
+    if (action === "deleted") return " Calendar event removed.";
+    if (action === "marked_completed") return " Calendar event marked complete.";
+    return " Calendar synced.";
+  }
+  if (status === "skipped") {
+    return " Calendar sync skipped: no linked planned event found.";
+  }
+  if (status === "failed") {
+    return ` Calendar sync failed${error ? `: ${String(error)}` : "."}`;
+  }
+  return "";
+}
+
+function getPlannedStandardCalendarSync(goal: Goal) {
+  const plannedFor = goal.standard?.planned_for || goal.planned_date;
+  if (!plannedFor) return null;
+
+  const plannedLog = (goal.logs || []).find((log) => {
+    const logType = (log.log_type || "").toLowerCase();
+    return logType === "planned" && log.planned_for?.slice(0, 10) === plannedFor.slice(0, 10);
+  });
+  const metadata = plannedLog?.metadata || {};
+  const status = metadata.calendar_sync_status;
+
+  if (status === "synced") {
+    return {
+      label: "Calendar synced · reminders armed",
+      className: "border-green-300/40 bg-green-300/10 text-green-100",
+    };
+  }
+  if (status === "failed") {
+    return {
+      label: "Calendar sync failed",
+      className: "border-red-300/40 bg-red-500/10 text-red-100",
+    };
+  }
+  if (status === "superseded") {
+    return {
+      label: "Calendar event superseded",
+      className: "border-amber-300/40 bg-amber-300/10 text-amber-100",
+    };
+  }
+  return {
+    label: "Calendar sync pending",
+    className: "border-cyan-300/40 bg-cyan-300/10 text-cyan-100",
+  };
 }
 
 function getStandardTone(status?: string | null): "green" | "cyan" | "purple" | "amber" | "red" {

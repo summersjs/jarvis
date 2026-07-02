@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -15,6 +16,15 @@ SCOPES = ["https://www.googleapis.com/auth/calendar"]
 BASE_DIR = Path(__file__).resolve().parents[2]
 TOKEN_PATH = BASE_DIR / "token.json"
 CREDS_PATH = BASE_DIR / "credentials.json"
+DEFAULT_TIMEZONE = "America/New_York"
+
+
+class CalendarIntegrationError(RuntimeError):
+    pass
+
+
+class CalendarAuthRequired(CalendarIntegrationError):
+    pass
 
 
 def get_calendar_service():
@@ -33,12 +43,74 @@ def get_calendar_service():
                 creds = None
 
         if not creds or not creds.valid:
+            if not CREDS_PATH.exists():
+                raise CalendarAuthRequired("Google Calendar credentials.json is missing.")
+
+            allow_bootstrap = os.getenv("JARVIS_ALLOW_CALENDAR_OAUTH_BOOTSTRAP", "").lower() in {"1", "true", "yes"}
+            if not allow_bootstrap:
+                raise CalendarAuthRequired("Google Calendar token is missing or expired. Reconnect Calendar from a local shell.")
+
             flow = InstalledAppFlow.from_client_secrets_file(str(CREDS_PATH), SCOPES)
             creds = flow.run_local_server(port=0)
 
         TOKEN_PATH.write_text(creds.to_json())
 
     return build("calendar", "v3", credentials=creds)
+
+
+def _event_body(
+    summary: str,
+    date_str: str,
+    time_str: str | None = None,
+    notes: str | None = None,
+    duration_minutes: int = 120,
+    reminders: list[int] | None = None,
+    extended_properties: dict | None = None,
+) -> dict:
+    reminders = reminders if reminders is not None else [1440, 60]
+    event_body = {
+        "summary": summary,
+        "description": notes or "",
+        "reminders": {
+            "useDefault": False,
+            "overrides": [
+                {"method": "popup", "minutes": minutes}
+                for minutes in reminders
+                if minutes >= 0
+            ],
+        },
+    }
+
+    if extended_properties:
+        event_body["extendedProperties"] = {
+            "private": {
+                key: str(value)
+                for key, value in extended_properties.items()
+                if value is not None
+            }
+        }
+
+    if time_str:
+        start_dt = datetime.fromisoformat(f"{date_str}T{time_str}").astimezone()
+        end_dt = start_dt + timedelta(minutes=duration_minutes)
+        event_body.update({
+            "start": {
+                "dateTime": start_dt.isoformat(),
+                "timeZone": DEFAULT_TIMEZONE,
+            },
+            "end": {
+                "dateTime": end_dt.isoformat(),
+                "timeZone": DEFAULT_TIMEZONE,
+            },
+        })
+    else:
+        start_date = datetime.fromisoformat(date_str).date()
+        event_body.update({
+            "start": {"date": start_date.isoformat()},
+            "end": {"date": (start_date + timedelta(days=1)).isoformat()},
+        })
+
+    return event_body
 
 
 def create_calendar_event(
@@ -48,31 +120,19 @@ def create_calendar_event(
     notes: str | None = None,
     calendar_id: str = "primary",
     duration_minutes: int = 120,
+    reminders: list[int] | None = None,
+    extended_properties: dict | None = None,
 ) -> dict:
     service = get_calendar_service()
-    if time_str:
-        start_dt = datetime.fromisoformat(f"{date_str}T{time_str}").astimezone()
-        end_dt = start_dt + timedelta(minutes=duration_minutes)
-        event_body = {
-            "summary": summary,
-            "description": notes or "",
-            "start": {
-                "dateTime": start_dt.isoformat(),
-                "timeZone": "America/New_York",
-            },
-            "end": {
-                "dateTime": end_dt.isoformat(),
-                "timeZone": "America/New_York",
-            },
-        }
-    else:
-        start_date = datetime.fromisoformat(date_str).date()
-        event_body = {
-            "summary": summary,
-            "description": notes or "",
-            "start": {"date": start_date.isoformat()},
-            "end": {"date": (start_date + timedelta(days=1)).isoformat()},
-        }
+    event_body = _event_body(
+        summary=summary,
+        date_str=date_str,
+        time_str=time_str,
+        notes=notes,
+        duration_minutes=duration_minutes,
+        reminders=reminders,
+        extended_properties=extended_properties,
+    )
 
     try:
         return service.events().insert(calendarId=calendar_id, body=event_body).execute()
@@ -81,6 +141,41 @@ def create_calendar_event(
             TOKEN_PATH.unlink(missing_ok=True)
             service = get_calendar_service()
             return service.events().insert(calendarId=calendar_id, body=event_body).execute()
+        raise
+
+
+def update_calendar_event(
+    event_id: str,
+    summary: str,
+    date_str: str,
+    time_str: str | None = None,
+    notes: str | None = None,
+    calendar_id: str = "primary",
+    duration_minutes: int = 120,
+    reminders: list[int] | None = None,
+    extended_properties: dict | None = None,
+) -> dict:
+    service = get_calendar_service()
+    event_body = _event_body(
+        summary=summary,
+        date_str=date_str,
+        time_str=time_str,
+        notes=notes,
+        duration_minutes=duration_minutes,
+        reminders=reminders,
+        extended_properties=extended_properties,
+    )
+    return service.events().update(calendarId=calendar_id, eventId=event_id, body=event_body).execute()
+
+
+def delete_calendar_event(event_id: str, calendar_id: str = "primary") -> dict:
+    service = get_calendar_service()
+    try:
+        service.events().delete(calendarId=calendar_id, eventId=event_id).execute()
+        return {"deleted": True, "event_id": event_id}
+    except HttpError as exc:
+        if exc.resp.status == 404:
+            return {"deleted": False, "event_id": event_id, "reason": "not_found"}
         raise
 
 

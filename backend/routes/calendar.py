@@ -9,32 +9,39 @@ from backend.services.calendar_service import (
 router = APIRouter(dependencies=[Depends(verify_api_key)])
 
 
-@router.get("/calendar/next")
-def get_next_calendar_event():
+def calendar_response(callback, fallback: str):
     try:
         return {
             "status": "ok",
-            "spoken_response": get_next_calendar_summary()
+            "spoken_response": callback(),
         }
     except Exception as e:
         return {
             "status": "error",
-            "spoken_response": "Sorry Daddy! I had trouble fetching your calendar events.",
-            "error": str(e)
+            "spoken_response": fallback,
+            "error": str(e),
         }
+
+
+@router.get("/calendar/next")
+def get_next_calendar_event():
+    return calendar_response(
+        get_next_calendar_summary,
+        "Calendar check failed. Jarvis could not fetch your next event.",
+    )
 
 
 @router.get("/calendar/next/work")
 def next_work():
-    return {
-        "status": "ok",
-        "spoken_response": get_next_work_summary()
-    }
+    return calendar_response(
+        get_next_work_summary,
+        "Calendar check failed. Jarvis could not fetch your next work event.",
+    )
 
 
 @router.get("/calendar/today")
 def today_events():
-    return {
-        "status": "ok",
-        "spoken_response": get_today_calendar_summary()
-    }
+    return calendar_response(
+        get_today_calendar_summary,
+        "Calendar check failed. Jarvis could not fetch today's events.",
+    )

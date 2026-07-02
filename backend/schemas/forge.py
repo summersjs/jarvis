@@ -36,6 +36,7 @@ class ForgeSparkCreate(BaseModel):
     category: Optional[str] = None
     project_id: Optional[str] = None
     tags: list[str] = Field(default_factory=list)
+    folder_path: list[str] = Field(default_factory=list)
 
 
 class ForgeSparkUpdate(BaseModel):
@@ -43,6 +44,7 @@ class ForgeSparkUpdate(BaseModel):
     category: Optional[str] = None
     project_id: Optional[str] = None
     tags: Optional[list[str]] = None
+    folder_path: Optional[list[str]] = None
 
 
 class ForgeNoteCreate(BaseModel):
@@ -52,6 +54,7 @@ class ForgeNoteCreate(BaseModel):
     category: Optional[str] = None
     project_id: Optional[str] = None
     tags: list[str] = Field(default_factory=list)
+    folder_path: list[str] = Field(default_factory=list)
     note_type: Optional[str] = None
     status: Optional[str] = "active"
     is_pinned: Optional[bool] = False
@@ -66,6 +69,7 @@ class ForgeNoteUpdate(BaseModel):
     category: Optional[str] = None
     project_id: Optional[str] = None
     tags: Optional[list[str]] = None
+    folder_path: Optional[list[str]] = None
     note_type: Optional[str] = None
     status: Optional[str] = None
     is_pinned: Optional[bool] = None

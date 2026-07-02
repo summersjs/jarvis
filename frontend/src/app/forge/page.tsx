@@ -60,6 +60,7 @@ type ForgeSpark = {
   category?: ForgeCategory | null;
   project_id?: string | null;
   tags?: string[] | null;
+  folder_path?: string[] | null;
   created_at?: string | null;
   updated_at?: string | null;
 };
@@ -71,6 +72,7 @@ type ForgeNote = {
   category?: ForgeCategory | null;
   project_id?: string | null;
   tags?: string[] | null;
+  folder_path?: string[] | null;
   created_at?: string | null;
   updated_at?: string | null;
 };
@@ -163,6 +165,10 @@ type FormState = {
   use_as_cover: string;
   caption: string;
   goal_id: string;
+  folder_primary: string;
+  folder_child: string;
+  new_folder_primary: string;
+  new_folder_child: string;
 };
 
 const FORGE_CATEGORIES: Array<{
@@ -248,6 +254,10 @@ const emptyForm: FormState = {
   use_as_cover: "",
   caption: "",
   goal_id: "",
+  folder_primary: "",
+  folder_child: "",
+  new_folder_primary: "",
+  new_folder_child: "",
 };
 
 export default function ForgePage() {
@@ -271,6 +281,8 @@ export default function ForgePage() {
     if (selectedCategory === "All") return dashboard.projects;
     return dashboard.projects.filter((project) => project.category === selectedCategory);
   }, [dashboard.projects, selectedCategory]);
+
+  const folderOptions = useMemo(() => buildForgeFolderOptions(dashboard.notes, dashboard.sparks), [dashboard.notes, dashboard.sparks]);
 
   useEffect(() => {
     loadForge();
@@ -435,6 +447,7 @@ export default function ForgePage() {
         form={form}
         projects={dashboard.projects}
         goals={dashboard.goals}
+        folderOptions={folderOptions}
         saving={saving}
         onClose={() => setModal(null)}
         onSave={saveModal}
@@ -727,6 +740,7 @@ function ForgeModal({
   form,
   projects,
   goals,
+  folderOptions,
   saving,
   onClose,
   onSave,
@@ -738,6 +752,7 @@ function ForgeModal({
   form: FormState;
   projects: ForgeProject[];
   goals: ForgeGoalOption[];
+  folderOptions: FolderOptions;
   saving: boolean;
   onClose: () => void;
   onSave: () => void;
@@ -803,6 +818,7 @@ function ForgeModal({
             <ForgeTextarea label="Spark Text" value={form.spark_text} onChange={(value) => onChange("spark_text", value)} required />
             <ForgeSelect label="Category" value={form.category} options={FORGE_CATEGORIES.map((item) => item.name)} onChange={(value) => onChange("category", value)} />
             <ProjectSelect projects={projects} value={form.project_id} onChange={(value) => onProjectSelect(projects.find((project) => project.id === value) || null)} />
+            <ForgeFolderSelect form={form} folderOptions={folderOptions} onChange={onChange} />
             <ForgeInput label="Tags" value={form.tags} onChange={(value) => onChange("tags", value)} placeholder="comma, separated, tags" />
           </div>
         ) : modal === "note" ? (
@@ -810,6 +826,7 @@ function ForgeModal({
             <ForgeInput label="Note Title" value={form.note_title} onChange={(value) => onChange("note_title", value)} required />
             <ForgeSelect label="Category" value={form.category} options={FORGE_CATEGORIES.map((item) => item.name)} onChange={(value) => onChange("category", value)} />
             <ProjectSelect projects={projects} value={form.project_id} onChange={(value) => onProjectSelect(projects.find((project) => project.id === value) || null)} />
+            <ForgeFolderSelect form={form} folderOptions={folderOptions} onChange={onChange} />
             <ForgeInput label="Tags" value={form.tags} onChange={(value) => onChange("tags", value)} placeholder="comma, separated, tags" />
             <ForgeTextarea label="Body" value={form.note_body} onChange={(value) => onChange("note_body", value)} />
           </div>
@@ -825,13 +842,9 @@ function ForgeModal({
                   onChange("file_name", file.name);
                   onChange("file_type", file.type);
                   onChange("file_size", String(file.size));
-                  if (file.type.startsWith("image/")) {
-                    const reader = new FileReader();
-                    reader.onload = () => onChange("file_url", String(reader.result || ""));
-                    reader.readAsDataURL(file);
-                  } else {
-                    onChange("file_url", "");
-                  }
+                  const reader = new FileReader();
+                  reader.onload = () => onChange("file_url", String(reader.result || ""));
+                  reader.readAsDataURL(file);
                 }}
               />
             </label>
@@ -897,6 +910,53 @@ function ProjectSelect({ projects, value, onChange }: { projects: ForgeProject[]
         {projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
       </select>
     </label>
+  );
+}
+
+type FolderOptions = { primary: string[]; children: Record<string, string[]> };
+
+function ForgeFolderSelect({ form, folderOptions, onChange }: { form: FormState; folderOptions: FolderOptions; onChange: (key: keyof FormState, value: string) => void }) {
+  const children = form.folder_primary ? folderOptions.children[form.folder_primary] || [] : [];
+  return (
+    <div className="forge-folder-select">
+      <label className="forge-input">
+        <span>Folder</span>
+        <select
+          value={form.folder_primary}
+          onChange={(event) => {
+            onChange("folder_primary", event.target.value);
+            onChange("folder_child", "");
+            onChange("new_folder_primary", "");
+          }}
+        >
+          <option value="">Unfiled</option>
+          {folderOptions.primary.map((item) => <option key={item} value={item}>{item}</option>)}
+          <option value="__new">Create new folder...</option>
+        </select>
+      </label>
+      {form.folder_primary === "__new" ? (
+        <ForgeInput label="New Folder" value={form.new_folder_primary} onChange={(value) => onChange("new_folder_primary", value)} placeholder="Characters" />
+      ) : (
+        <label className="forge-input">
+          <span>Subfolder</span>
+          <select
+            value={form.folder_child}
+            onChange={(event) => {
+              onChange("folder_child", event.target.value);
+              onChange("new_folder_child", "");
+            }}
+            disabled={!form.folder_primary}
+          >
+            <option value="">None</option>
+            {children.map((item) => <option key={item} value={item}>{item}</option>)}
+            {form.folder_primary && <option value="__new">Create new subfolder...</option>}
+          </select>
+        </label>
+      )}
+      {form.folder_child === "__new" && form.folder_primary !== "__new" && (
+        <ForgeInput label="New Subfolder" value={form.new_folder_child} onChange={(value) => onChange("new_folder_child", value)} placeholder="Lucien" />
+      )}
+    </div>
   );
 }
 
@@ -1237,6 +1297,7 @@ function ProgressLine({ value, large = false }: { value?: number | null; large?:
 
 function buildPayload(modal: Exclude<ModalType, null>, form: FormState) {
   const tags = form.tags.split(",").map((tag) => tag.trim()).filter(Boolean);
+  const folder_path = resolveForgeFolderPath(form.folder_primary, form.folder_child, form.new_folder_primary, form.new_folder_child);
   if (modal === "project") {
     return {
       user_id: USER_ID,
@@ -1258,6 +1319,7 @@ function buildPayload(modal: Exclude<ModalType, null>, form: FormState) {
       category: form.category || null,
       project_id: form.project_id || null,
       tags,
+      folder_path,
     };
   }
   if (modal === "note") {
@@ -1268,6 +1330,7 @@ function buildPayload(modal: Exclude<ModalType, null>, form: FormState) {
       category: form.category || null,
       project_id: form.project_id || null,
       tags,
+      folder_path,
     };
   }
   return {
@@ -1282,6 +1345,35 @@ function buildPayload(modal: Exclude<ModalType, null>, form: FormState) {
     tags,
     metadata: { upload_status: "metadata_only_v1" },
   };
+}
+
+function buildForgeFolderOptions(notes: ForgeNote[], sparks: ForgeSpark[]): FolderOptions {
+  const primary = new Set<string>();
+  const children: Record<string, Set<string>> = {};
+  [...notes, ...sparks].forEach((item) => {
+    const path = (item.folder_path || []).map(titleCaseForgeFolder).filter(Boolean).slice(0, 2);
+    if (!path[0]) return;
+    primary.add(path[0]);
+    if (path[1]) {
+      children[path[0]] ||= new Set<string>();
+      children[path[0]].add(path[1]);
+    }
+  });
+  return {
+    primary: [...primary].sort((a, b) => a.localeCompare(b)),
+    children: Object.fromEntries(Object.entries(children).map(([key, values]) => [key, [...values].sort((a, b) => a.localeCompare(b))])),
+  };
+}
+
+function resolveForgeFolderPath(primary: string, child: string, newPrimary: string, newChild: string) {
+  return [
+    titleCaseForgeFolder(primary === "__new" ? newPrimary : primary),
+    titleCaseForgeFolder(child === "__new" ? newChild : child),
+  ].filter(Boolean).slice(0, 2);
+}
+
+function titleCaseForgeFolder(value: string) {
+  return value.trim().replace(/\s+/g, " ").split(" ").map((word) => word ? `${word[0].toUpperCase()}${word.slice(1)}` : "").join(" ");
 }
 
 function relativeDate(value?: string | null) {

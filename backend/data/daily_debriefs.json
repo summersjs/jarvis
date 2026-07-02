@@ -362,5 +362,104 @@
       "win": "Created a daily journal screen called Chronicles. Built the Forge and added two projects to it. "
     },
     "weekly_score": 100
+  },
+  {
+    "completed_at": "2026-07-02T19:19:55.9+00:00",
+    "created_at": "2026-07-02T19:19:55.936806+00:00",
+    "daily_score": 100,
+    "date": "2026-07-02",
+    "finance": {
+      "category": "Food",
+      "money_spent_today": 5.98,
+      "notes": null,
+      "spending_status": "UNDER CONTROL",
+      "unexpected_expense": false
+    },
+    "id": "7cdc8b46-8320-4d9c-aae5-ae9dc40de550",
+    "is_finalized": true,
+    "lessons": {
+      "adjust_tomorrow": "Keep on trucking, try to control rage. ",
+      "did_not_work": "I felt a crazy rage at Kroger after my workout. Then very irritable. It lasted a good 30 minutes.",
+      "worked": "I moved bench to 306, so much closer to my 315 goal. I got a pretty good start and work flow for Jarvis and World Walker. I was able to switch back and forth while waiting for Codex credits."
+    },
+    "lifetime_rank": "Legend",
+    "lifetime_score": 100,
+    "mission_score": 100,
+    "notes": null,
+    "nutrition": {
+      "ate_out_today": false,
+      "estimated_food_spend": 5.98,
+      "meals_completed": 3,
+      "meals_planned_today": 3,
+      "notes": null
+    },
+    "objectives": [
+      {
+        "blocker": "",
+        "completed": true,
+        "id": "4ca7aa9a-72b8-477f-8d1b-75dd5d361222",
+        "notes": "Auto-updated from bench top set: 270.0 x 4.",
+        "title": "Bench 315"
+      },
+      {
+        "blocker": "",
+        "completed": true,
+        "id": "31fbf94e-0c2d-4e2e-9161-55964367eeef",
+        "notes": "Forge task completed: Finalize GDD v1",
+        "title": "Complete 3 World Walker Tasks Weekly"
+      },
+      {
+        "blocker": "",
+        "completed": true,
+        "id": "4950c2ed-bbfd-41b8-9858-18f22442bbe2",
+        "notes": "Milestone completed: Calendar and Notification Hardening",
+        "title": "Jarvis Life Command Center"
+      },
+      {
+        "blocker": "",
+        "completed": true,
+        "id": "4c49d748-15e0-462e-8811-ba12f2345e81",
+        "notes": "Shipped collapsible Goals cards, richer morning/dashboard/debrief spoken context, and Daily Debrief Supabase persistence/schema.",
+        "title": "Ship 3 Features Weekly"
+      }
+    ],
+    "overall_status": "ok",
+    "summary": "Evening debrief, John. Today was complete. Daily score 100. Weekly score 100. Lifetime rank Legend. bench was scheduled today. You completed 4 of 4 goal impacts today. Weekly goals moved: 2 completed, 2 above and beyond. Workout logged: bench. That session moved Bench 315 moved today: Completed. Stayed under control on spending. Planned standard: 1 Date weekly is planned for Friday, July 3. Chronicles logged today. Archive total is 2 documented days, current streak 2. Next protocol is squat on Friday. Tomorrow looks like a squat day. Main lesson: Keep squat day simple and stay on plan. Top priority tomorrow is Prepare for squat.",
+    "tomorrow": {
+      "calendar": [
+        "Payday",
+        "1 Date Weekly"
+      ],
+      "meal_prep": "You have 2 events tomorrow. Payday from 8:00 AM to 9:00 AM. 1 Date Weekly from 7:00 PM to 10:00 PM.",
+      "priorities": [
+        "Prepare for squat"
+      ],
+      "reminder": "Next protocol: squat",
+      "shopping_items": [],
+      "top_priorities": [
+        "Prepare for squat"
+      ],
+      "workout": {
+        "label": "squat",
+        "lift": "squat",
+        "weekday": "Friday"
+      }
+    },
+    "training": {
+      "energy_level": 4,
+      "lift_completed": "bench",
+      "pain_notes": "none",
+      "top_set_reps": 4,
+      "top_set_weight": 270.0,
+      "training_notes": "It was really heavy. I cheated a lot on the last rep to get it up. The first two were somewhat easy. The third was hard and I cheated a little. The last one was full cheat and felt like I wasn't going to get it up. ",
+      "workout_completed": true
+    },
+    "updated_at": "2026-07-02T19:19:56.07618+00:00",
+    "user_id": "john",
+    "victory": {
+      "category": "Personal",
+      "win": "Finished bench and pushed the training chain forward. Worked on Jarvis and Completed more of the Forge. Worked on World Walker some more. "
+    },
+    "weekly_score": 100
   }
 ]

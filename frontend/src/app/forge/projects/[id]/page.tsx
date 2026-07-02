@@ -3,6 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { useParams } from "next/navigation";
+import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -49,9 +50,23 @@ type ForgeProject = {
     } | null;
     milestones?: Array<{ id: string; title: string; status: string; target_date?: string | null; cost?: number | null; notes?: string | null }>;
   } | null;
+  linked_goals?: Array<{
+    id: string;
+    title: string;
+    category?: string | null;
+    relationship_type?: string | null;
+    notes?: string | null;
+    project?: {
+      completed_count?: number;
+      total_count?: number;
+      percent?: number;
+      next_milestone?: { title?: string | null } | null;
+    } | null;
+    progress?: { percent?: number; remaining?: number; is_complete?: boolean } | null;
+  }> | null;
 };
 
-type ForgeSpark = { id: string; spark_text: string; project_id?: string | null; category?: string | null; tags?: string[] | null; created_at?: string | null };
+type ForgeSpark = { id: string; spark_text: string; project_id?: string | null; category?: string | null; tags?: string[] | null; folder_path?: string[] | null; created_at?: string | null };
 type ForgeNote = {
   id: string;
   title: string;
@@ -59,11 +74,13 @@ type ForgeNote = {
   project_id?: string | null;
   category?: string | null;
   tags?: string[] | null;
+  folder_path?: string[] | null;
   note_type?: string | null;
   status?: string | null;
   is_pinned?: boolean | null;
   linked_milestone?: string | null;
   linked_tasks?: string[] | null;
+  sort_order?: number | null;
   created_at?: string | null;
   updated_at?: string | null;
 };
@@ -88,10 +105,10 @@ type ForgeTask = {
 };
 
 type EditingForgeItem =
-  | { kind: "spark"; item: ForgeSpark; text: string; projectId: string; category: string; tags: string }
-  | { kind: "note"; item: ForgeNote; title: string; body: string; projectId: string; category: string; tags: string; noteType: string; status: string; isPinned: boolean; linkedMilestone: string };
+  | { kind: "spark"; item: ForgeSpark; text: string; projectId: string; category: string; tags: string; folderPrimary: string; folderChild: string; newFolderPrimary: string; newFolderChild: string }
+  | { kind: "note"; item: ForgeNote; title: string; body: string; projectId: string; category: string; tags: string; noteType: string; status: string; isPinned: boolean; linkedMilestone: string; folderPrimary: string; folderChild: string; newFolderPrimary: string; newFolderChild: string };
 
-const TABS = ["Overview", "Tasks", "Spark Log", "Timeline", "Research", "Notes", "Files", "Images", "Activity"];
+const TABS = ["Overview", "Writing Desk", "Tasks", "Spark Log", "Timeline", "Research", "Notes", "Files", "Images", "Activity"];
 
 export default function ForgeProjectWorkspace() {
   const params = useParams<{ id: string }>();
@@ -114,6 +131,8 @@ export default function ForgeProjectWorkspace() {
   const [taskBusy, setTaskBusy] = useState<{ id?: string; title: string; action: "complete" | "reopen" | "create" } | null>(null);
   const [editingItem, setEditingItem] = useState<EditingForgeItem | null>(null);
   const [uploadForm, setUploadForm] = useState({ fileName: "", fileType: "", fileSize: "", fileUrl: "", caption: "", tags: "", useAsCover: false });
+  const [previewFile, setPreviewFile] = useState<ForgeFile | null>(null);
+  const [writingDraft, setWritingDraft] = useState({ title: "", body: "", noteType: "draft", folderPrimary: "", folderChild: "", tags: "" });
 
   const project = projects.find((item) => item.id === projectId) || null;
   const visibleSparks = sparks.filter((item) => inbox ? !item.project_id : item.project_id === projectId);
@@ -131,8 +150,11 @@ export default function ForgeProjectWorkspace() {
     Activity: visibleSparks.length + visibleNotes.length + visibleFiles.length + visibleTasks.length,
     Timeline: project?.linked_goal?.milestones?.length || 0,
     Tasks: visibleTasks.length,
+    "Writing Desk": visibleNotes.length,
     Research: 0,
   }), [visibleSparks.length, visibleNotes.length, visibleFiles.length, visibleImages.length, visibleTasks.length, project]);
+
+  const folderOptions = useMemo(() => buildFolderOptions(visibleNotes, visibleSparks), [visibleNotes, visibleSparks]);
 
   useEffect(() => {
     loadForge();
@@ -177,6 +199,10 @@ export default function ForgeProjectWorkspace() {
       projectId: spark.project_id || "",
       category: spark.category || project?.category || "",
       tags: (spark.tags || []).join(", "),
+      folderPrimary: spark.folder_path?.[0] || "",
+      folderChild: spark.folder_path?.[1] || "",
+      newFolderPrimary: "",
+      newFolderChild: "",
     });
   }
 
@@ -193,6 +219,10 @@ export default function ForgeProjectWorkspace() {
       status: note.status || "active",
       isPinned: Boolean(note.is_pinned),
       linkedMilestone: note.linked_milestone || "",
+      folderPrimary: note.folder_path?.[0] || "",
+      folderChild: note.folder_path?.[1] || "",
+      newFolderPrimary: "",
+      newFolderChild: "",
     });
   }
 
@@ -201,6 +231,7 @@ export default function ForgeProjectWorkspace() {
     setError("");
     const selectedProject = projects.find((item) => item.id === editingItem.projectId);
     const tags = editingItem.tags.split(",").map((tag) => tag.trim()).filter(Boolean);
+    const folder_path = resolveFolderPath(folderOptions, editingItem.folderPrimary, editingItem.folderChild, editingItem.newFolderPrimary, editingItem.newFolderChild);
     const endpoint = editingItem.kind === "spark" ? "sparks" : "notes";
     const payload = editingItem.kind === "spark"
       ? {
@@ -208,6 +239,7 @@ export default function ForgeProjectWorkspace() {
           project_id: editingItem.projectId || null,
           category: selectedProject?.category || editingItem.category || null,
           tags,
+          folder_path,
         }
       : {
           title: editingItem.title,
@@ -215,6 +247,7 @@ export default function ForgeProjectWorkspace() {
           project_id: editingItem.projectId || null,
           category: selectedProject?.category || editingItem.category || null,
           tags,
+          folder_path,
           note_type: editingItem.noteType || null,
           status: editingItem.status || "active",
           is_pinned: editingItem.isPinned,
@@ -233,6 +266,44 @@ export default function ForgeProjectWorkspace() {
     setMessage(editingItem.kind === "spark" ? "Spark updated." : "Note updated.");
     setEditingItem(null);
     await loadForge();
+  }
+
+  async function saveWritingDraft() {
+    if (!project || !writingDraft.title.trim()) {
+      setError("Writing Desk needs a title before saving.");
+      return;
+    }
+    setTaskBusy({ title: writingDraft.title.trim(), action: "create" });
+    setError("");
+    try {
+      const tags = writingDraft.tags.split(",").map((tag) => tag.trim()).filter(Boolean);
+      const folder_path = resolveFolderPath(folderOptions, writingDraft.folderPrimary, writingDraft.folderChild, "", "");
+      const res = await fetch(`${API_BASE}/forge/notes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        body: JSON.stringify({
+          user_id: USER_ID,
+          project_id: project.id,
+          category: project.category,
+          title: writingDraft.title.trim(),
+          body: writingDraft.body || null,
+          tags,
+          note_type: writingDraft.noteType,
+          status: "active",
+          is_pinned: ["canon", "decision", "gdd_section"].includes(writingDraft.noteType),
+          folder_path,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Writing Desk save failed.");
+      setWritingDraft({ title: "", body: "", noteType: "draft", folderPrimary: "", folderChild: "", tags: "" });
+      setMessage(`Writing saved: ${data.note?.title || "Forge note"}`);
+      await loadForge();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Writing Desk save failed.");
+    } finally {
+      setTaskBusy(null);
+    }
   }
 
   async function uploadWorkspaceFile() {
@@ -482,15 +553,26 @@ export default function ForgeProjectWorkspace() {
             <InfoCard title="Latest Note" value={visibleNotes[0]?.title || "No notes yet."} />
             <InfoCard title="Latest Upload" value={visibleFiles[0]?.file_name || "No files attached yet."} />
             <MissionCard project={project} tasks={visibleTasks} />
+            {!inbox && project && <LinkedGoalsPanel project={project} />}
             {visibleImages.length > 0 && <ImageGrid files={visibleImages.slice(0, 3)} onPreview={setPreviewImage} />}
           </div>
         )}
-        {tab === "Spark Log" && <SparkList sparks={visibleSparks} onEdit={openSparkDrawer} />}
-        {tab === "Notes" && <NoteList notes={visibleNotes} onEdit={openNoteDrawer} />}
+        {tab === "Writing Desk" && !inbox && project && (
+          <WritingDesk
+            draft={writingDraft}
+            notes={visibleNotes}
+            folderOptions={folderOptions}
+            onDraftChange={setWritingDraft}
+            onSave={saveWritingDraft}
+            onEdit={openNoteDrawer}
+          />
+        )}
+        {tab === "Spark Log" && <SparkList sparks={visibleSparks} folderOptions={folderOptions} onEdit={openSparkDrawer} />}
+        {tab === "Notes" && <NoteList notes={visibleNotes} folderOptions={folderOptions} onEdit={openNoteDrawer} />}
         {tab === "Files" && (
           <>
             {!inbox && project && <WorkspaceUploadForm form={uploadForm} onChange={setUploadForm} onUpload={uploadWorkspaceFile} />}
-            <FileList files={visibleFiles} projects={projects} onMove={(id, next) => moveItem("files", id, next)} onDelete={(id, label) => deleteItem("files", id, label)} />
+            <FileList files={visibleFiles} projects={projects} onMove={(id, next) => moveItem("files", id, next)} onDelete={(id, label) => deleteItem("files", id, label)} onPreview={setPreviewFile} />
           </>
         )}
         {tab === "Images" && (
@@ -523,10 +605,12 @@ export default function ForgeProjectWorkspace() {
         {tab === "Activity" && <Activity sparks={visibleSparks} notes={visibleNotes} files={visibleFiles} tasks={visibleTasks} project={project} inbox={inbox} />}
       </section>
       {previewImage && <ImageLightbox file={previewImage} onClose={() => setPreviewImage(null)} />}
+      {previewFile && <DocumentPreview file={previewFile} onClose={() => setPreviewFile(null)} />}
       {editingItem && (
         <ForgeItemDrawer
           item={editingItem}
           projects={projects}
+          folderOptions={folderOptions}
           onChange={setEditingItem}
           onSave={saveEditingItem}
           onDelete={(kind, id, label) => deleteItem(kind, id, label).then((deleted) => {
@@ -573,6 +657,100 @@ function MissionCard({ project, tasks }: { project: ForgeProject | null; tasks: 
       <span>Recently Unlocked: {unlocked}{unlocked !== "Nothing unlocked yet." ? " ✅" : ""}</span>
       <em>Project Completion: {sortedComplete.length} / {tasks.length} tasks complete</em>
     </article>
+  );
+}
+
+function LinkedGoalsPanel({ project }: { project: ForgeProject }) {
+  const goals = [
+    ...(project.linked_goal ? [{ ...project.linked_goal, relationship_type: "primary", notes: "Primary synced project goal." }] : []),
+    ...(project.linked_goals || []),
+  ];
+
+  if (!goals.length) {
+    return <article className="workspace-card linked-goals-card"><p>Linked Goals</p><strong>No shared goals linked yet.</strong><span>Future dependency goals can be attached here without moving the project.</span></article>;
+  }
+
+  return (
+    <article className="workspace-card linked-goals-card">
+      <p>Linked Goals</p>
+      {goals.map((goal) => {
+        const percent = goal.project?.percent ?? goal.progress?.percent ?? 0;
+        return (
+          <div className="linked-goal-row" key={`${goal.id}-${goal.relationship_type || "goal"}`}>
+            <div>
+              <strong>{goal.title}</strong>
+              <span>{goal.relationship_type || "linked"} · {goal.notes || "Updates here can depend on this goal."}</span>
+            </div>
+            <Progress value={percent} />
+            <Link href={`/goals?focus=${goal.id}`}>Open Goal</Link>
+          </div>
+        );
+      })}
+    </article>
+  );
+}
+
+function WritingDesk({
+  draft,
+  notes,
+  folderOptions,
+  onDraftChange,
+  onSave,
+  onEdit,
+}: {
+  draft: { title: string; body: string; noteType: string; folderPrimary: string; folderChild: string; tags: string };
+  notes: ForgeNote[];
+  folderOptions: FolderOptions;
+  onDraftChange: (draft: { title: string; body: string; noteType: string; folderPrimary: string; folderChild: string; tags: string }) => void;
+  onSave: () => void;
+  onEdit: (note: ForgeNote) => void;
+}) {
+  const bible = buildProjectBible(notes);
+  return (
+    <div className="writing-desk">
+      <section className="writing-editor">
+        <div>
+          <p>Writing Desk</p>
+          <h2>Build the document inside Forge.</h2>
+          <span>Use this for GDD sections, canon notes, decisions, references, and project-bible material.</span>
+        </div>
+        <input value={draft.title} onChange={(event) => onDraftChange({ ...draft, title: event.target.value })} placeholder="Document title" />
+        <div className="drawer-grid">
+          <select value={draft.noteType} onChange={(event) => onDraftChange({ ...draft, noteType: event.target.value })}>
+            <option value="draft">Draft</option>
+            <option value="gdd_section">GDD Section</option>
+            <option value="canon">Canon</option>
+            <option value="decision">Decision</option>
+            <option value="reference">Reference</option>
+            <option value="question">Question</option>
+            <option value="idea">Idea</option>
+          </select>
+          <input value={draft.tags} onChange={(event) => onDraftChange({ ...draft, tags: event.target.value })} placeholder="tags, comma separated" />
+        </div>
+        <FolderPicker
+          folderOptions={folderOptions}
+          primary={draft.folderPrimary}
+          child={draft.folderChild}
+          newPrimary=""
+          newChild=""
+          onChange={(next) => onDraftChange({ ...draft, folderPrimary: next.primary, folderChild: next.child })}
+        />
+        <textarea value={draft.body} onChange={(event) => onDraftChange({ ...draft, body: event.target.value })} placeholder="# Heading&#10;&#10;Write the project doc here..." rows={14} />
+        <button type="button" className="workspace-secondary" onClick={onSave}>Save to Writing Desk</button>
+      </section>
+      <section className="project-bible">
+        <div>
+          <p>Project Bible</p>
+          <h2>Generated from pinned/canon notes.</h2>
+        </div>
+        <pre>{bible || "No Project Bible material yet. Save canon, decision, reference, or GDD section notes to generate one."}</pre>
+        <button type="button" className="workspace-secondary" onClick={() => navigator.clipboard.writeText(bible)}>Copy Project Bible Markdown</button>
+      </section>
+      <section className="writing-library">
+        <h3>Writing Library</h3>
+        <NoteList notes={notes} folderOptions={folderOptions} onEdit={onEdit} />
+      </section>
+    </div>
   );
 }
 
@@ -723,21 +901,92 @@ function TaskSavingOverlay({ task }: { task: { title: string; action: "complete"
   );
 }
 
-function SparkList({ sparks, onEdit }: { sparks: ForgeSpark[]; onEdit: (spark: ForgeSpark) => void }) {
+type FolderOptions = { primary: string[]; children: Record<string, string[]> };
+
+function SparkList({ sparks, folderOptions, onEdit }: { sparks: ForgeSpark[]; folderOptions: FolderOptions; onEdit: (spark: ForgeSpark) => void }) {
   if (!sparks.length) return <Empty title="No sparks captured for this project yet." text="Capture the small idea before it cools." />;
-  return <div className="workspace-list">{sparks.map((spark) => <button type="button" className="workspace-click-card" key={spark.id} onClick={() => onEdit(spark)}><b>{spark.spark_text}</b><span>{spark.tags?.length ? spark.tags.join(", ") : "Open spark protocol"}</span></button>)}</div>;
+  return <FolderBoard items={sparks} folderOptions={folderOptions} renderItem={(spark) => (
+    <button type="button" className="workspace-click-card" key={spark.id} onClick={() => onEdit(spark)}>
+      <b>{spark.spark_text}</b>
+      <span>{spark.tags?.length ? spark.tags.join(", ") : "Open spark protocol"}</span>
+    </button>
+  )} />;
 }
 
-function NoteList({ notes, onEdit }: { notes: ForgeNote[]; onEdit: (note: ForgeNote) => void }) {
+function NoteList({ notes, folderOptions, onEdit }: { notes: ForgeNote[]; folderOptions: FolderOptions; onEdit: (note: ForgeNote) => void }) {
   if (!notes.length) return <Empty title="No notes yet." text="Write down the shape of the idea." />;
-  return (
-    <div className="workspace-list">
-      {notes.map((note) => (
+  return <FolderBoard items={notes} folderOptions={folderOptions} renderItem={(note) => (
         <button type="button" className={`workspace-click-card ${note.is_pinned ? "pinned" : ""}`} key={note.id} onClick={() => onEdit(note)}>
           <b>{note.title}</b>
           <span>{note.note_type ? `${note.note_type} · ` : ""}{note.body || "Open note dossier"}</span>
         </button>
+  )} />;
+}
+
+function FolderBoard<T extends { id: string; folder_path?: string[] | null }>({ items, renderItem }: { items: T[]; folderOptions: FolderOptions; renderItem: (item: T) => ReactNode }) {
+  const folders = groupByFolder(items);
+  return (
+    <div className="folder-board">
+      {folders.map((folder) => (
+        <section key={folder.key} className="folder-section">
+          <div className="forge-folder-label">
+            <Image src="/images/Forge/cleaned/forge-incubation-folder-small.png" alt="" width={72} height={52} unoptimized />
+            <span>{folder.label}</span>
+          </div>
+          <div className="workspace-list">{folder.items.map(renderItem)}</div>
+        </section>
       ))}
+    </div>
+  );
+}
+
+function FolderPicker({
+  folderOptions,
+  primary,
+  child,
+  newPrimary,
+  newChild,
+  onChange,
+}: {
+  folderOptions: FolderOptions;
+  primary: string;
+  child: string;
+  newPrimary: string;
+  newChild: string;
+  onChange: (next: { primary: string; child: string; newPrimary: string; newChild: string }) => void;
+}) {
+  const children = primary ? folderOptions.children[primary] || [] : [];
+  return (
+    <div className="folder-picker">
+      <label>
+        <span>Folder</span>
+        <select value={primary} onChange={(event) => onChange({ primary: event.target.value, child: "", newPrimary: "", newChild })}>
+          <option value="">Unfiled</option>
+          {folderOptions.primary.map((item) => <option key={item} value={item}>{item}</option>)}
+          <option value="__new">Create new folder...</option>
+        </select>
+      </label>
+      {primary === "__new" ? (
+        <label>
+          <span>New Folder</span>
+          <input value={newPrimary} onChange={(event) => onChange({ primary, child, newPrimary: event.target.value, newChild })} placeholder="Characters" />
+        </label>
+      ) : (
+        <label>
+          <span>Subfolder</span>
+          <select value={child} onChange={(event) => onChange({ primary, child: event.target.value, newPrimary, newChild: "" })} disabled={!primary || primary === "__new"}>
+            <option value="">None</option>
+            {children.map((item) => <option key={item} value={item}>{item}</option>)}
+            {primary && <option value="__new">Create new subfolder...</option>}
+          </select>
+        </label>
+      )}
+      {child === "__new" && primary !== "__new" && (
+        <label>
+          <span>New Subfolder</span>
+          <input value={newChild} onChange={(event) => onChange({ primary, child, newPrimary, newChild: event.target.value })} placeholder="Lucien" />
+        </label>
+      )}
     </div>
   );
 }
@@ -790,6 +1039,7 @@ function WorkspaceUploadForm({
 function ForgeItemDrawer({
   item,
   projects,
+  folderOptions,
   onChange,
   onSave,
   onDelete,
@@ -797,6 +1047,7 @@ function ForgeItemDrawer({
 }: {
   item: EditingForgeItem;
   projects: ForgeProject[];
+  folderOptions: FolderOptions;
   onChange: (item: EditingForgeItem) => void;
   onSave: () => void;
   onDelete: (kind: "sparks" | "notes", id: string, label: string) => void;
@@ -835,6 +1086,20 @@ function ForgeItemDrawer({
             <input value={item.linkedMilestone} onChange={(event) => onChange({ ...item, linkedMilestone: event.target.value })} placeholder="Linked milestone" />
           </>
         )}
+        <FolderPicker
+          folderOptions={folderOptions}
+          primary={item.folderPrimary}
+          child={item.folderChild}
+          newPrimary={item.newFolderPrimary}
+          newChild={item.newFolderChild}
+          onChange={(next) => onChange({
+            ...item,
+            folderPrimary: next.primary,
+            folderChild: next.child,
+            newFolderPrimary: next.newPrimary,
+            newFolderChild: next.newChild,
+          } as EditingForgeItem)}
+        />
         <select value={item.projectId} onChange={(event) => onChange({ ...item, projectId: event.target.value })}>
           <option value="">Unassigned Forge Inbox</option>
           {projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
@@ -850,9 +1115,9 @@ function ForgeItemDrawer({
   );
 }
 
-function FileList({ files, projects, onMove, onDelete }: { files: ForgeFile[]; projects: ForgeProject[]; onMove: (id: string, projectId: string) => void; onDelete: (id: string, label: string) => void }) {
+function FileList({ files, projects, onMove, onDelete, onPreview }: { files: ForgeFile[]; projects: ForgeProject[]; onMove: (id: string, projectId: string) => void; onDelete: (id: string, label: string) => void; onPreview: (file: ForgeFile) => void }) {
   if (!files.length) return <Empty title="No files attached yet." text="Upload screenshots, PDFs, references, sketches, or docs." />;
-  return <div className="workspace-list">{files.map((file) => <article key={file.id}><b>{file.file_name}</b><span>{file.caption || file.file_type || "Forge file"}</span><MoveSelect value={file.project_id || ""} projects={projects} onChange={(value) => onMove(file.id, value)} /><DeleteButton onClick={() => onDelete(file.id, `file: ${file.file_name}`)} /></article>)}</div>;
+  return <div className="workspace-list">{files.map((file) => <article key={file.id}><b>{file.file_name}</b><span>{file.caption || file.file_type || "Forge file"}</span><button type="button" className="workspace-secondary" onClick={() => onPreview(file)}>Preview</button><MoveSelect value={file.project_id || ""} projects={projects} onChange={(value) => onMove(file.id, value)} /><DeleteButton onClick={() => onDelete(file.id, `file: ${file.file_name}`)} /></article>)}</div>;
 }
 
 function ImageGrid({ files, projects, onMove, onDelete, onPreview, onSetCover }: { files: ForgeFile[]; projects?: ForgeProject[]; onMove?: (id: string, projectId: string) => void; onDelete?: (id: string, label: string) => void; onPreview?: (file: ForgeFile) => void; onSetCover?: (file: ForgeFile) => void }) {
@@ -995,6 +1260,103 @@ function orderedGroupEntries(groups: Record<string, ForgeTask[]>) {
     }
     return a.localeCompare(b);
   });
+}
+
+function buildFolderOptions(notes: ForgeNote[], sparks: ForgeSpark[]): FolderOptions {
+  const primary = new Set<string>();
+  const children: Record<string, Set<string>> = {};
+  [...notes, ...sparks].forEach((item) => {
+    const path = normalizeFolderPath(item.folder_path || []);
+    if (!path[0]) return;
+    primary.add(path[0]);
+    if (path[1]) {
+      children[path[0]] ||= new Set<string>();
+      children[path[0]].add(path[1]);
+    }
+  });
+  return {
+    primary: [...primary].sort((a, b) => a.localeCompare(b)),
+    children: Object.fromEntries(Object.entries(children).map(([key, values]) => [key, [...values].sort((a, b) => a.localeCompare(b))])),
+  };
+}
+
+function resolveFolderPath(options: FolderOptions, primary: string, child: string, newPrimary: string, newChild: string) {
+  const resolvedPrimary = primary === "__new" ? newPrimary : primary;
+  const resolvedChild = child === "__new" ? newChild : child;
+  const canonicalPrimary = canonicalFolderLabel(resolvedPrimary, options.primary);
+  const canonicalChild = canonicalPrimary ? canonicalFolderLabel(resolvedChild, options.children[canonicalPrimary] || []) : "";
+  return [canonicalPrimary, canonicalChild].filter(Boolean).slice(0, 2);
+}
+
+function canonicalFolderLabel(value: string, existing: string[]) {
+  const clean = titleCaseFolder(value);
+  if (!clean) return "";
+  const normalized = normalizeFolderKey(clean);
+  return existing.find((item) => normalizeFolderKey(item) === normalized) || clean;
+}
+
+function normalizeFolderKey(value: string) {
+  const clean = value.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  return clean.endsWith("s") ? clean.slice(0, -1) : clean;
+}
+
+function titleCaseFolder(value: string) {
+  return value.trim().replace(/\s+/g, " ").split(" ").map((word) => word ? `${word[0].toUpperCase()}${word.slice(1)}` : "").join(" ");
+}
+
+function normalizeFolderPath(path: string[]) {
+  return (path || []).map(titleCaseFolder).filter(Boolean).slice(0, 2);
+}
+
+function groupByFolder<T extends { id: string; folder_path?: string[] | null }>(items: T[]) {
+  const groups = new Map<string, { key: string; label: string; items: T[] }>();
+  items.forEach((item) => {
+    const path = normalizeFolderPath(item.folder_path || []);
+    const label = path.length ? path.join(" / ") : "Unfiled";
+    const key = label.toLowerCase();
+    if (!groups.has(key)) groups.set(key, { key, label, items: [] });
+    groups.get(key)?.items.push(item);
+  });
+  return [...groups.values()].sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function buildProjectBible(notes: ForgeNote[]) {
+  const source = notes
+    .filter((note) => ["gdd_section", "canon", "decision", "reference"].includes(note.note_type || "") || note.is_pinned)
+    .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0) || a.title.localeCompare(b.title));
+  return source.map((note) => `## ${note.title}\n\n${note.body || "_No body recorded yet._"}`).join("\n\n---\n\n");
+}
+
+function DocumentPreview({ file, onClose }: { file: ForgeFile; onClose: () => void }) {
+  const type = file.file_type || "";
+  const name = file.file_name || "";
+  const isPdf = type === "application/pdf" || name.toLowerCase().endsWith(".pdf");
+  const isOffice = /\.(doc|docx|pages)$/i.test(name) || type.includes("wordprocessingml") || type.includes("msword");
+  return (
+    <div className="image-lightbox document-lightbox" role="presentation" onMouseDown={onClose}>
+      <section role="dialog" aria-modal="true" aria-label={name} onMouseDown={(event) => event.stopPropagation()}>
+        <button type="button" onClick={onClose} aria-label="Close document preview">×</button>
+        <div className="document-preview-header">
+          <p>Document Preview</p>
+          <h2>{name}</h2>
+          <span>{file.caption || type || "Forge document"}</span>
+        </div>
+        {isPdf && file.file_url ? (
+          <iframe src={file.file_url} title={name} />
+        ) : isImage(file) ? (
+          <Image src={file.file_url || ""} alt={file.caption || name} width={1100} height={760} unoptimized />
+        ) : isOffice ? (
+          <div className="document-preview-fallback">
+            <strong>{name}</strong>
+            <span>Word and Pages files are stored in Forge. Browser-native preview is limited for this file type, so use Open/Download to inspect the original document.</span>
+          </div>
+        ) : (
+          <div className="document-preview-fallback"><strong>{name}</strong><span>No browser preview is available for this file type yet.</span></div>
+        )}
+        {file.file_url && <a className="workspace-secondary" href={file.file_url} target="_blank" rel="noreferrer" download={name}>Open / Download</a>}
+      </section>
+    </div>
+  );
 }
 
 function ImageLightbox({ file, onClose }: { file: ForgeFile; onClose: () => void }) {
@@ -1152,6 +1514,25 @@ function WorkspaceStyles() {
     .mission-card {
       grid-column: span 2;
     }
+    .linked-goals-card {
+      grid-column: span 2;
+    }
+    .linked-goal-row {
+      border-top: 1px solid rgba(212,173,101,.14);
+      display: grid;
+      gap: 12px;
+      grid-template-columns: minmax(0, 1fr) minmax(160px, 220px) auto;
+      align-items: center;
+      margin-top: 12px;
+      padding-top: 12px;
+    }
+    .linked-goal-row a {
+      border: 1px solid rgba(143,220,124,.28);
+      border-radius: 999px;
+      color: #caffbf;
+      padding: 8px 10px;
+      text-decoration: none;
+    }
     .mission-card span,
     .mission-card em {
       color: rgba(234,223,199,.72);
@@ -1183,6 +1564,122 @@ function WorkspaceStyles() {
     }
     .workspace-click-card b {
       color: #fff1c8;
+    }
+    .writing-desk {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: minmax(320px, 1.1fr) minmax(280px, .9fr);
+    }
+    .writing-editor,
+    .project-bible,
+    .writing-library {
+      border: 1px solid rgba(212,173,101,.18);
+      border-radius: 12px;
+      background:
+        radial-gradient(circle at 90% 5%, rgba(196,111,45,.12), transparent 26%),
+        rgba(0,0,0,.26);
+      display: grid;
+      gap: 12px;
+      padding: 15px;
+    }
+    .writing-library {
+      grid-column: 1 / -1;
+    }
+    .writing-editor p,
+    .project-bible p,
+    .writing-library h3 {
+      color: #f0a44d;
+      font-size: .74rem;
+      font-weight: 900;
+      letter-spacing: .15em;
+      text-transform: uppercase;
+    }
+    .writing-editor h2,
+    .project-bible h2 {
+      color: #fff1c8;
+      margin-top: 4px;
+    }
+    .writing-editor span {
+      color: rgba(234,223,199,.72);
+      display: block;
+      margin-top: 5px;
+    }
+    .writing-editor input,
+    .writing-editor select,
+    .writing-editor textarea {
+      border: 1px solid rgba(212,173,101,.22);
+      border-radius: 8px;
+      background: rgba(0,0,0,.34);
+      color: #eadfc7;
+      padding: 10px 11px;
+    }
+    .writing-editor textarea {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      line-height: 1.65;
+      resize: vertical;
+    }
+    .project-bible pre {
+      background:
+        linear-gradient(rgba(232,211,165,.03) 1px, transparent 1px),
+        rgba(0,0,0,.28);
+      background-size: 100% 28px;
+      border: 1px solid rgba(212,173,101,.16);
+      border-radius: 10px;
+      color: #eadfc7;
+      line-height: 1.58;
+      max-height: 420px;
+      overflow: auto;
+      padding: 14px;
+      white-space: pre-wrap;
+    }
+    .folder-board {
+      display: grid;
+      gap: 14px;
+    }
+    .folder-section {
+      border: 1px solid rgba(212,173,101,.12);
+      border-radius: 12px;
+      background: rgba(0,0,0,.16);
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+    }
+    .forge-folder-label {
+      align-items: end;
+      color: #f4d38f;
+      display: inline-flex;
+      font-size: .78rem;
+      font-weight: 900;
+      gap: 8px;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    .forge-folder-label img {
+      filter: drop-shadow(0 0 14px rgba(196,111,45,.24));
+    }
+    .folder-picker {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    }
+    .folder-picker label {
+      display: grid;
+      gap: 6px;
+    }
+    .folder-picker span {
+      color: rgba(234,223,199,.66);
+      font-size: .72rem;
+      font-weight: 800;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+    .folder-picker input,
+    .folder-picker select {
+      border: 1px solid rgba(212,173,101,.22);
+      border-radius: 8px;
+      background: rgba(0,0,0,.34);
+      color: #eadfc7;
+      padding: 10px 11px;
     }
     .workspace-upload {
       border: 1px solid rgba(212,173,101,.18);
@@ -1606,6 +2103,45 @@ function WorkspaceStyles() {
       color: rgba(234,223,199,.76);
       margin-top: 10px;
     }
+    .document-lightbox iframe {
+      border: 1px solid rgba(212,173,101,.22);
+      border-radius: 10px;
+      height: min(72vh, 780px);
+      width: min(1040px, 88vw);
+      background: #10100c;
+    }
+    .document-preview-header {
+      margin-bottom: 12px;
+      padding-right: 54px;
+    }
+    .document-preview-header p {
+      color: #f0a44d;
+      font-size: .72rem;
+      font-weight: 900;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+    .document-preview-header h2 {
+      color: #fff1c8;
+      margin-top: 4px;
+    }
+    .document-preview-header span,
+    .document-preview-fallback span {
+      color: rgba(234,223,199,.72);
+      display: block;
+      margin-top: 6px;
+    }
+    .document-preview-fallback {
+      border: 1px dashed rgba(212,173,101,.3);
+      border-radius: 12px;
+      background: rgba(0,0,0,.28);
+      display: grid;
+      gap: 8px;
+      min-height: 260px;
+      place-content: center;
+      text-align: center;
+      padding: 24px;
+    }
     @media (max-width: 760px) {
       .workspace-cover {
         float: none;
@@ -1614,6 +2150,14 @@ function WorkspaceStyles() {
       }
       .mission-card {
         grid-column: auto;
+      }
+      .linked-goals-card,
+      .writing-library {
+        grid-column: auto;
+      }
+      .linked-goal-row,
+      .writing-desk {
+        grid-template-columns: 1fr;
       }
       .task-command {
         align-items: start;

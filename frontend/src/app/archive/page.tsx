@@ -192,6 +192,7 @@ function ArchivePageContent() {
   const [chronicleForm, setChronicleForm] = useState<ChronicleForm>(() => emptyChronicleForm());
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [archiveSaving, setArchiveSaving] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [chroniclesLoading, setChroniclesLoading] = useState(false);
   const [chronicleFilter, setChronicleFilter] = useState<"all" | "draft" | "in_progress" | "filed">("all");
@@ -355,6 +356,7 @@ function ArchivePageContent() {
     const file = !!options?.file;
     setMessage("");
     setError("");
+    setArchiveSaving(file ? "Filing Chronicle" : "Saving Chronicle");
     try {
       const res = await fetch(`${API_BASE}/archive/chronicles/${chronicleForm.id}`, {
         method: "PUT",
@@ -381,12 +383,15 @@ function ArchivePageContent() {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save Chronicle.");
+    } finally {
+      setArchiveSaving(null);
     }
   }
 
   async function createDream() {
     setMessage("");
     setError("");
+    setArchiveSaving("Archiving Dream");
     try {
       const payload = formToPayload(form);
       const res = await fetch(`${API_BASE}/archive/dreams`, {
@@ -401,12 +406,15 @@ function ArchivePageContent() {
       if (data.dream) selectDream(data.dream);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to archive dream.");
+    } finally {
+      setArchiveSaving(null);
     }
   }
 
   async function saveDream() {
     setMessage("");
     setError("");
+    setArchiveSaving(form.id ? "Updating Dream" : "Archiving Dream");
     try {
       const payload = formToPayload(form);
       const res = await fetch(form.id ? `${API_BASE}/archive/dreams/${form.id}` : `${API_BASE}/archive/dreams`, {
@@ -421,6 +429,8 @@ function ArchivePageContent() {
       if (data.dream) selectDream(data.dream);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save dream.");
+    } finally {
+      setArchiveSaving(null);
     }
   }
 
@@ -477,8 +487,21 @@ function ArchivePageContent() {
         )}
       </section>
 
+      {archiveSaving && <ArchiveSavingOverlay label={archiveSaving} />}
       <ArchiveStyles />
     </main>
+  );
+}
+
+function ArchiveSavingOverlay({ label }: { label: string }) {
+  return (
+    <div className="archive-saving-overlay" role="status" aria-live="polite">
+      <div className="archive-saving-card">
+        <span aria-hidden="true" />
+        <p>{label}</p>
+        <strong>Preserving this memory in The Archive...</strong>
+      </div>
+    </div>
   );
 }
 
@@ -2520,6 +2543,68 @@ function ArchiveStyles() {
         border: 1px solid rgba(214, 168, 95, 0.34);
         background: rgba(214, 168, 95, 0.12);
         color: #f4ead2;
+      }
+
+      .archive-saving-overlay {
+        align-items: center;
+        background:
+          radial-gradient(circle at 50% 42%, rgba(47, 111, 179, 0.18), transparent 28%),
+          radial-gradient(circle at 50% 52%, rgba(214, 168, 95, 0.16), transparent 24%),
+          rgba(3, 6, 14, 0.82);
+        backdrop-filter: blur(8px);
+        display: flex;
+        inset: 0;
+        justify-content: center;
+        padding: 24px;
+        position: fixed;
+        z-index: 200;
+      }
+
+      .archive-saving-card {
+        border: 1px solid rgba(214, 168, 95, 0.38);
+        border-radius: 18px;
+        background:
+          linear-gradient(145deg, rgba(9, 14, 25, 0.96), rgba(28, 20, 12, 0.94)),
+          url("/images/Parchment Paper Texture.png") center/cover;
+        box-shadow: 0 28px 90px rgba(0, 0, 0, 0.66), 0 0 48px rgba(47, 111, 179, 0.22), inset 0 0 42px rgba(214, 168, 95, 0.08);
+        display: grid;
+        justify-items: center;
+        max-width: 420px;
+        padding: 34px;
+        text-align: center;
+        width: min(100%, 420px);
+      }
+
+      .archive-saving-card > span {
+        animation: archive-save-spin 1.3s linear infinite;
+        border: 5px solid rgba(214, 168, 95, 0.24);
+        border-left-color: #2f6fb3;
+        border-top-color: #d6a85f;
+        border-radius: 999px;
+        box-shadow: 0 0 32px rgba(47, 111, 179, 0.22);
+        height: 78px;
+        width: 78px;
+      }
+
+      .archive-saving-card p {
+        color: #d6a85f;
+        font-family: ${cinzel.style.fontFamily};
+        font-size: 0.82rem;
+        font-weight: 700;
+        letter-spacing: 0.18em;
+        margin-top: 20px;
+        text-transform: uppercase;
+      }
+
+      .archive-saving-card strong {
+        color: #f4ead2;
+        font-family: ${cormorant.style.fontFamily};
+        font-size: 1.35rem;
+        margin-top: 8px;
+      }
+
+      @keyframes archive-save-spin {
+        to { transform: rotate(360deg); }
       }
 
       @media (max-width: 1100px) {

@@ -28,6 +28,7 @@ WORKSTATION_TAGS = ["jarvis", "hardware", "workstation", "command-center", "buil
 
 def build_forge_dashboard(user_id: str = "john") -> dict:
     ensure_workstation_project_link(user_id)
+    ensure_shared_goal_links(user_id)
     projects = list_forge_projects(user_id)
     sparks = list_forge_sparks(user_id)
     notes = list_forge_notes(user_id)
@@ -36,6 +37,7 @@ def build_forge_dashboard(user_id: str = "john") -> dict:
     goals = list_goals(user_id, active_only=False)
     apply_task_progress(projects, tasks)
     attach_task_goals(projects, goals)
+    attach_shared_goals(projects, goals, user_id)
 
     by_category = defaultdict(list)
     for project in projects:
@@ -144,6 +146,43 @@ def attach_task_goals(projects: list[dict], goals: list[dict]) -> None:
         task_goal = task_goals_by_project.get(project.get("id"))
         if task_goal:
             project["task_goal"] = task_goal
+
+
+def attach_shared_goals(projects: list[dict], goals: list[dict], user_id: str = "john") -> None:
+    try:
+        response = (
+            supabase.table("forge_project_goal_links")
+            .select("*")
+            .eq("user_id", user_id)
+            .execute()
+        )
+    except Exception:
+        return
+
+    goals_by_id = {goal.get("id"): goal for goal in goals}
+    links_by_project: dict[str, list[dict]] = defaultdict(list)
+    for link in response.data or []:
+        goal = goals_by_id.get(link.get("goal_id")) or get_goal(link.get("goal_id"))
+        if not goal:
+            continue
+        links_by_project[link.get("project_id")].append({
+            "id": goal.get("id"),
+            "title": goal.get("title"),
+            "category": goal.get("category"),
+            "mission_type": goal.get("mission_type"),
+            "relationship_type": link.get("relationship_type") or "dependency",
+            "notes": link.get("notes"),
+            "project": goal.get("project") or {},
+            "milestones": goal.get("milestones") or [],
+            "progress": goal.get("progress") or {},
+        })
+
+    for project in projects:
+        project_links = links_by_project.get(project.get("id"), [])
+        primary_goal_id = project.get("goal_id")
+        if primary_goal_id:
+            project_links = [link for link in project_links if link.get("id") != primary_goal_id]
+        project["linked_goals"] = project_links
 
 
 def is_task_complete(task: dict) -> bool:
@@ -264,6 +303,37 @@ def ensure_workstation_project_link(user_id: str = "john") -> None:
             return
 
         supabase.table("forge_projects").insert(project_data).execute()
+    except Exception:
+        return
+
+
+def ensure_shared_goal_links(user_id: str = "john") -> None:
+    try:
+        goals = [
+            goal for goal in list_goals(user_id, active_only=False)
+            if (goal.get("title") or "").strip().lower() == WORKSTATION_TITLE.lower()
+        ]
+        if not goals:
+            return
+
+        goal = goals[0]
+        projects_response = (
+            supabase.table("forge_projects")
+            .select("id, user_id, title")
+            .eq("user_id", user_id)
+            .execute()
+        )
+        for project in projects_response.data or []:
+            title = (project.get("title") or "").strip().lower()
+            if title not in {"chloe gf build", "jarvis life command center"}:
+                continue
+            supabase.table("forge_project_goal_links").upsert({
+                "user_id": user_id,
+                "project_id": project["id"],
+                "goal_id": goal["id"],
+                "relationship_type": "dependency",
+                "notes": "Shared workstation hardware dependency. This project can keep moving, but final completion depends on the workstation build.",
+            }, on_conflict="project_id,goal_id").execute()
     except Exception:
         return
 

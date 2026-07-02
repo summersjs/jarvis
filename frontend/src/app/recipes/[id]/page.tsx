@@ -535,7 +535,20 @@ export default function RecipeDetailPage() {
           </section>
         )}
       </div>
+      {isSaving && <JarvisRecipeSaveOverlay label="Saving Recipe Changes" />}
     </main>
+  );
+}
+
+function JarvisRecipeSaveOverlay({ label }: { label: string }) {
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/80 p-6 backdrop-blur-md">
+      <div className="grid w-full max-w-md justify-items-center rounded-3xl border border-cyan-300/35 bg-[radial-gradient(circle_at_50%_0%,rgba(34,211,238,0.16),transparent_35%),linear-gradient(145deg,rgba(3,10,8,0.98),rgba(5,18,15,0.96))] p-8 text-center shadow-[0_0_70px_rgba(34,211,238,0.22)]">
+        <span className="h-20 w-20 animate-spin rounded-full border-4 border-green-400/20 border-l-cyan-300 border-t-green-300 shadow-[0_0_34px_rgba(34,211,238,0.24)]" />
+        <p className="mt-5 text-xs font-black uppercase tracking-[0.24em] text-cyan-200">{label}</p>
+        <strong className="mt-2 text-xl text-green-50">Updating Recipe Vault systems...</strong>
+      </div>
+    </div>
   );
 }
 

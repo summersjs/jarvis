@@ -615,7 +615,7 @@ export default function CommandCenterPage() {
           </Link>
           <Link className="command-nav-link tactical-nav-link" href="/recipes">
             <BookOpen className="h-4 w-4" />
-            <span>Recipes</span>
+            <span>Recipe Vault</span>
           </Link>
           <Link className="command-nav-link tactical-nav-link" href="/preferences">
             <Settings2 className="h-4 w-4" />

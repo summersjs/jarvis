@@ -72,6 +72,7 @@ export default function FoodVaultPage() {
   });
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [savingLabel, setSavingLabel] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setError("");
@@ -109,6 +110,7 @@ export default function FoodVaultPage() {
       setError("Food item name is required.");
       return;
     }
+    setSavingLabel(editingItemId ? "Updating Food Vault Item" : "Saving Food Vault Item");
     try {
       const payload = {
         user_id: USER_ID,
@@ -141,6 +143,8 @@ export default function FoodVaultPage() {
       await loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save food item.");
+    } finally {
+      setSavingLabel(null);
     }
   }
 
@@ -152,6 +156,7 @@ export default function FoodVaultPage() {
       setError("Food item name is required.");
       return;
     }
+    setSavingLabel("Updating Food Vault Item");
     try {
       const res = await fetch(`${API_BASE}/food-vault/items/${editingItemId}`, {
         method: "PATCH",
@@ -165,6 +170,8 @@ export default function FoodVaultPage() {
       await loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save food item.");
+    } finally {
+      setSavingLabel(null);
     }
   }
 
@@ -227,6 +234,7 @@ export default function FoodVaultPage() {
   async function saveTargets() {
     setError("");
     setMessage("");
+    setSavingLabel("Saving Nutrition Targets");
     try {
       const res = await fetch(`${API_BASE}/food-vault/nutrition-targets`, {
         method: "PUT",
@@ -245,6 +253,8 @@ export default function FoodVaultPage() {
       setMessage("Nutrition targets saved.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save nutrition targets.");
+    } finally {
+      setSavingLabel(null);
     }
   }
 
@@ -420,7 +430,20 @@ export default function FoodVaultPage() {
           onDelete={() => deleteItem(editingItem)}
         />
       )}
+      {savingLabel && <JarvisSaveOverlay label={savingLabel} />}
     </main>
+  );
+}
+
+function JarvisSaveOverlay({ label }: { label: string }) {
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/80 p-6 backdrop-blur-md">
+      <div className="grid w-full max-w-md justify-items-center rounded-3xl border border-green-400/35 bg-[radial-gradient(circle_at_50%_0%,rgba(34,211,238,0.15),transparent_35%),linear-gradient(145deg,rgba(3,10,8,0.98),rgba(5,18,15,0.96))] p-8 text-center shadow-[0_0_70px_rgba(34,197,94,0.22)]">
+        <span className="h-20 w-20 animate-spin rounded-full border-4 border-green-400/20 border-l-cyan-300 border-t-green-300 shadow-[0_0_34px_rgba(34,211,238,0.24)]" />
+        <p className="mt-5 text-xs font-black uppercase tracking-[0.24em] text-cyan-200">{label}</p>
+        <strong className="mt-2 text-xl text-green-50">Synchronizing Jarvis nutrition data...</strong>
+      </div>
+    </div>
   );
 }
 

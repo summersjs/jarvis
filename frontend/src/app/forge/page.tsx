@@ -403,11 +403,11 @@ export default function ForgePage() {
 
         {selectedCategory !== "All" && (
           <section className="forge-filter-panel">
-            <div>
+            <Link href={`/forge/projects?category=${encodeURIComponent(selectedCategory)}`} className="forge-filter-link">
               <p>Selected Folder</p>
               <h2>{selectedCategory}</h2>
               <span>{filteredProjects.length ? `${filteredProjects.length} project${filteredProjects.length === 1 ? "" : "s"} on this bench.` : "No projects on this bench yet."}</span>
-            </div>
+            </Link>
             <button onClick={() => openModal("project", null, selectedCategory)}>New {selectedCategory} Project</button>
           </section>
         )}
@@ -1759,6 +1759,24 @@ function ForgeStyles() {
         justify-content: space-between;
         margin-top: 14px;
         padding: 14px 16px;
+      }
+
+      .forge-filter-link {
+        border: 1px solid transparent;
+        border-radius: 10px;
+        color: inherit;
+        display: block;
+        padding: 8px 10px;
+        position: relative;
+        text-decoration: none;
+        transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease, background 180ms ease;
+      }
+
+      .forge-filter-link:hover {
+        background: rgba(196, 111, 45, 0.08);
+        border-color: rgba(196, 111, 45, 0.34);
+        box-shadow: 0 0 24px rgba(196, 111, 45, 0.16), inset 0 0 18px rgba(143, 220, 124, 0.04);
+        transform: translateY(-2px);
       }
 
       .forge-filter-panel p,

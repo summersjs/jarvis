@@ -277,5 +277,90 @@
       "win": "I added lots to Jarvis today. The thing I'm most proud of is the Dream Journal that I added. "
     },
     "weekly_score": 95
+  },
+  {
+    "completed_at": "2026-07-01T23:31:29.627Z",
+    "created_at": "2026-07-01T19:31:29.657221-04:00",
+    "daily_score": 100,
+    "date": "2026-07-01",
+    "finance": {
+      "category": "Food",
+      "money_spent_today": 37.89,
+      "notes": null,
+      "spending_status": "WATCH",
+      "unexpected_expense": false
+    },
+    "is_finalized": true,
+    "lessons": {
+      "adjust_tomorrow": "I need to get out of bed sooner. I woke up earlier today. I need to define some goals early and learn to relax after I meet them. ",
+      "did_not_work": "I didnt stay within my calorie and fat goals. Tomorrow i need to ensure to get my macros. That means eating sooner so I dont eat junk.",
+      "worked": "Today was awesome. I had a lot of momentum and continued upon yesterday's success. "
+    },
+    "lifetime_rank": "Legend",
+    "lifetime_score": 100,
+    "mission_score": 100,
+    "notes": null,
+    "nutrition": {
+      "ate_out_today": true,
+      "estimated_food_spend": 37.89,
+      "meals_completed": 3,
+      "meals_planned_today": 3,
+      "notes": null
+    },
+    "objectives": [
+      {
+        "blocker": "",
+        "completed": true,
+        "id": "9220617f-ed2a-4c2b-8cae-150e4c71098d",
+        "notes": "Milestone completed: Case",
+        "title": "Build the Jarvis Workstation"
+      },
+      {
+        "blocker": "",
+        "completed": true,
+        "id": "4c49d748-15e0-462e-8811-ba12f2345e81",
+        "notes": "Created a daily journal screen. Called Chronicles",
+        "title": "Ship 3 Features Weekly"
+      }
+    ],
+    "overall_status": "ok",
+    "summary": "Evening debrief, John. Today was recovery. Daily score 95. Weekly score 100. Lifetime rank Legend. Today was a recovery day. You completed 2 of 2 goal impacts today. Weekly goals moved: 2 completed, 2 above and beyond. No workout log was found today. Stayed watch on spending. Planned standard: 1 Date weekly is planned for Friday, July 3. Next protocol is bench on Thursday. Tomorrow looks like a bench day. Main lesson: Do the first important thing earlier and keep tomorrow simple. Top priority tomorrow is Prepare for bench.",
+    "tomorrow": {
+      "calendar": [
+        "Clear the morning",
+        "Keep the calendar clean",
+        "Protect the first hour"
+      ],
+      "meal_prep": "You have no events scheduled for tomorrow.",
+      "priorities": [
+        "Prepare for bench"
+      ],
+      "reminder": "Next protocol: bench",
+      "shopping_items": [],
+      "top_priorities": [
+        "Prepare for bench"
+      ],
+      "workout": {
+        "label": "bench",
+        "lift": "bench",
+        "weekday": "Thursday"
+      }
+    },
+    "training": {
+      "energy_level": null,
+      "lift_completed": null,
+      "pain_notes": null,
+      "top_set_reps": null,
+      "top_set_weight": null,
+      "training_notes": null,
+      "workout_completed": false
+    },
+    "updated_at": "2026-07-01T19:31:29.657221-04:00",
+    "user_id": "john",
+    "victory": {
+      "category": "App Build",
+      "win": "Created a daily journal screen called Chronicles. Built the Forge and added two projects to it. "
+    },
+    "weekly_score": 100
   }
 ]

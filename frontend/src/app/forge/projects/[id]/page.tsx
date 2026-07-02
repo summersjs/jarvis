@@ -89,6 +89,7 @@ export default function ForgeProjectWorkspace() {
   const [showTaskGoalForm, setShowTaskGoalForm] = useState(false);
   const [taskGoalTarget, setTaskGoalTarget] = useState("3");
   const [taskGoalFrequency, setTaskGoalFrequency] = useState("weekly");
+  const [taskBusy, setTaskBusy] = useState<{ id: string; title: string; action: "complete" | "reopen" } | null>(null);
 
   const project = projects.find((item) => item.id === projectId) || null;
   const visibleSparks = sparks.filter((item) => inbox ? !item.project_id : item.project_id === projectId);
@@ -189,22 +190,29 @@ export default function ForgeProjectWorkspace() {
   }
 
   async function toggleTask(task: ForgeTask) {
+    if (taskBusy) return;
     const complete = isTaskComplete(task);
-    const res = await fetch(`${API_BASE}/forge/tasks/${task.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-      body: JSON.stringify({
-        status: complete ? "Backlog" : "Done",
-        completed_at: complete ? null : new Date().toISOString(),
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.detail || "Task update failed.");
-      return;
+    setError("");
+    setTaskBusy({ id: task.id, title: task.title, action: complete ? "reopen" : "complete" });
+    try {
+      const res = await fetch(`${API_BASE}/forge/tasks/${task.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        body: JSON.stringify({
+          status: complete ? "Backlog" : "Done",
+          completed_at: complete ? null : new Date().toISOString(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.detail || "Task update failed.");
+        return;
+      }
+      setMessage(complete ? "Task reopened." : "Task completed.");
+      await loadForge();
+    } finally {
+      setTaskBusy(null);
     }
-    setMessage(complete ? "Task reopened." : "Task completed.");
-    await loadForge();
   }
 
   async function setProjectCover(file: ForgeFile) {
@@ -318,6 +326,7 @@ export default function ForgeProjectWorkspace() {
 
       {message && <div className="workspace-alert">{message}</div>}
       {error && <div className="workspace-alert danger">{error}</div>}
+      {taskBusy && <TaskSavingOverlay task={taskBusy} />}
 
       <nav className="workspace-tabs">
         {TABS.map((item) => (
@@ -358,6 +367,7 @@ export default function ForgeProjectWorkspace() {
             onAdd={addTask}
             onToggle={toggleTask}
             onDelete={(id, label) => deleteItem("tasks", id, label)}
+            busyTaskId={taskBusy?.id || null}
           />
         )}
         {tab === "Research" && <Empty title="No research pinned yet." text="Research storage is prepared in SQL; save articles, videos, references, and sources here next." />}
@@ -414,6 +424,7 @@ function TaskBoard({
   onAdd,
   onToggle,
   onDelete,
+  busyTaskId,
 }: {
   tasks: ForgeTask[];
   title: string;
@@ -423,6 +434,7 @@ function TaskBoard({
   onAdd: () => void;
   onToggle: (task: ForgeTask) => void;
   onDelete: (id: string, label: string) => void;
+  busyTaskId: string | null;
 }) {
   const complete = tasks.filter(isTaskComplete).sort((a, b) => String(b.completed_at || "").localeCompare(String(a.completed_at || "")));
   const incomplete = tasks.filter((task) => !isTaskComplete(task)).sort(sortTasks);
@@ -473,7 +485,7 @@ function TaskBoard({
           <section key={groupName}>
             <h3>{groupName}</h3>
             <div className="workspace-list">
-              {groupTasksList.map((task) => <TaskRow key={task.id} task={task} onToggle={onToggle} onDelete={onDelete} />)}
+              {groupTasksList.map((task) => <TaskRow key={task.id} task={task} onToggle={onToggle} onDelete={onDelete} busy={busyTaskId === task.id} disabled={Boolean(busyTaskId)} />)}
             </div>
           </section>
         ))}
@@ -481,7 +493,7 @@ function TaskBoard({
           <section className="completed-tasks">
             <h3>Completed</h3>
             <div className="workspace-list">
-              {complete.map((task) => <TaskRow key={task.id} task={task} onToggle={onToggle} onDelete={onDelete} />)}
+              {complete.map((task) => <TaskRow key={task.id} task={task} onToggle={onToggle} onDelete={onDelete} busy={busyTaskId === task.id} disabled={Boolean(busyTaskId)} />)}
             </div>
           </section>
         )}
@@ -502,19 +514,50 @@ function TaskComposer({ title, group, groups, onTitleChange, onGroupChange, onAd
   );
 }
 
-function TaskRow({ task, onToggle, onDelete }: { task: ForgeTask; onToggle: (task: ForgeTask) => void; onDelete: (id: string, label: string) => void }) {
+function TaskRow({
+  task,
+  onToggle,
+  onDelete,
+  busy,
+  disabled,
+}: {
+  task: ForgeTask;
+  onToggle: (task: ForgeTask) => void;
+  onDelete: (id: string, label: string) => void;
+  busy: boolean;
+  disabled: boolean;
+}) {
   const complete = isTaskComplete(task);
   return (
-    <article className={`task-row ${complete ? "done" : ""}`}>
-      <button type="button" className="task-check" onClick={() => onToggle(task)} aria-label={complete ? `Reopen ${task.title}` : `Complete ${task.title}`}>
-        {complete ? "✓" : ""}
+    <article className={`task-row ${complete ? "done" : ""} ${busy ? "task-row-busy" : ""}`}>
+      <button
+        type="button"
+        className="task-check"
+        onClick={() => onToggle(task)}
+        aria-label={complete ? `Reopen ${task.title}` : `Complete ${task.title}`}
+        disabled={disabled}
+      >
+        {busy ? <span className="task-check-spinner" aria-hidden="true" /> : complete ? "✓" : ""}
       </button>
       <div>
         <b>{task.title}</b>
         <span>{task.milestone_group || "General"}{task.priority ? ` · ${task.priority}` : ""}</span>
       </div>
-      <button type="button" className="workspace-delete" onClick={() => onDelete(task.id, `task: ${task.title}`)}>Delete</button>
+      <button type="button" className="workspace-delete" onClick={() => onDelete(task.id, `task: ${task.title}`)} disabled={disabled}>Delete</button>
     </article>
+  );
+}
+
+function TaskSavingOverlay({ task }: { task: { title: string; action: "complete" | "reopen" } }) {
+  return (
+    <div className="task-saving-overlay" role="status" aria-live="polite" aria-label="Saving Forge task">
+      <div className="task-saving-core">
+        <span className="forge-loader-ring" aria-hidden="true" />
+        <p>{task.action === "complete" ? "Completing Task" : "Reopening Task"}</p>
+        <strong>{task.title}</strong>
+        <em>Syncing Forge and Goals...</em>
+      </div>
+    </div>
   );
 }
 
@@ -554,14 +597,45 @@ function ImageGrid({ files, projects, onMove, onDelete, onPreview, onSetCover }:
 
 function Activity({ sparks, notes, files, tasks, project, inbox }: { sparks: ForgeSpark[]; notes: ForgeNote[]; files: ForgeFile[]; tasks: ForgeTask[]; project: ForgeProject | null; inbox: boolean }) {
   const rows = [
-    ...sparks.map((spark) => `Spark added: ${spark.spark_text}`),
-    ...notes.map((note) => `Note added: ${note.title}`),
-    ...files.map((file) => `${isImage(file) ? "Image" : "File"} uploaded: ${file.file_name}`),
-    ...tasks.map((task) => `${isTaskComplete(task) ? "Task completed" : "Task added"}: ${task.title}`),
-    ...(!inbox && project ? [`Project updated: ${project.title}`] : []),
-  ];
+    ...sparks.map((spark) => ({
+      label: "Spark added",
+      title: spark.spark_text,
+      at: spark.created_at,
+    })),
+    ...notes.map((note) => ({
+      label: note.updated_at && note.updated_at !== note.created_at ? "Note updated" : "Note added",
+      title: note.title,
+      at: note.updated_at || note.created_at,
+    })),
+    ...files.map((file) => ({
+      label: isImage(file) ? "Image uploaded" : "File uploaded",
+      title: file.file_name,
+      at: file.created_at,
+    })),
+    ...tasks.map((task) => ({
+      label: isTaskComplete(task) ? "Task completed" : "Task added",
+      title: task.title,
+      at: task.completed_at || task.created_at,
+    })),
+    ...(!inbox && project ? [{
+      label: "Project updated",
+      title: project.title,
+      at: project.updated_at,
+    }] : []),
+  ].sort((a, b) => timestampValue(b.at) - timestampValue(a.at));
+
   if (!rows.length) return <Empty title="No activity yet." text="Project movement will appear here." />;
-  return <div className="workspace-list">{rows.map((row, index) => <article key={`${row}-${index}`}><b>{row}</b></article>)}</div>;
+  return (
+    <div className="workspace-list activity-list">
+      {rows.map((row, index) => (
+        <article key={`${row.label}-${row.title}-${row.at || index}`}>
+          <p>{row.label}</p>
+          <b>{row.title}</b>
+          <time dateTime={row.at || undefined}>{formatActivityTime(row.at)}</time>
+        </article>
+      ))}
+    </div>
+  );
 }
 
 function MoveSelect({ value, projects, onChange }: { value: string; projects: ForgeProject[]; onChange: (value: string) => void }) {
@@ -582,6 +656,25 @@ function isImage(file: ForgeFile) {
 
 function isTaskComplete(task: ForgeTask) {
   return ["done", "complete", "completed"].includes((task.status || "").toLowerCase()) || Boolean(task.completed_at);
+}
+
+function timestampValue(value?: string | null) {
+  if (!value) return 0;
+  const time = new Date(value).getTime();
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function formatActivityTime(value?: string | null) {
+  if (!value) return "Time not recorded";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Time not recorded";
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 function sortTasks(a: ForgeTask, b: ForgeTask) {
@@ -902,6 +995,10 @@ function WorkspaceStyles() {
       text-decoration: line-through;
       text-decoration-color: rgba(143,220,124,.55);
     }
+    .task-row-busy {
+      border-color: rgba(143,220,124,.42);
+      box-shadow: 0 0 24px rgba(143,220,124,.16), inset 0 0 18px rgba(143,220,124,.05);
+    }
     .task-check {
       align-items: center;
       border: 1px solid rgba(143,220,124,.42);
@@ -920,6 +1017,105 @@ function WorkspaceStyles() {
       border-color: rgba(143,220,124,.75);
       box-shadow: 0 0 20px rgba(143,220,124,.18);
       transform: translateY(-2px);
+    }
+    .task-check:disabled,
+    .workspace-delete:disabled {
+      cursor: wait;
+      opacity: .68;
+      transform: none;
+    }
+    .task-check-spinner {
+      animation: forge-spin 900ms linear infinite;
+      border: 2px solid rgba(202,255,191,.25);
+      border-top-color: #caffbf;
+      border-radius: 999px;
+      display: inline-block;
+      height: 15px;
+      width: 15px;
+    }
+    .task-saving-overlay {
+      align-items: center;
+      background:
+        radial-gradient(circle at 50% 45%, rgba(196,111,45,.18), transparent 30%),
+        radial-gradient(circle at 50% 50%, rgba(143,220,124,.16), transparent 22%),
+        rgba(0,0,0,.82);
+      backdrop-filter: blur(8px);
+      display: flex;
+      inset: 0;
+      justify-content: center;
+      padding: 24px;
+      position: fixed;
+      z-index: 120;
+    }
+    .task-saving-core {
+      border: 1px solid rgba(212,173,101,.34);
+      border-radius: 18px;
+      background:
+        linear-gradient(145deg, rgba(9,12,10,.96), rgba(18,13,8,.94)),
+        url("/images/Forge/forge-bg-texture.png") center/cover;
+      box-shadow: 0 28px 90px rgba(0,0,0,.66), 0 0 48px rgba(196,111,45,.22), inset 0 0 42px rgba(143,220,124,.06);
+      display: grid;
+      justify-items: center;
+      max-width: 420px;
+      padding: 34px;
+      text-align: center;
+      width: min(100%, 420px);
+    }
+    .forge-loader-ring {
+      animation: forge-spin 1.05s linear infinite;
+      border: 5px solid rgba(212,173,101,.22);
+      border-left-color: #caffbf;
+      border-top-color: #f0a44d;
+      border-radius: 999px;
+      box-shadow: 0 0 32px rgba(196,111,45,.24);
+      height: 78px;
+      width: 78px;
+    }
+    .task-saving-core p {
+      color: #f0a44d;
+      font-size: .78rem;
+      font-weight: 900;
+      letter-spacing: .2em;
+      margin-top: 20px;
+      text-transform: uppercase;
+    }
+    .task-saving-core strong {
+      color: #fff1c8;
+      font-size: 1.3rem;
+      margin-top: 8px;
+    }
+    .task-saving-core em {
+      color: rgba(234,223,199,.72);
+      font-style: normal;
+      margin-top: 10px;
+    }
+    .activity-list article {
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+    }
+    .activity-list p {
+      color: #f0a44d;
+      font-size: .72rem;
+      font-weight: 900;
+      grid-column: 1;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+    .activity-list b {
+      grid-column: 1;
+    }
+    .activity-list time {
+      border: 1px solid rgba(212,173,101,.18);
+      border-radius: 999px;
+      color: rgba(234,223,199,.7);
+      font-size: .78rem;
+      grid-column: 2;
+      grid-row: 1 / span 2;
+      padding: 7px 10px;
+      white-space: nowrap;
+    }
+    @keyframes forge-spin {
+      to { transform: rotate(360deg); }
     }
     .image-lightbox {
       align-items: center;
@@ -990,6 +1186,14 @@ function WorkspaceStyles() {
       }
       .task-row .workspace-delete {
         grid-column: 2;
+      }
+      .activity-list article {
+        grid-template-columns: 1fr;
+      }
+      .activity-list time {
+        grid-column: 1;
+        grid-row: auto;
+        justify-self: start;
       }
       .task-goal-form {
         grid-template-columns: 1fr;

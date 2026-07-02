@@ -29,6 +29,7 @@ export default function ForgeProjectListPage() {
 function ForgeProjectListInner() {
   const params = useSearchParams();
   const filter = params.get("filter") || "all";
+  const category = params.get("category") || "";
   const [projects, setProjects] = useState<ForgeProject[]>([]);
   const [error, setError] = useState("");
 
@@ -48,13 +49,18 @@ function ForgeProjectListInner() {
 
   const filtered = useMemo(() => {
     const activeStatuses = new Set(["Active", "Building", "Experiment"]);
+    if (category) {
+      return projects.filter((project) => project.category.toLowerCase() === category.toLowerCase());
+    }
     if (filter === "active") return projects.filter((project) => activeStatuses.has(project.status));
     if (filter === "building") return projects.filter((project) => project.status === "Building");
     if (filter === "incubating") return projects.filter((project) => project.status === "Incubating");
     if (filter === "archived") return projects.filter((project) => project.status === "Archived");
     if (filter === "recent") return projects.filter((project) => !["Incubating", "Archived", "Completed"].includes(project.status));
     return projects;
-  }, [projects, filter]);
+  }, [projects, filter, category]);
+
+  const title = category ? `${category} Projects` : formatFilter(filter);
 
   return (
     <main className="forge-project-list-page">
@@ -62,7 +68,7 @@ function ForgeProjectListInner() {
       <header>
         <Link href="/forge">Back to Forge</Link>
         <p>FORGE PROJECT INDEX</p>
-        <h1>{formatFilter(filter)}</h1>
+        <h1>{title}</h1>
         <span>{filtered.length} project{filtered.length === 1 ? "" : "s"} available.</span>
       </header>
 
@@ -172,4 +178,3 @@ function ForgeProjectListInner() {
 function formatFilter(filter: string) {
   return filter === "recent" ? "Recently Updated" : `${filter.charAt(0).toUpperCase()}${filter.slice(1)} Projects`;
 }
-

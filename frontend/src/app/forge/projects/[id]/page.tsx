@@ -52,7 +52,21 @@ type ForgeProject = {
 };
 
 type ForgeSpark = { id: string; spark_text: string; project_id?: string | null; category?: string | null; tags?: string[] | null; created_at?: string | null };
-type ForgeNote = { id: string; title: string; body?: string | null; project_id?: string | null; category?: string | null; tags?: string[] | null; created_at?: string | null; updated_at?: string | null };
+type ForgeNote = {
+  id: string;
+  title: string;
+  body?: string | null;
+  project_id?: string | null;
+  category?: string | null;
+  tags?: string[] | null;
+  note_type?: string | null;
+  status?: string | null;
+  is_pinned?: boolean | null;
+  linked_milestone?: string | null;
+  linked_tasks?: string[] | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
 type ForgeFile = { id: string; file_name: string; file_type?: string | null; file_url?: string | null; caption?: string | null; project_id?: string | null; category?: string | null; tags?: string[] | null; created_at?: string | null };
 type ForgeTask = {
   id: string;
@@ -64,10 +78,18 @@ type ForgeTask = {
   milestone_group?: string | null;
   sort_order?: number | null;
   completed_at?: string | null;
+  task_type?: string | null;
+  linked_goal_id?: string | null;
+  counts_toward_goal?: boolean | null;
+  goal_event_id?: string | null;
   metadata?: Record<string, unknown> | null;
   project_id: string;
   created_at?: string | null;
 };
+
+type EditingForgeItem =
+  | { kind: "spark"; item: ForgeSpark; text: string; projectId: string; category: string; tags: string }
+  | { kind: "note"; item: ForgeNote; title: string; body: string; projectId: string; category: string; tags: string; noteType: string; status: string; isPinned: boolean; linkedMilestone: string };
 
 const TABS = ["Overview", "Tasks", "Spark Log", "Timeline", "Research", "Notes", "Files", "Images", "Activity"];
 
@@ -89,7 +111,9 @@ export default function ForgeProjectWorkspace() {
   const [showTaskGoalForm, setShowTaskGoalForm] = useState(false);
   const [taskGoalTarget, setTaskGoalTarget] = useState("3");
   const [taskGoalFrequency, setTaskGoalFrequency] = useState("weekly");
-  const [taskBusy, setTaskBusy] = useState<{ id: string; title: string; action: "complete" | "reopen" } | null>(null);
+  const [taskBusy, setTaskBusy] = useState<{ id?: string; title: string; action: "complete" | "reopen" | "create" } | null>(null);
+  const [editingItem, setEditingItem] = useState<EditingForgeItem | null>(null);
+  const [uploadForm, setUploadForm] = useState({ fileName: "", fileType: "", fileSize: "", fileUrl: "", caption: "", tags: "", useAsCover: false });
 
   const project = projects.find((item) => item.id === projectId) || null;
   const visibleSparks = sparks.filter((item) => inbox ? !item.project_id : item.project_id === projectId);
@@ -145,8 +169,111 @@ export default function ForgeProjectWorkspace() {
     await loadForge();
   }
 
-  async function deleteItem(kind: "projects" | "sparks" | "notes" | "files" | "tasks", id: string, label: string) {
-    if (!window.confirm(`Delete ${label}? This cannot be undone.`)) return;
+  function openSparkDrawer(spark: ForgeSpark) {
+    setEditingItem({
+      kind: "spark",
+      item: spark,
+      text: spark.spark_text,
+      projectId: spark.project_id || "",
+      category: spark.category || project?.category || "",
+      tags: (spark.tags || []).join(", "),
+    });
+  }
+
+  function openNoteDrawer(note: ForgeNote) {
+    setEditingItem({
+      kind: "note",
+      item: note,
+      title: note.title,
+      body: note.body || "",
+      projectId: note.project_id || "",
+      category: note.category || project?.category || "",
+      tags: (note.tags || []).join(", "),
+      noteType: note.note_type || "idea",
+      status: note.status || "active",
+      isPinned: Boolean(note.is_pinned),
+      linkedMilestone: note.linked_milestone || "",
+    });
+  }
+
+  async function saveEditingItem() {
+    if (!editingItem) return;
+    setError("");
+    const selectedProject = projects.find((item) => item.id === editingItem.projectId);
+    const tags = editingItem.tags.split(",").map((tag) => tag.trim()).filter(Boolean);
+    const endpoint = editingItem.kind === "spark" ? "sparks" : "notes";
+    const payload = editingItem.kind === "spark"
+      ? {
+          spark_text: editingItem.text,
+          project_id: editingItem.projectId || null,
+          category: selectedProject?.category || editingItem.category || null,
+          tags,
+        }
+      : {
+          title: editingItem.title,
+          body: editingItem.body || null,
+          project_id: editingItem.projectId || null,
+          category: selectedProject?.category || editingItem.category || null,
+          tags,
+          note_type: editingItem.noteType || null,
+          status: editingItem.status || "active",
+          is_pinned: editingItem.isPinned,
+          linked_milestone: editingItem.linkedMilestone || null,
+        };
+    const res = await fetch(`${API_BASE}/forge/${endpoint}/${editingItem.item.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setError(data.detail || "Forge item update failed.");
+      return;
+    }
+    setMessage(editingItem.kind === "spark" ? "Spark updated." : "Note updated.");
+    setEditingItem(null);
+    await loadForge();
+  }
+
+  async function uploadWorkspaceFile() {
+    if (!project || !uploadForm.fileName.trim()) return;
+    setError("");
+    const tags = uploadForm.tags.split(",").map((tag) => tag.trim()).filter(Boolean);
+    const res = await fetch(`${API_BASE}/forge/files`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+      body: JSON.stringify({
+        user_id: USER_ID,
+        project_id: project.id,
+        category: project.category,
+        file_name: uploadForm.fileName.trim(),
+        file_type: uploadForm.fileType || null,
+        file_size: uploadForm.fileSize ? Number(uploadForm.fileSize) : null,
+        file_url: uploadForm.fileUrl || null,
+        caption: uploadForm.caption || null,
+        tags,
+        metadata: { upload_status: "workspace_upload" },
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setError(data.detail || "File upload metadata failed.");
+      return;
+    }
+    if (uploadForm.useAsCover && uploadForm.fileUrl) {
+      await fetch(`${API_BASE}/forge/projects/${project.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        body: JSON.stringify({ cover_image_url: uploadForm.fileUrl }),
+      });
+    }
+    setUploadForm({ fileName: "", fileType: "", fileSize: "", fileUrl: "", caption: "", tags: "", useAsCover: false });
+    setMessage(`File attached: ${data.file?.file_name || uploadForm.fileName}`);
+    await loadForge();
+  }
+
+  async function deleteItem(kind: "projects" | "sparks" | "notes" | "files" | "tasks", id: string, label: string): Promise<boolean> {
+    if (!window.confirm(`Delete ${label}? This cannot be undone.`)) return false;
     const res = await fetch(`${API_BASE}/forge/${kind}/${id}`, {
       method: "DELETE",
       headers: { "x-api-key": API_KEY },
@@ -154,39 +281,51 @@ export default function ForgeProjectWorkspace() {
     const data = await res.json();
     if (!res.ok) {
       setError(data.detail || "Delete failed.");
-      return;
+      return false;
     }
     setMessage(`${label} deleted.`);
     if (kind === "projects") {
       window.location.href = "/forge/projects?filter=all";
-      return;
+      return true;
     }
     await loadForge();
+    return true;
   }
 
   async function addTask() {
     if (!project || !newTaskTitle.trim()) return;
+    if (taskBusy) return;
     const maxSort = visibleTasks.reduce((max, task) => Math.max(max, Number(task.sort_order || 0)), 0);
-    const res = await fetch(`${API_BASE}/forge/tasks`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-      body: JSON.stringify({
-        user_id: USER_ID,
-        project_id: project.id,
-        title: newTaskTitle.trim(),
-        milestone_group: newTaskGroup || "General",
-        status: "Backlog",
-        sort_order: maxSort + 1,
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.detail || "Task could not be added. Run the Forge task SQL migration if the table is missing.");
-      return;
+    const taskTitle = newTaskTitle.trim();
+    setTaskBusy({ title: taskTitle, action: "create" });
+    setError("");
+    try {
+      const res = await fetch(`${API_BASE}/forge/tasks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        body: JSON.stringify({
+          user_id: USER_ID,
+          project_id: project.id,
+          title: taskTitle,
+          milestone_group: newTaskGroup || "General",
+          status: "Backlog",
+          task_type: "task",
+          linked_goal_id: project.task_goal?.id || null,
+          counts_toward_goal: true,
+          sort_order: maxSort + 1,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.detail || "Task could not be added. Run the Forge task SQL migration if the table is missing.");
+        return;
+      }
+      setNewTaskTitle("");
+      setMessage(`Task added: ${data.task?.title || taskTitle}`);
+      await loadForge();
+    } finally {
+      setTaskBusy(null);
     }
-    setNewTaskTitle("");
-    setMessage(`Task added: ${data.task?.title || newTaskTitle.trim()}`);
-    await loadForge();
   }
 
   async function toggleTask(task: ForgeTask) {
@@ -346,10 +485,20 @@ export default function ForgeProjectWorkspace() {
             {visibleImages.length > 0 && <ImageGrid files={visibleImages.slice(0, 3)} onPreview={setPreviewImage} />}
           </div>
         )}
-        {tab === "Spark Log" && <SparkList sparks={visibleSparks} projects={projects} onMove={(id, next) => moveItem("sparks", id, next)} onDelete={(id, label) => deleteItem("sparks", id, label)} />}
-        {tab === "Notes" && <NoteList notes={visibleNotes} projects={projects} onMove={(id, next) => moveItem("notes", id, next)} onDelete={(id, label) => deleteItem("notes", id, label)} />}
-        {tab === "Files" && <FileList files={visibleFiles} projects={projects} onMove={(id, next) => moveItem("files", id, next)} onDelete={(id, label) => deleteItem("files", id, label)} />}
-        {tab === "Images" && <ImageGrid files={visibleImages} projects={projects} onMove={(id, next) => moveItem("files", id, next)} onDelete={(id, label) => deleteItem("files", id, label)} onPreview={setPreviewImage} onSetCover={setProjectCover} />}
+        {tab === "Spark Log" && <SparkList sparks={visibleSparks} onEdit={openSparkDrawer} />}
+        {tab === "Notes" && <NoteList notes={visibleNotes} onEdit={openNoteDrawer} />}
+        {tab === "Files" && (
+          <>
+            {!inbox && project && <WorkspaceUploadForm form={uploadForm} onChange={setUploadForm} onUpload={uploadWorkspaceFile} />}
+            <FileList files={visibleFiles} projects={projects} onMove={(id, next) => moveItem("files", id, next)} onDelete={(id, label) => deleteItem("files", id, label)} />
+          </>
+        )}
+        {tab === "Images" && (
+          <>
+            {!inbox && project && <WorkspaceUploadForm form={uploadForm} onChange={setUploadForm} onUpload={uploadWorkspaceFile} imageMode />}
+            <ImageGrid files={visibleImages} projects={projects} onMove={(id, next) => moveItem("files", id, next)} onDelete={(id, label) => deleteItem("files", id, label)} onPreview={setPreviewImage} onSetCover={setProjectCover} />
+          </>
+        )}
         {tab === "Timeline" && (
           <div className="workspace-list">
             {(project?.linked_goal?.milestones || []).length ? project?.linked_goal?.milestones?.map((milestone) => (
@@ -374,6 +523,18 @@ export default function ForgeProjectWorkspace() {
         {tab === "Activity" && <Activity sparks={visibleSparks} notes={visibleNotes} files={visibleFiles} tasks={visibleTasks} project={project} inbox={inbox} />}
       </section>
       {previewImage && <ImageLightbox file={previewImage} onClose={() => setPreviewImage(null)} />}
+      {editingItem && (
+        <ForgeItemDrawer
+          item={editingItem}
+          projects={projects}
+          onChange={setEditingItem}
+          onSave={saveEditingItem}
+          onDelete={(kind, id, label) => deleteItem(kind, id, label).then((deleted) => {
+            if (deleted) setEditingItem(null);
+          })}
+          onCancel={() => setEditingItem(null)}
+        />
+      )}
       <WorkspaceStyles />
     </main>
   );
@@ -465,7 +626,7 @@ function TaskBoard({
       </div>
 
       <div className="milestone-progress-grid">
-        {Object.entries(groupTasks(tasks)).map(([groupName, groupTasksList]) => {
+        {orderedGroupEntries(groupTasks(tasks)).map(([groupName, groupTasksList]) => {
           const done = groupTasksList.filter(isTaskComplete).length;
           const percent = groupTasksList.length ? Math.round((done / groupTasksList.length) * 100) : 0;
           return (
@@ -481,7 +642,7 @@ function TaskBoard({
       <TaskComposer title={title} group={group} groups={milestoneGroups} onTitleChange={onTitleChange} onGroupChange={onGroupChange} onAdd={onAdd} />
 
       <div className="task-groups">
-        {Object.entries(groups).map(([groupName, groupTasksList]) => (
+        {orderedGroupEntries(groups).map(([groupName, groupTasksList]) => (
           <section key={groupName}>
             <h3>{groupName}</h3>
             <div className="workspace-list">
@@ -506,9 +667,10 @@ function TaskComposer({ title, group, groups, onTitleChange, onGroupChange, onAd
   return (
     <div className="task-composer">
       <input value={title} onChange={(event) => onTitleChange(event.target.value)} placeholder="Add a new Forge task..." />
-      <select value={group} onChange={(event) => onGroupChange(event.target.value)}>
-        {groups.map((item) => <option key={item} value={item}>{item}</option>)}
-      </select>
+      <input list="forge-task-groups" value={group} onChange={(event) => onGroupChange(event.target.value)} placeholder="Milestone or custom group" />
+      <datalist id="forge-task-groups">
+        {groups.map((item) => <option key={item} value={item} />)}
+      </datalist>
       <button type="button" onClick={onAdd}>Add Task</button>
     </div>
   );
@@ -548,12 +710,12 @@ function TaskRow({
   );
 }
 
-function TaskSavingOverlay({ task }: { task: { title: string; action: "complete" | "reopen" } }) {
+function TaskSavingOverlay({ task }: { task: { title: string; action: "complete" | "reopen" | "create" } }) {
   return (
     <div className="task-saving-overlay" role="status" aria-live="polite" aria-label="Saving Forge task">
       <div className="task-saving-core">
         <span className="forge-loader-ring" aria-hidden="true" />
-        <p>{task.action === "complete" ? "Completing Task" : "Reopening Task"}</p>
+        <p>{task.action === "complete" ? "Completing Task" : task.action === "create" ? "Creating Task" : "Reopening Task"}</p>
         <strong>{task.title}</strong>
         <em>Syncing Forge and Goals...</em>
       </div>
@@ -561,14 +723,131 @@ function TaskSavingOverlay({ task }: { task: { title: string; action: "complete"
   );
 }
 
-function SparkList({ sparks, projects, onMove, onDelete }: { sparks: ForgeSpark[]; projects: ForgeProject[]; onMove: (id: string, projectId: string) => void; onDelete: (id: string, label: string) => void }) {
+function SparkList({ sparks, onEdit }: { sparks: ForgeSpark[]; onEdit: (spark: ForgeSpark) => void }) {
   if (!sparks.length) return <Empty title="No sparks captured for this project yet." text="Capture the small idea before it cools." />;
-  return <div className="workspace-list">{sparks.map((spark) => <article key={spark.id}><b>{spark.spark_text}</b><MoveSelect value={spark.project_id || ""} projects={projects} onChange={(value) => onMove(spark.id, value)} /><DeleteButton onClick={() => onDelete(spark.id, `spark: ${spark.spark_text.slice(0, 40)}`)} /></article>)}</div>;
+  return <div className="workspace-list">{sparks.map((spark) => <button type="button" className="workspace-click-card" key={spark.id} onClick={() => onEdit(spark)}><b>{spark.spark_text}</b><span>{spark.tags?.length ? spark.tags.join(", ") : "Open spark protocol"}</span></button>)}</div>;
 }
 
-function NoteList({ notes, projects, onMove, onDelete }: { notes: ForgeNote[]; projects: ForgeProject[]; onMove: (id: string, projectId: string) => void; onDelete: (id: string, label: string) => void }) {
+function NoteList({ notes, onEdit }: { notes: ForgeNote[]; onEdit: (note: ForgeNote) => void }) {
   if (!notes.length) return <Empty title="No notes yet." text="Write down the shape of the idea." />;
-  return <div className="workspace-list">{notes.map((note) => <article key={note.id}><b>{note.title}</b><span>{note.body}</span><MoveSelect value={note.project_id || ""} projects={projects} onChange={(value) => onMove(note.id, value)} /><DeleteButton onClick={() => onDelete(note.id, `note: ${note.title}`)} /></article>)}</div>;
+  return (
+    <div className="workspace-list">
+      {notes.map((note) => (
+        <button type="button" className={`workspace-click-card ${note.is_pinned ? "pinned" : ""}`} key={note.id} onClick={() => onEdit(note)}>
+          <b>{note.title}</b>
+          <span>{note.note_type ? `${note.note_type} · ` : ""}{note.body || "Open note dossier"}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function WorkspaceUploadForm({
+  form,
+  imageMode = false,
+  onChange,
+  onUpload,
+}: {
+  form: { fileName: string; fileType: string; fileSize: string; fileUrl: string; caption: string; tags: string; useAsCover: boolean };
+  imageMode?: boolean;
+  onChange: (next: { fileName: string; fileType: string; fileSize: string; fileUrl: string; caption: string; tags: string; useAsCover: boolean }) => void;
+  onUpload: () => void;
+}) {
+  return (
+    <div className="workspace-upload">
+      <div>
+        <p>{imageMode ? "Image Upload" : "File Upload"}</p>
+        <strong>{imageMode ? "Attach concept art, screenshots, or references." : "Attach docs, PDFs, screenshots, sketches, or references."}</strong>
+      </div>
+      <input
+        type="file"
+        accept={imageMode ? "image/*" : undefined}
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = () => onChange({
+            ...form,
+            fileName: file.name,
+            fileType: file.type,
+            fileSize: String(file.size),
+            fileUrl: String(reader.result || ""),
+          });
+          reader.readAsDataURL(file);
+        }}
+      />
+      <input value={form.caption} onChange={(event) => onChange({ ...form, caption: event.target.value })} placeholder="Caption or note" />
+      <input value={form.tags} onChange={(event) => onChange({ ...form, tags: event.target.value })} placeholder="tags, comma separated" />
+      <label>
+        <input type="checkbox" checked={form.useAsCover} onChange={(event) => onChange({ ...form, useAsCover: event.target.checked })} />
+        Use as project cover
+      </label>
+      <button type="button" onClick={onUpload} disabled={!form.fileName}>Upload</button>
+    </div>
+  );
+}
+
+function ForgeItemDrawer({
+  item,
+  projects,
+  onChange,
+  onSave,
+  onDelete,
+  onCancel,
+}: {
+  item: EditingForgeItem;
+  projects: ForgeProject[];
+  onChange: (item: EditingForgeItem) => void;
+  onSave: () => void;
+  onDelete: (kind: "sparks" | "notes", id: string, label: string) => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="forge-drawer-backdrop" onMouseDown={onCancel}>
+      <aside className="forge-edit-drawer" onMouseDown={(event) => event.stopPropagation()}>
+        <p>{item.kind === "spark" ? "Spark Protocol" : "Note Dossier"}</p>
+        {item.kind === "spark" ? (
+          <textarea value={item.text} onChange={(event) => onChange({ ...item, text: event.target.value })} rows={8} />
+        ) : (
+          <>
+            <input value={item.title} onChange={(event) => onChange({ ...item, title: event.target.value })} placeholder="Title" />
+            <div className="drawer-grid">
+              <select value={item.noteType} onChange={(event) => onChange({ ...item, noteType: event.target.value })}>
+                <option value="idea">Idea</option>
+                <option value="draft">Draft</option>
+                <option value="decision">Decision</option>
+                <option value="canon">Canon</option>
+                <option value="question">Question</option>
+                <option value="reference">Reference</option>
+                <option value="gdd_section">GDD Section</option>
+              </select>
+              <select value={item.status} onChange={(event) => onChange({ ...item, status: event.target.value })}>
+                <option value="draft">Draft</option>
+                <option value="active">Active</option>
+                <option value="archived">Archived</option>
+              </select>
+            </div>
+            <textarea value={item.body} onChange={(event) => onChange({ ...item, body: event.target.value })} rows={12} />
+            <label className="drawer-check">
+              <input type="checkbox" checked={item.isPinned} onChange={(event) => onChange({ ...item, isPinned: event.target.checked })} />
+              Pinned project-bible item
+            </label>
+            <input value={item.linkedMilestone} onChange={(event) => onChange({ ...item, linkedMilestone: event.target.value })} placeholder="Linked milestone" />
+          </>
+        )}
+        <select value={item.projectId} onChange={(event) => onChange({ ...item, projectId: event.target.value })}>
+          <option value="">Unassigned Forge Inbox</option>
+          {projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
+        </select>
+        <input value={item.tags} onChange={(event) => onChange({ ...item, tags: event.target.value })} placeholder="tags, comma separated" />
+        <div className="drawer-actions">
+          <button type="button" onClick={onSave}>Save Changes</button>
+          <button type="button" onClick={onCancel}>Cancel</button>
+          <button type="button" className="danger" onClick={() => onDelete(item.kind === "spark" ? "sparks" : "notes", item.item.id, `${item.kind}: ${item.kind === "spark" ? item.text.slice(0, 40) : item.title}`)}>Delete</button>
+        </div>
+      </aside>
+    </div>
+  );
 }
 
 function FileList({ files, projects, onMove, onDelete }: { files: ForgeFile[]; projects: ForgeProject[]; onMove: (id: string, projectId: string) => void; onDelete: (id: string, label: string) => void }) {
@@ -683,12 +962,39 @@ function sortTasks(a: ForgeTask, b: ForgeTask) {
 
 function groupTasks(tasks: ForgeTask[]) {
   return tasks.reduce<Record<string, ForgeTask[]>>((groups, task) => {
-    const key = task.milestone_group || "General";
+    const key = task.task_type === "project_gate" ? "Major Milestones / Project Gates" : task.milestone_group || "General";
     groups[key] ||= [];
     groups[key].push(task);
     groups[key].sort(sortTasks);
     return groups;
   }, {});
+}
+
+function orderedGroupEntries(groups: Record<string, ForgeTask[]>) {
+  const order = [
+    "Completed Foundation",
+    "Milestone 1 - Foundation",
+    "Milestone 2 - Characters",
+    "Milestone 3 - Story",
+    "Milestone 4 - Gameplay",
+    "Milestone 5 - Vertical Slice",
+    "Characters",
+    "Story",
+    "Combat",
+    "Art",
+    "Audio",
+    "Development",
+    "Major Milestones / Project Gates",
+    "General",
+  ];
+  return Object.entries(groups).sort(([a], [b]) => {
+    const aIndex = order.indexOf(a);
+    const bIndex = order.indexOf(b);
+    if (aIndex !== -1 || bIndex !== -1) {
+      return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
+    }
+    return a.localeCompare(b);
+  });
 }
 
 function ImageLightbox({ file, onClose }: { file: ForgeFile; onClose: () => void }) {
@@ -856,6 +1162,130 @@ function WorkspaceStyles() {
     .workspace-list { display: grid; gap: 10px; }
     .workspace-list span, .workspace-empty span { color: rgba(234,223,199,.68); display: block; margin-top: 5px; }
     .workspace-list article { display: grid; gap: 8px; }
+    .workspace-click-card {
+      border: 1px solid rgba(212,173,101,.16);
+      border-radius: 10px;
+      background: rgba(0,0,0,.26);
+      color: inherit;
+      cursor: pointer;
+      display: grid;
+      gap: 8px;
+      padding: 14px;
+      text-align: left;
+      transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease, background 180ms ease;
+    }
+    .workspace-click-card:hover,
+    .workspace-click-card.pinned {
+      background: rgba(196,111,45,.08);
+      border-color: rgba(196,111,45,.42);
+      box-shadow: 0 0 28px rgba(196,111,45,.18), inset 0 0 18px rgba(143,220,124,.04);
+      transform: translateY(-2px);
+    }
+    .workspace-click-card b {
+      color: #fff1c8;
+    }
+    .workspace-upload {
+      border: 1px solid rgba(212,173,101,.18);
+      border-radius: 12px;
+      background:
+        radial-gradient(circle at 90% 0%, rgba(196,111,45,.14), transparent 28%),
+        rgba(0,0,0,.26);
+      display: grid;
+      gap: 10px;
+      grid-template-columns: minmax(220px, 1fr) minmax(180px, 1fr) minmax(180px, 1fr) minmax(160px, 1fr) auto auto;
+      margin-bottom: 14px;
+      padding: 14px;
+    }
+    .workspace-upload p,
+    .forge-edit-drawer p {
+      color: #f0a44d;
+      font-size: .72rem;
+      font-weight: 900;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+    .workspace-upload strong {
+      color: #fff1c8;
+      display: block;
+      margin-top: 4px;
+    }
+    .workspace-upload input,
+    .workspace-upload button,
+    .forge-edit-drawer input,
+    .forge-edit-drawer select,
+    .forge-edit-drawer textarea {
+      border: 1px solid rgba(212,173,101,.22);
+      border-radius: 8px;
+      background: rgba(0,0,0,.34);
+      color: #eadfc7;
+      padding: 10px 11px;
+    }
+    .workspace-upload label,
+    .drawer-check {
+      align-items: center;
+      color: rgba(234,223,199,.72);
+      display: flex;
+      gap: 8px;
+    }
+    .workspace-upload button,
+    .drawer-actions button {
+      border-color: rgba(143,220,124,.36);
+      background: rgba(143,220,124,.1);
+      color: #caffbf;
+      cursor: pointer;
+      font-weight: 900;
+      transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+    }
+    .workspace-upload button:hover,
+    .drawer-actions button:hover {
+      border-color: rgba(143,220,124,.72);
+      box-shadow: 0 0 24px rgba(143,220,124,.18);
+      transform: translateY(-2px);
+    }
+    .forge-drawer-backdrop {
+      background: rgba(0,0,0,.54);
+      inset: 0;
+      position: fixed;
+      z-index: 110;
+    }
+    .forge-edit-drawer {
+      animation: forge-drawer-in 220ms ease both;
+      border-left: 1px solid rgba(212,173,101,.28);
+      background:
+        linear-gradient(145deg, rgba(7,9,8,.98), rgba(14,10,7,.96)),
+        url("/images/Forge/forge-bg-texture.png") center/cover;
+      bottom: 0;
+      box-shadow: -24px 0 70px rgba(0,0,0,.52), 0 0 42px rgba(196,111,45,.18);
+      display: grid;
+      gap: 12px;
+      max-width: 520px;
+      overflow-y: auto;
+      padding: 22px;
+      position: absolute;
+      right: 0;
+      top: 0;
+      width: min(100%, 520px);
+    }
+    .forge-edit-drawer textarea {
+      line-height: 1.55;
+      resize: vertical;
+    }
+    .drawer-grid,
+    .drawer-actions {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: 1fr 1fr;
+    }
+    .drawer-actions .danger {
+      border-color: rgba(255,112,92,.42);
+      background: rgba(92,18,12,.32);
+      color: #ffd0c8;
+      grid-column: 1 / -1;
+    }
+    @keyframes forge-drawer-in {
+      from { transform: translateX(100%); }
+      to { transform: translateX(0); }
+    }
     .workspace-images { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
     .workspace-images img { width: 100%; height: 170px; object-fit: cover; border-radius: 8px; border: 1px solid rgba(212,173,101,.18); }
     .image-preview-button {
@@ -1105,6 +1535,7 @@ function WorkspaceStyles() {
       grid-column: 1;
     }
     .activity-list time {
+      animation: activity-time-pulse 2.8s ease-in-out infinite;
       border: 1px solid rgba(212,173,101,.18);
       border-radius: 999px;
       color: rgba(234,223,199,.7);
@@ -1113,6 +1544,16 @@ function WorkspaceStyles() {
       grid-row: 1 / span 2;
       padding: 7px 10px;
       white-space: nowrap;
+    }
+    @keyframes activity-time-pulse {
+      0%, 100% {
+        border-color: rgba(212,173,101,.18);
+        box-shadow: 0 0 12px rgba(196,111,45,.08);
+      }
+      50% {
+        border-color: rgba(212,173,101,.42);
+        box-shadow: 0 0 20px rgba(196,111,45,.2), 0 0 8px rgba(143,220,124,.1);
+      }
     }
     @keyframes forge-spin {
       to { transform: rotate(360deg); }
@@ -1179,6 +1620,11 @@ function WorkspaceStyles() {
         flex-direction: column;
       }
       .task-composer {
+        grid-template-columns: 1fr;
+      }
+      .workspace-upload,
+      .drawer-grid,
+      .drawer-actions {
         grid-template-columns: 1fr;
       }
       .task-row {

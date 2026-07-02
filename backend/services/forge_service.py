@@ -429,6 +429,11 @@ def sync_task_completion_goal(task: dict) -> None:
             return
 
         for goal in task_goals:
+            if task.get("linked_goal_id") and task.get("linked_goal_id") != goal.get("id"):
+                continue
+            if task.get("counts_toward_goal") is False:
+                continue
+
             existing = (
                 supabase.table("goal_logs")
                 .select("id, metadata")
@@ -443,7 +448,24 @@ def sync_task_completion_goal(task: dict) -> None:
             if duplicate:
                 continue
 
-            supabase.table("goal_logs").insert({
+            goal_event = create_goal_progress_event({
+                "goal_id": goal["id"],
+                "amount": 1,
+                "unit": goal.get("unit") or "update",
+                "note": f"Forge task completed: {task.get('title')}",
+                "source_type": "forge_task",
+                "source_id": task.get("id"),
+                "source_project_id": project_id,
+                "counts_toward_goal": True,
+                "event_source": "automatic",
+                "created_by": task.get("user_id") or "john",
+                "metadata": {
+                    "forge_task_title": task.get("title"),
+                    "milestone_group": task.get("milestone_group"),
+                    "task_type": task.get("task_type"),
+                },
+            })
+            log_response = supabase.table("goal_logs").insert({
                 "goal_id": goal["id"],
                 "value": 1,
                 "notes": f"Forge task completed: {task.get('title')}",
@@ -454,9 +476,20 @@ def sync_task_completion_goal(task: dict) -> None:
                     "forge_task_title": task.get("title"),
                     "forge_project_id": project_id,
                     "milestone_group": task.get("milestone_group"),
+                    "goal_progress_event_id": (goal_event or {}).get("id"),
                     "source": "forge_task_completion",
                 },
             }).execute()
+            if goal_event and log_response.data:
+                safe_table_update(
+                    "forge_tasks",
+                    {
+                        "linked_goal_id": goal["id"],
+                        "goal_event_id": goal_event.get("id"),
+                    },
+                    "id",
+                    task.get("id"),
+                )
     except Exception:
         return
 
@@ -483,6 +516,42 @@ def remove_task_completion_goal_logs(task: dict) -> None:
             )
             for row in existing.data or []:
                 if (row.get("metadata") or {}).get("forge_task_id") == task_id:
+                    event_id = (row.get("metadata") or {}).get("goal_progress_event_id")
                     supabase.table("goal_logs").delete().eq("id", row["id"]).execute()
+                    if event_id:
+                        safe_table_update(
+                            "goal_progress_events",
+                            {"counts_toward_goal": False},
+                            "id",
+                            event_id,
+                        )
+    except Exception:
+        return
+
+
+def create_goal_progress_event(payload: dict) -> dict | None:
+    try:
+        existing = (
+            supabase.table("goal_progress_events")
+            .select("*")
+            .eq("goal_id", payload.get("goal_id"))
+            .eq("source_type", payload.get("source_type"))
+            .eq("source_id", payload.get("source_id"))
+            .limit(1)
+            .execute()
+        )
+        if existing.data:
+            return existing.data[0]
+        response = supabase.table("goal_progress_events").insert(payload).execute()
+        return response.data[0] if response.data else None
+    except Exception:
+        return None
+
+
+def safe_table_update(table: str, values: dict, key: str, value: str | None) -> None:
+    if not value:
+        return
+    try:
+        supabase.table(table).update(values).eq(key, value).execute()
     except Exception:
         return

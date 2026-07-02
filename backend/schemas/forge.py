@@ -52,6 +52,12 @@ class ForgeNoteCreate(BaseModel):
     category: Optional[str] = None
     project_id: Optional[str] = None
     tags: list[str] = Field(default_factory=list)
+    note_type: Optional[str] = None
+    status: Optional[str] = "active"
+    is_pinned: Optional[bool] = False
+    linked_milestone: Optional[str] = None
+    linked_tasks: list[str] = Field(default_factory=list)
+    sort_order: Optional[int] = None
 
 
 class ForgeNoteUpdate(BaseModel):
@@ -60,6 +66,12 @@ class ForgeNoteUpdate(BaseModel):
     category: Optional[str] = None
     project_id: Optional[str] = None
     tags: Optional[list[str]] = None
+    note_type: Optional[str] = None
+    status: Optional[str] = None
+    is_pinned: Optional[bool] = None
+    linked_milestone: Optional[str] = None
+    linked_tasks: Optional[list[str]] = None
+    sort_order: Optional[int] = None
 
 
 class ForgeFileCreate(BaseModel):
@@ -98,6 +110,10 @@ class ForgeTaskCreate(BaseModel):
     milestone_group: Optional[str] = None
     sort_order: int = 0
     completed_at: Optional[str] = None
+    task_type: Optional[str] = "task"
+    linked_goal_id: Optional[str] = None
+    counts_toward_goal: Optional[bool] = True
+    goal_event_id: Optional[str] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -110,4 +126,8 @@ class ForgeTaskUpdate(BaseModel):
     milestone_group: Optional[str] = None
     sort_order: Optional[int] = None
     completed_at: Optional[str] = None
+    task_type: Optional[str] = None
+    linked_goal_id: Optional[str] = None
+    counts_toward_goal: Optional[bool] = None
+    goal_event_id: Optional[str] = None
     metadata: Optional[dict[str, Any]] = None

@@ -9,6 +9,37 @@ def build_business_status() -> str:
     return "No active Aegis Intake Systems alerts. No Fiverr spike alerts yet."
 
 
+def build_journal_status(user_id: str) -> str:
+    today = datetime.now().date().isoformat()
+    try:
+        response = (
+            supabase
+            .table("archive_chronicles")
+            .select("entry_date,status,story_text,future_me_message,notes")
+            .eq("user_id", user_id)
+            .order("entry_date", desc=True)
+            .limit(90)
+            .execute()
+        )
+    except Exception:
+        return ""
+
+    rows = response.data or []
+    documented_dates = {
+        str(row.get("entry_date") or "")[:10]
+        for row in rows
+        if row.get("story_text")
+        or row.get("future_me_message")
+        or row.get("notes")
+        or row.get("status") in {"in_progress", "filed"}
+    }
+    if today in documented_dates:
+        return f"Chronicles is already active today. You have {len(documented_dates)} documented days in the Archive."
+    if documented_dates:
+        return f"Chronicles is not logged yet today. Make one paragraph a priority; the Archive has {len(documented_dates)} documented days so far."
+    return "Chronicles is not logged yet today. Start the record with one simple paragraph."
+
+
 def get_lift_profile(user_id: str, lift: str) -> dict | None:
     response = (
         supabase
@@ -29,6 +60,7 @@ def get_lift_profile(user_id: str, lift: str) -> dict | None:
 def build_morning_brief(user_id: str = "john") -> dict:
     workout_logic = get_next_workout_logic(user_id)
     lift = workout_logic.get("actual_next")
+    journal_status = build_journal_status(user_id)
 
     if not lift:
         return {
@@ -40,9 +72,11 @@ def build_morning_brief(user_id: str = "john") -> dict:
             "training_max": None,
             "latest_top_set": None,
             "business_status": build_business_status(),
+            "journal_status": journal_status,
             "spoken_response": (
                 f"Good morning, Daddy. "
                 f"{workout_logic.get('spoken_response', 'No workout scheduled.')} "
+                f"{journal_status} "
                 f"{build_business_status()}"
             )
         }
@@ -87,6 +121,7 @@ def build_morning_brief(user_id: str = "john") -> dict:
         f"{workout_line} "
         f"{workout_details} "
         f"{latest_line} "
+        f"{journal_status} "
         f"{business_line}"
     )
 
@@ -99,6 +134,7 @@ def build_morning_brief(user_id: str = "john") -> dict:
         "training_max": training_max,
         "latest_top_set": latest_top_set,
         "business_status": business_line,
+        "journal_status": journal_status,
         "workout_logic": workout_logic,
         "spoken_response": spoken_response
     }

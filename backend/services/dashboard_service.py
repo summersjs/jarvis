@@ -127,6 +127,83 @@ def _get_calendar_summary(today_date) -> dict:
     }
 
 
+def _rotating_pick(options: list[str], today: str, salt: str = "") -> str:
+    if not options:
+        return ""
+    try:
+        day_number = datetime.fromisoformat(f"{today[:10]}T12:00:00").date().toordinal()
+    except ValueError:
+        day_number = datetime.now(LOCAL_TZ).date().toordinal()
+    salt_value = sum(ord(char) for char in salt)
+    return options[(day_number + salt_value) % len(options)]
+
+
+def _get_journal_snapshot(user_id: str, today: str) -> dict:
+    snapshot = {
+        "available": False,
+        "documented_days": 0,
+        "current_streak": 0,
+        "journaled_today": False,
+        "today_status": "missing",
+        "latest_title": None,
+        "latest_date": None,
+    }
+    try:
+        response = (
+            supabase
+            .table("archive_chronicles")
+            .select("entry_date,title,status,story_text,future_me_message,notes")
+            .eq("user_id", user_id)
+            .order("entry_date", desc=True)
+            .limit(120)
+            .execute()
+        )
+    except Exception:
+        return snapshot
+
+    rows = response.data or []
+    documented_dates: set[str] = set()
+    today_entry = None
+    latest_documented = None
+    for row in rows:
+        entry_date = str(row.get("entry_date") or "")[:10]
+        if not entry_date:
+            continue
+        is_documented = bool(
+            row.get("story_text")
+            or row.get("future_me_message")
+            or row.get("notes")
+            or row.get("status") in {"in_progress", "filed"}
+        )
+        if entry_date == today:
+            today_entry = row
+        if is_documented:
+            documented_dates.add(entry_date)
+            if latest_documented is None:
+                latest_documented = row
+
+    cursor = datetime.fromisoformat(f"{today}T12:00:00").date()
+    if today not in documented_dates:
+        cursor = cursor - timedelta(days=1)
+    current_streak = 0
+    while cursor.isoformat() in documented_dates:
+        current_streak += 1
+        cursor = cursor - timedelta(days=1)
+
+    latest_date = str(latest_documented.get("entry_date"))[:10] if latest_documented else None
+    today_status = today_entry.get("status") if today_entry else "missing"
+    snapshot.update({
+        "available": True,
+        "documented_days": len(documented_dates),
+        "current_streak": current_streak,
+        "journaled_today": today in documented_dates,
+        "today_status": today_status or "missing",
+        "latest_title": latest_documented.get("title") if latest_documented else None,
+        "latest_date": latest_date,
+    })
+    return snapshot
+
+
 def _get_mission_phase(now: datetime) -> dict:
     hour = now.hour
     if 5 <= hour < 12:
@@ -309,8 +386,15 @@ def _format_planned_standard(goal: dict) -> str:
     return f"{goal.get('title', 'Planned standard')} on {date_label}{time_label}"
 
 
-def _highest_priority_remaining_task(user_id: str, workout_logic: dict, shopping: dict, mission: dict, today: str | None = None) -> str:
-    goals = mission.get("goals") or dashboard.get("goals") or []
+def _highest_priority_remaining_task(
+    user_id: str,
+    workout_logic: dict,
+    shopping: dict,
+    mission: dict,
+    today: str | None = None,
+    journal: dict | None = None,
+) -> str:
+    goals = mission.get("goals") or []
     if today:
         planned_standard = _planned_standard_for_date(goals, today)
         if planned_standard:
@@ -333,6 +417,9 @@ def _highest_priority_remaining_task(user_id: str, workout_logic: dict, shopping
     if workout_logic.get("day_type") != "completed" and workout_logic.get("scheduled_today"):
         return f"Complete {format_lift_name(workout_logic['scheduled_today'])}."
 
+    if journal and journal.get("available") and not journal.get("journaled_today"):
+        return "Write today's Chronicle before the day gets away."
+
     if shopping.get("unchecked_count", 0) > 0:
         item = shopping.get("unchecked_items", [])[0]
         return f"Clear {item.get('item_name', 'the top shopping item')}."
@@ -350,6 +437,7 @@ def _mission_phase_content(phase: dict, dashboard: dict, mission: dict) -> dict:
     calendar = dashboard.get("calendar", {})
     meals = dashboard.get("meals", [])
     finance_summary = dashboard.get("finance_summary", {})
+    journal = dashboard.get("journal") or {}
     goals = mission.get("goals") or []
     incomplete_goal = next((goal for goal in goals if not goal.get("progress", {}).get("is_complete")), None)
     priority = dashboard.get("highest_priority_remaining_task") or "Hold the line."
@@ -364,6 +452,12 @@ def _mission_phase_content(phase: dict, dashboard: dict, mission: dict) -> dict:
         ]
         if planned_today:
             items.insert(1, f"Planned: {_format_planned_standard(planned_today)}")
+        if journal.get("available"):
+            items.append(
+                "Chronicle: logged today"
+                if journal.get("journaled_today")
+                else "Chronicle: not logged yet"
+            )
         recommendation = dashboard.get("coaching_note") or "Keep the day simple and execute the plan."
         return {
             "title": "Today's Priorities",
@@ -406,6 +500,10 @@ def _mission_phase_content(phase: dict, dashboard: dict, mission: dict) -> dict:
                 f"Objectives: {objectives_completed}/{objectives_total} complete",
                 f"Workout: {today.get('day_type', 'rest').replace('_', ' ').title()}",
                 f"Food spend: ${finance_summary.get('weekly_food_budget', {}).get('total_actual_food_spend_this_week', 0):.2f} this week",
+                (
+                    f"Chronicles: {journal.get('documented_days', 0)} documented day"
+                    f"{'' if journal.get('documented_days', 0) == 1 else 's'}"
+                ) if journal.get("available") else "Chronicles: unavailable",
                 f"Tomorrow focus: {calendar.get('tomorrow', {}).get('spoken_response') or 'No calendar data'}",
             ],
             "recommendation": dashboard.get("debrief_recommendation") or dashboard.get("coaching_note") or "Close the day, log the win, and keep tomorrow simple.",
@@ -527,7 +625,14 @@ def _get_completed_workout_note(user_id: str, today: str) -> str | None:
     return f"Good work on {lift_label}. No PR today, but you beat the minimum and kept the chain moving."
 
 
-def _build_coaching_note(user_id: str, workout_logic: dict, meals: list[dict], shopping: dict, today: str) -> str:
+def _build_coaching_note(
+    user_id: str,
+    workout_logic: dict,
+    meals: list[dict],
+    shopping: dict,
+    today: str,
+    journal: dict | None = None,
+) -> str:
     completed_note = _get_completed_workout_note(user_id, today)
     if completed_note:
         return completed_note
@@ -535,20 +640,77 @@ def _build_coaching_note(user_id: str, workout_logic: dict, meals: list[dict], s
     actual_next = workout_logic.get("actual_next")
     day_type = workout_logic.get("day_type")
 
+    if journal and journal.get("available") and not journal.get("journaled_today"):
+        return _rotating_pick(
+            [
+                "Chronicle has not been logged yet. Capture the day while the details are still warm.",
+                "Put one honest paragraph into Chronicles today. Small record, permanent memory.",
+                "Before the day gets noisy, file a quick Chronicle entry so the Archive does not miss this one.",
+                "Make journaling the anchor today: write what happened, what mattered, and what needs to carry forward.",
+            ],
+            today,
+            "journal",
+        )
+
     if day_type == "rest":
-        return "Rest day. Recover like it is part of the program: walk, stretch, eat protein, and do not invent chaos."
+        return _rotating_pick(
+            [
+                "Rest day. Recover like it is part of the program: walk, stretch, eat protein, and do not invent chaos.",
+                "Recovery is the assignment today. Keep movement light, hit protein, and protect sleep.",
+                "No hero lift today. Win by leaving tomorrow easier than you found it.",
+                "Use the lighter day to tighten the system: hydrate, prep one thing, and close the loop early.",
+            ],
+            today,
+            "rest",
+        )
 
     if actual_next:
         lift = format_lift_name(actual_next)
-        return f"Keep today simple: handle {lift}, eat what is planned, and clear the highest-priority shopping item."
+        return _rotating_pick(
+            [
+                f"Primary build today: {lift}. Get the work done, eat the planned food, and keep the rest controlled.",
+                f"{lift.capitalize()} is the anchor. Handle the top set first, then clear one operational loose end.",
+                f"Treat {lift} like the main mission. Nutrition and shopping support it; they do not replace it.",
+                f"Win the day through sequence: {lift}, protein, then the highest-priority admin task.",
+            ],
+            today,
+            f"lift-{actual_next}",
+        )
 
     if not meals:
-        return "No meals are planned for today. Add one easy anchor meal before the day gets away from you."
+        return _rotating_pick(
+            [
+                "No meals are planned for today. Add one easy anchor meal before the day gets away from you.",
+                "Food plan is thin. Lock in one reliable protein meal so the rest of the day has guardrails.",
+                "Before momentum drops, put a simple meal into Food Ops and mark it eaten when it happens.",
+                "Nutrition needs a first move. Add the easiest repeat meal and let the system track the rest.",
+            ],
+            today,
+            "meals",
+        )
 
     if shopping.get("unchecked_count", 0) > 0:
-        return "Your shopping list still has open items. Knock out the essentials before they block tomorrow."
+        return _rotating_pick(
+            [
+                "Your shopping list still has open items. Knock out the essentials before they block tomorrow.",
+                "Clear the highest-impact shopping item today so Food Ops does not become tomorrow's friction.",
+                "Restock before it becomes a problem. One clean shopping pass protects the week.",
+                "The shopping queue is open. Remove the item most likely to disrupt meals or training.",
+            ],
+            today,
+            "shopping",
+        )
 
-    return "Systems are clear. Protect the routine and avoid adding noise."
+    return _rotating_pick(
+        [
+            "Systems are clear. Protect the routine and avoid adding noise.",
+            "Nothing is screaming. Use that advantage to move one goal forward deliberately.",
+            "Quiet dashboard today. Pick the cleanest next action and make it visible in the logs.",
+            "The system is stable. Spend the extra bandwidth on one feature, one task, or one record worth keeping.",
+        ],
+        today,
+        "clear",
+    )
 
 
 def build_daily_dashboard(user_id: str = "john") -> dict:
@@ -561,6 +723,7 @@ def build_daily_dashboard(user_id: str = "john") -> dict:
     calendar = _get_calendar_summary(now.date())
     finance_summary = build_finance_ops_summary(user_id, today[:7])
     goals = list_goals(user_id, active_only=False)
+    journal_snapshot = _get_journal_snapshot(user_id, today)
     mission_phase = _get_mission_phase(now)
     today_workout = get_todays_workout_summary(user_id, now.date())
     workout_profile = _get_lift_profile(user_id, scheduled_today)
@@ -580,7 +743,14 @@ def build_daily_dashboard(user_id: str = "john") -> dict:
         goals=goals,
     )
     mission = mission_scores["daily"]
-    highest_priority_remaining_task = _highest_priority_remaining_task(user_id, workout_logic, shopping, {"goals": goals}, today)
+    highest_priority_remaining_task = _highest_priority_remaining_task(
+        user_id,
+        workout_logic,
+        shopping,
+        {"goals": goals},
+        today,
+        journal_snapshot,
+    )
     previous_mission_score = get_previous_mission_score(user_id)
     mission_delta = mission["score"] - previous_mission_score if previous_mission_score is not None else None
 
@@ -605,6 +775,7 @@ def build_daily_dashboard(user_id: str = "john") -> dict:
         "shopping": shopping,
         "calendar": calendar,
         "finance_summary": finance_summary,
+        "journal": journal_snapshot,
         "goals": goals,
         "today_workout": today_workout,
         "workout_metadata": {
@@ -624,7 +795,7 @@ def build_daily_dashboard(user_id: str = "john") -> dict:
             "delta": mission_delta,
         },
         "highest_priority_remaining_task": highest_priority_remaining_task,
-        "coaching_note": _build_coaching_note(user_id, workout_logic, meals, shopping, today),
+        "coaching_note": _build_coaching_note(user_id, workout_logic, meals, shopping, today, journal_snapshot),
     }
 
     phase_content = _mission_phase_content(mission_phase, dashboard_base, mission)

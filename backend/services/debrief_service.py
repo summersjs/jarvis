@@ -32,6 +32,63 @@ def _today_str() -> str:
     return datetime.now(LOCAL_TZ).date().isoformat()
 
 
+def _journal_snapshot(user_id: str, date_str: str) -> dict:
+    snapshot = {
+        "available": False,
+        "documented_days": 0,
+        "current_streak": 0,
+        "journaled_today": False,
+        "today_status": "missing",
+    }
+    try:
+        response = (
+            supabase
+            .table("archive_chronicles")
+            .select("entry_date,status,story_text,future_me_message,notes")
+            .eq("user_id", user_id)
+            .order("entry_date", desc=True)
+            .limit(120)
+            .execute()
+        )
+    except Exception:
+        return snapshot
+
+    rows = response.data or []
+    documented_dates: set[str] = set()
+    today_entry = None
+    for row in rows:
+        entry_date = str(row.get("entry_date") or "")[:10]
+        if not entry_date:
+            continue
+        is_documented = bool(
+            row.get("story_text")
+            or row.get("future_me_message")
+            or row.get("notes")
+            or row.get("status") in {"in_progress", "filed"}
+        )
+        if entry_date == date_str:
+            today_entry = row
+        if is_documented:
+            documented_dates.add(entry_date)
+
+    cursor = datetime.fromisoformat(f"{date_str}T12:00:00").date()
+    if date_str not in documented_dates:
+        cursor = cursor - timedelta(days=1)
+    current_streak = 0
+    while cursor.isoformat() in documented_dates:
+        current_streak += 1
+        cursor = cursor - timedelta(days=1)
+
+    snapshot.update({
+        "available": True,
+        "documented_days": len(documented_dates),
+        "current_streak": current_streak,
+        "journaled_today": date_str in documented_dates,
+        "today_status": (today_entry or {}).get("status") or "missing",
+    })
+    return snapshot
+
+
 def _month_key(date_str: str | None = None) -> str:
     if date_str:
         return date_str[:7]
@@ -39,11 +96,122 @@ def _month_key(date_str: str | None = None) -> str:
 
 
 def _debrief_entries() -> list[dict]:
+    try:
+        response = (
+            supabase
+            .table("daily_debrief_entries")
+            .select("*")
+            .order("date", desc=True)
+            .execute()
+        )
+        if response.data is not None:
+            return [_debrief_row_to_entry(row) for row in response.data]
+    except Exception:
+        pass
+
     return read_json(DEBRIEF_FILE, [])
 
 
 def _save_debrief_entries(entries: list[dict]):
     return write_json(DEBRIEF_FILE, entries)
+
+
+def _debrief_row_to_entry(row: dict) -> dict:
+    entry = dict(row)
+    if entry.get("date") is not None:
+        entry["date"] = str(entry["date"])[:10]
+
+    for key, default in {
+        "objectives": [],
+        "training": {},
+        "nutrition": {},
+        "finance": {},
+        "victory": {},
+        "lessons": {},
+        "tomorrow": {},
+    }.items():
+        entry[key] = entry.get(key) if entry.get(key) is not None else default
+
+    entry.pop("raw_payload", None)
+    entry.pop("source", None)
+    return entry
+
+
+def _upsert_debrief_entry_to_supabase(entry: dict) -> dict | None:
+    db_payload = {
+        "user_id": entry.get("user_id") or "john",
+        "date": entry.get("date"),
+        "overall_status": entry.get("overall_status") or "PARTIAL",
+        "mission_score": entry.get("mission_score"),
+        "daily_score": entry.get("daily_score"),
+        "weekly_score": entry.get("weekly_score"),
+        "lifetime_score": entry.get("lifetime_score"),
+        "lifetime_rank": entry.get("lifetime_rank"),
+        "is_finalized": bool(entry.get("is_finalized")),
+        "completed_at": entry.get("completed_at"),
+        "summary": entry.get("summary"),
+        "objectives": entry.get("objectives") or [],
+        "training": entry.get("training") or {},
+        "nutrition": entry.get("nutrition") or {},
+        "finance": entry.get("finance") or {},
+        "victory": entry.get("victory") or {},
+        "lessons": entry.get("lessons") or {},
+        "tomorrow": entry.get("tomorrow") or {},
+        "notes": entry.get("notes"),
+        "source": "app",
+        "raw_payload": entry,
+        "created_at": entry.get("created_at"),
+        "updated_at": entry.get("updated_at"),
+    }
+
+    response = (
+        supabase
+        .table("daily_debrief_entries")
+        .upsert(db_payload, on_conflict="user_id,date")
+        .execute()
+    )
+    if not response.data:
+        return None
+
+    saved = _debrief_row_to_entry(response.data[0])
+    _sync_debrief_objectives_to_supabase(saved)
+    return saved
+
+
+def _sync_debrief_objectives_to_supabase(entry: dict) -> None:
+    try:
+        entry_response = (
+            supabase
+            .table("daily_debrief_entries")
+            .select("id")
+            .eq("user_id", entry.get("user_id") or "john")
+            .eq("date", entry.get("date"))
+            .limit(1)
+            .execute()
+        )
+        if not entry_response.data:
+            return
+
+        debrief_id = entry_response.data[0]["id"]
+        supabase.table("daily_debrief_objectives").delete().eq("debrief_id", debrief_id).execute()
+        rows = []
+        for index, objective in enumerate(entry.get("objectives") or []):
+            rows.append({
+                "debrief_id": debrief_id,
+                "user_id": entry.get("user_id") or "john",
+                "date": entry.get("date"),
+                "goal_id": objective.get("id"),
+                "title": objective.get("title") or "Untitled objective",
+                "completed": bool(objective.get("completed")),
+                "notes": objective.get("notes"),
+                "blocker": objective.get("blocker"),
+                "sort_order": index,
+                "raw_payload": objective,
+            })
+        if rows:
+            supabase.table("daily_debrief_objectives").insert(rows).execute()
+    except Exception:
+        pass
 
 
 def _budget_entries() -> list[dict]:
@@ -1072,7 +1240,6 @@ def _build_tomorrow_prep(saved_tomorrow: dict | None, tomorrow_events: list[dict
 
 
 def save_daily_debrief_entry(payload: dict) -> dict:
-    entries = _debrief_entries()
     now = datetime.now(LOCAL_TZ).isoformat()
     payload = dict(payload)
     payload["created_at"] = payload.get("created_at") or now
@@ -1084,6 +1251,21 @@ def save_daily_debrief_entry(payload: dict) -> dict:
     if payload.get("mission_score") is not None and payload.get("daily_score") is None:
         payload["daily_score"] = payload.get("mission_score")
 
+    try:
+        saved = _upsert_debrief_entry_to_supabase(payload)
+        if saved:
+            entries = [
+                entry
+                for entry in read_json(DEBRIEF_FILE, [])
+                if not (entry.get("user_id") == payload.get("user_id") and entry.get("date") == payload.get("date"))
+            ]
+            entries.append(saved)
+            _save_debrief_entries(entries)
+            return saved
+    except Exception:
+        pass
+
+    entries = _debrief_entries()
     entries = [
         entry
         for entry in entries
@@ -1107,6 +1289,7 @@ def build_daily_debrief_summary(user_id: str = "john") -> dict:
     today = now.date().isoformat()
     month = today[:7]
     saved = _lookup_latest_debrief(user_id, today) or {}
+    journal = _journal_snapshot(user_id, today)
     budget = _current_month_budget(user_id, month)
     transactions = _food_transactions_for_date(user_id, today)
     meal_snapshot = _today_meal_snapshot(user_id, today)
@@ -1261,6 +1444,18 @@ def build_daily_debrief_summary(user_id: str = "john") -> dict:
             "reminder": saved.get("tomorrow", {}).get("reminder") or tomorrow.get("reminder"),
         }
 
+    journal_line = None
+    if journal.get("available") and journal.get("journaled_today"):
+        documented_days = int(journal.get("documented_days") or 0)
+        streak = int(journal.get("current_streak") or 0)
+        streak_line = f", current streak {streak}" if streak else ""
+        journal_line = (
+            f"Chronicles logged today. Archive total is {documented_days} documented day"
+            f"{'' if documented_days == 1 else 's'}{streak_line}."
+        )
+    elif journal.get("available"):
+        journal_line = "Chronicles was not logged today. Add the record before the day closes."
+
     spoken_bits = [
         f"Evening debrief, John. Today was {overall_status.lower().replace('_', ' ')}.",
         f"Daily score {daily_score}. Weekly score {weekly_score}. Lifetime rank {lifetime_rank}.",
@@ -1272,6 +1467,7 @@ def build_daily_debrief_summary(user_id: str = "john") -> dict:
         f"That session moved {training['goal_impact']}" if training.get("goal_impact") else None,
         f"Stayed {daily_status.lower()} on spending." if daily_status else None,
         f"Planned standard: {planned_standard_summaries[0]}" if planned_standard_summaries else None,
+        journal_line,
         f"Next protocol is {_safe_lift_label(next_protocol['lift'])} on {next_protocol['weekday']}." if next_protocol else None,
         f"Tomorrow looks like a {_safe_day_label(tomorrow_day_type)} day." if tomorrow_day_type else None,
         f"Main lesson: {lessons.get('adjust_tomorrow') or lessons.get('worked') or 'keep tomorrow simple.'}",
@@ -1325,6 +1521,7 @@ def build_daily_debrief_summary(user_id: str = "john") -> dict:
         "training": training,
         "nutrition": nutrition,
         "finance": finance,
+        "journal": journal,
         "tomorrow": {
             **tomorrow,
             "top_priorities": tomorrow.get("priorities", []),

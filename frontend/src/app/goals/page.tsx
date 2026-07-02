@@ -194,6 +194,8 @@ function GoalsPageInner() {
   const [historyGoal, setHistoryGoal] = useState<Goal | null>(null);
   const [focusedGoalId, setFocusedGoalId] = useState<string | null>(null);
   const [milestoneDrawer, setMilestoneDrawer] = useState<MilestoneDrawerState | null>(null);
+  const [expandedGoalIds, setExpandedGoalIds] = useState<Set<string>>(new Set());
+  const [goalExpansionInitialized, setGoalExpansionInitialized] = useState(false);
 
   async function loadGoals() {
     try {
@@ -584,6 +586,35 @@ function GoalsPageInner() {
     loadGoals();
   }, []);
 
+  useEffect(() => {
+    if (goals.length === 0) return;
+
+    setExpandedGoalIds((prev) => {
+      const validGoalIds = new Set(goals.map((goal) => goal.id));
+      const next = new Set([...prev].filter((goalId) => validGoalIds.has(goalId)));
+      if (!goalExpansionInitialized) {
+        next.add(goals[0].id);
+      }
+      return next;
+    });
+
+    if (!goalExpansionInitialized) {
+      setGoalExpansionInitialized(true);
+    }
+  }, [goals, goalExpansionInitialized]);
+
+  function toggleGoalExpanded(goalId: string) {
+    setExpandedGoalIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(goalId)) {
+        next.delete(goalId);
+      } else {
+        next.add(goalId);
+      }
+      return next;
+    });
+  }
+
   return (
     <main className="min-h-screen bg-black px-6 py-10 text-green-400">
       <div className="mx-auto max-w-7xl">
@@ -842,6 +873,8 @@ function GoalsPageInner() {
                 key={goal.id}
                 goal={goal}
                 focused={goal.id === focusedGoalId}
+                expanded={expandedGoalIds.has(goal.id)}
+                onToggleExpanded={() => toggleGoalExpanded(goal.id)}
                 logValue={logValues[goal.id] || ""}
                 logNote={logNotes[goal.id] || ""}
                 onLogValueChange={(value) => setLogValues((prev) => ({ ...prev, [goal.id]: value }))}
@@ -1114,6 +1147,8 @@ function GoalCard({
   onEditMilestone,
   onArchive,
   onOpenHistory,
+  expanded,
+  onToggleExpanded,
 }: {
   goal: Goal;
   focused: boolean;
@@ -1138,6 +1173,8 @@ function GoalCard({
   onEditMilestone: (milestone: GoalMilestone) => void;
   onArchive: () => void;
   onOpenHistory: () => void;
+  expanded: boolean;
+  onToggleExpanded: () => void;
 }) {
   const missionType = goal.mission_type || (goal.period ? "standard" : "objective");
   if (missionType === "standard") {
@@ -1161,6 +1198,8 @@ function GoalCard({
         onRemovePlanned={onRemovePlanned}
         onArchive={onArchive}
         onOpenHistory={onOpenHistory}
+        expanded={expanded}
+        onToggleExpanded={onToggleExpanded}
       />
     );
   }
@@ -1176,6 +1215,8 @@ function GoalCard({
         onUpdateMilestone={onUpdateMilestone}
         onEditMilestone={onEditMilestone}
         onArchive={onArchive}
+        expanded={expanded}
+        onToggleExpanded={onToggleExpanded}
       />
     );
   }
@@ -1191,6 +1232,8 @@ function GoalCard({
       onLog={onLog}
       onArchive={onArchive}
       onOpenHistory={onOpenHistory}
+      expanded={expanded}
+      onToggleExpanded={onToggleExpanded}
     />
   );
 }
@@ -1205,6 +1248,8 @@ function ObjectiveCard({
   onLog,
   onArchive,
   onOpenHistory,
+  expanded,
+  onToggleExpanded,
 }: {
   goal: Goal;
   focused: boolean;
@@ -1215,6 +1260,8 @@ function ObjectiveCard({
   onLog: () => void;
   onArchive: () => void;
   onOpenHistory: () => void;
+  expanded: boolean;
+  onToggleExpanded: () => void;
 }) {
   const percent = goal.progress?.percent ?? 0;
   const isLimitBreak = percent >= 100 || !!goal.progress?.is_complete;
@@ -1236,21 +1283,33 @@ function ObjectiveCard({
           <p className="text-sm uppercase tracking-wide text-green-500/60">
             Objective / {goal.category} / {goal.goal_type}
           </p>
-          <h2 className="mt-1 text-2xl font-semibold">{goal.title}</h2>
-          {goal.description && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleExpanded();
+            }}
+            className="mt-1 block text-left text-2xl font-semibold text-green-100 transition hover:text-cyan-100 hover:drop-shadow-[0_0_10px_rgba(34,211,238,0.45)]"
+            aria-expanded={expanded}
+          >
+            {goal.title}
+          </button>
+          {expanded && goal.description && (
             <p className="mt-2 text-green-300/75">{goal.description}</p>
           )}
         </div>
 
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onArchive();
-          }}
-          className="rounded-xl border border-red-500/30 px-3 py-2 text-sm text-red-300 transition hover:bg-red-500/10"
-        >
-          Archive
-        </button>
+        {expanded && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onArchive();
+            }}
+            className="rounded-xl border border-red-500/30 px-3 py-2 text-sm text-red-300 transition hover:bg-red-500/10"
+          >
+            Archive
+          </button>
+        )}
       </div>
 
       <div className="mt-5">
@@ -1267,68 +1326,78 @@ function ObjectiveCard({
         <GoalProgressBar goal={goal} />
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
-        <div className="rounded-xl border border-green-500/20 bg-black p-4">
-          <p className="text-xs uppercase tracking-wide text-green-500/60">Estimated Completion</p>
-          <p className="mt-2 font-semibold text-green-300">{etaDate || "Unknown"}</p>
-          <p className="mt-1 text-sm text-green-300/65">{goal.eta?.summary || "No estimate yet."}</p>
-        </div>
-
-        <div className="rounded-xl border border-green-500/20 bg-black p-4">
-          <p className="text-xs uppercase tracking-wide text-green-500/60">Remaining</p>
-          <p className="mt-2 font-semibold text-green-300">
-            {goal.progress?.remaining ?? "?"}{goal.unit ? ` ${goal.unit}` : ""}
-          </p>
-          {goal.frequency && (
-            <p className="mt-1 text-sm text-green-300/65">Frequency: {goal.frequency}</p>
-          )}
-        </div>
-      </div>
-
-      {goal.period && (
-        <div className="mt-4 rounded-xl border border-green-500/20 bg-black p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-xs uppercase tracking-wide text-green-500/60">
-                Current {goal.period.frequency}
-              </p>
-              <p className="mt-1 font-semibold text-green-300">{goal.period.label}</p>
-            </div>
-            <div className="text-right">
-              <p className="font-semibold text-green-300">
-                {formatNumber(goal.period.value)}{goal.unit ? ` ${goal.unit}` : ""}
-              </p>
-              <p className="text-sm text-green-300/65">
-                {goal.period.hit_goal ? "Goal hit" : "In progress"}
-              </p>
-            </div>
-          </div>
-        </div>
+      {!expanded && (
+        <p className="mt-3 text-xs uppercase tracking-[0.18em] text-cyan-200/60">
+          Click title to expand
+        </p>
       )}
 
-      <div className="mt-5 grid gap-3 md:grid-cols-[0.45fr_1fr_auto]" onClick={(e) => e.stopPropagation()}>
-        <input
-          type="number"
-          value={logValue}
-          onChange={(e) => onLogValueChange(e.target.value)}
-          className="rounded-xl border border-green-500/30 bg-black px-4 py-3"
-          placeholder={goal.goal_type === "metric" || goal.goal_type === "binary" ? "New value" : "Add amount"}
-        />
-        <input
-          value={logNote}
-          onChange={(e) => onLogNoteChange(e.target.value)}
-          className="rounded-xl border border-green-500/30 bg-black px-4 py-3"
-          placeholder="Progress note"
-        />
-        <button
-          onClick={onLog}
-          className="command-action-button command-action-green border border-green-500/40 bg-green-500/10 px-4 py-3 text-green-100"
-        >
-          Log
-        </button>
-      </div>
+      {!expanded ? null : (
+        <>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <div className="rounded-xl border border-green-500/20 bg-black p-4">
+              <p className="text-xs uppercase tracking-wide text-green-500/60">Estimated Completion</p>
+              <p className="mt-2 font-semibold text-green-300">{etaDate || "Unknown"}</p>
+              <p className="mt-1 text-sm text-green-300/65">{goal.eta?.summary || "No estimate yet."}</p>
+            </div>
 
-      <RecentLogs goal={goal} />
+            <div className="rounded-xl border border-green-500/20 bg-black p-4">
+              <p className="text-xs uppercase tracking-wide text-green-500/60">Remaining</p>
+              <p className="mt-2 font-semibold text-green-300">
+                {goal.progress?.remaining ?? "?"}{goal.unit ? ` ${goal.unit}` : ""}
+              </p>
+              {goal.frequency && (
+                <p className="mt-1 text-sm text-green-300/65">Frequency: {goal.frequency}</p>
+              )}
+            </div>
+          </div>
+
+          {goal.period && (
+            <div className="mt-4 rounded-xl border border-green-500/20 bg-black p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-green-500/60">
+                    Current {goal.period.frequency}
+                  </p>
+                  <p className="mt-1 font-semibold text-green-300">{goal.period.label}</p>
+                </div>
+                <div className="text-right">
+                  <p className="font-semibold text-green-300">
+                    {formatNumber(goal.period.value)}{goal.unit ? ` ${goal.unit}` : ""}
+                  </p>
+                  <p className="text-sm text-green-300/65">
+                    {goal.period.hit_goal ? "Goal hit" : "In progress"}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-5 grid gap-3 md:grid-cols-[0.45fr_1fr_auto]" onClick={(e) => e.stopPropagation()}>
+            <input
+              type="number"
+              value={logValue}
+              onChange={(e) => onLogValueChange(e.target.value)}
+              className="rounded-xl border border-green-500/30 bg-black px-4 py-3"
+              placeholder={goal.goal_type === "metric" || goal.goal_type === "binary" ? "New value" : "Add amount"}
+            />
+            <input
+              value={logNote}
+              onChange={(e) => onLogNoteChange(e.target.value)}
+              className="rounded-xl border border-green-500/30 bg-black px-4 py-3"
+              placeholder="Progress note"
+            />
+            <button
+              onClick={onLog}
+              className="command-action-button command-action-green border border-green-500/40 bg-green-500/10 px-4 py-3 text-green-100"
+            >
+              Log
+            </button>
+          </div>
+
+          <RecentLogs goal={goal} />
+        </>
+      )}
     </article>
   );
 }
@@ -1352,6 +1421,8 @@ function StandardCard({
   onRemovePlanned,
   onArchive,
   onOpenHistory,
+  expanded,
+  onToggleExpanded,
 }: {
   goal: Goal;
   focused: boolean;
@@ -1371,6 +1442,8 @@ function StandardCard({
   onRemovePlanned: () => void;
   onArchive: () => void;
   onOpenHistory: () => void;
+  expanded: boolean;
+  onToggleExpanded: () => void;
 }) {
   const standard = goal.standard;
   const period = goal.period;
@@ -1386,7 +1459,32 @@ function StandardCard({
       className={`rounded-2xl border border-cyan-300/35 bg-zinc-950 p-6 shadow-[0_0_24px_rgba(34,211,238,0.12)] transition hover:-translate-y-0.5 hover:shadow-[0_0_34px_rgba(34,211,238,0.22)] ${focused ? "ring-2 ring-cyan-300/60 shadow-[0_0_42px_rgba(34,211,238,0.25)]" : ""}`}
       onClick={onOpenHistory}
     >
-      <CardHeader goal={goal} label={`Standard / ${goal.category}`} onArchive={onArchive} />
+      <CardHeader
+        goal={goal}
+        label={`Standard / ${goal.category}`}
+        expanded={expanded}
+        onToggleExpanded={onToggleExpanded}
+        onArchive={onArchive}
+      />
+
+      {!expanded && (
+        <div className="mt-5">
+          <div className="mb-2 flex items-center justify-between gap-3 text-sm text-green-300/75">
+            <span>
+              {formatNumber(period?.value || 0)}{goal.unit ? ` ${goal.unit}` : ""} /{" "}
+              {goal.target_value ? `${formatNumber(goal.target_value)}${goal.unit ? ` ${goal.unit}` : ""}` : "No target"}
+            </span>
+            <span>{percent ?? 0}%</span>
+          </div>
+          <GoalProgressBar goal={goal} />
+          <p className="mt-3 text-xs uppercase tracking-[0.18em] text-cyan-200/60">
+            Click title to expand
+          </p>
+        </div>
+      )}
+
+      {expanded && (
+        <>
 
       <div className="mt-5 grid gap-3 md:grid-cols-3">
         <MetricPanel label="Current Period" value={period?.label || "Unknown"} />
@@ -1490,6 +1588,8 @@ function StandardCard({
         onLog={onLog}
       />
       <RecentLogs goal={goal} />
+        </>
+      )}
     </article>
   );
 }
@@ -1503,6 +1603,8 @@ function ProjectCard({
   onUpdateMilestone,
   onEditMilestone,
   onArchive,
+  expanded,
+  onToggleExpanded,
 }: {
   goal: Goal;
   focused: boolean;
@@ -1512,6 +1614,8 @@ function ProjectCard({
   onUpdateMilestone: (milestoneId: string, status: string) => void;
   onEditMilestone: (milestone: GoalMilestone) => void;
   onArchive: () => void;
+  expanded: boolean;
+  onToggleExpanded: () => void;
 }) {
   const project = goal.project;
   const milestones = goal.milestones || [];
@@ -1524,14 +1628,13 @@ function ProjectCard({
       id={`goal-${goal.id}`}
       className={`rounded-2xl border border-purple-300/35 bg-zinc-950 p-6 shadow-[0_0_24px_rgba(168,85,247,0.14)] ${focused ? "ring-2 ring-purple-300/60 shadow-[0_0_42px_rgba(168,85,247,0.25)]" : ""}`}
     >
-      <CardHeader goal={goal} label={`Project / ${goal.category}`} onArchive={onArchive} />
-
-      <div className="mt-5 grid gap-3 md:grid-cols-4">
-        <MetricPanel label="Status" value={project?.status || "NOT STARTED"} tone="purple" />
-        <MetricPanel label="Milestones" value={`${project?.completed_count ?? 0} / ${project?.total_count ?? 0}`} />
-        <MetricPanel label="Remaining" value={`${project?.remaining_count ?? 0}`} />
-        <MetricPanel label="Next" value={project?.next_milestone?.title || "No milestone planned"} />
-      </div>
+      <CardHeader
+        goal={goal}
+        label={`Project / ${goal.category}`}
+        expanded={expanded}
+        onToggleExpanded={onToggleExpanded}
+        onArchive={onArchive}
+      />
 
       <div className="mt-5">
         <div className="mb-2 flex items-center justify-between gap-3 text-sm text-green-300/75">
@@ -1544,6 +1647,22 @@ function ProjectCard({
             style={{ width: `${Math.min(100, Math.max(0, project?.percent || 0))}%` }}
           />
         </div>
+      </div>
+
+      {!expanded && (
+        <p className="mt-3 text-xs uppercase tracking-[0.18em] text-purple-200/60">
+          Click title to expand
+        </p>
+      )}
+
+      {expanded && (
+        <>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-4">
+        <MetricPanel label="Status" value={project?.status || "NOT STARTED"} tone="purple" />
+        <MetricPanel label="Milestones" value={`${project?.completed_count ?? 0} / ${project?.total_count ?? 0}`} />
+        <MetricPanel label="Remaining" value={`${project?.remaining_count ?? 0}`} />
+        <MetricPanel label="Next" value={project?.next_milestone?.title || "No milestone planned"} />
       </div>
 
       <div className="mt-5 grid gap-3">
@@ -1589,6 +1708,8 @@ function ProjectCard({
       </div>
 
       <RecentLogs goal={goal} />
+        </>
+      )}
     </article>
   );
 }
@@ -1759,21 +1880,35 @@ function getMilestoneStatusLabel(milestone: GoalMilestone) {
 function CardHeader({
   goal,
   label,
+  expanded,
+  onToggleExpanded,
   onArchive,
 }: {
   goal: Goal;
   label: string;
+  expanded: boolean;
+  onToggleExpanded: () => void;
   onArchive: () => void;
 }) {
   return (
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div>
         <p className="text-sm uppercase tracking-wide text-green-500/60">{label}</p>
-        <h2 className="mt-1 text-2xl font-semibold text-green-100">{goal.title}</h2>
-        {goal.description && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleExpanded();
+          }}
+          className="mt-1 block text-left text-2xl font-semibold text-green-100 transition hover:text-cyan-100 hover:drop-shadow-[0_0_10px_rgba(34,211,238,0.45)]"
+          aria-expanded={expanded}
+        >
+          {goal.title}
+        </button>
+        {expanded && goal.description && (
           <p className="mt-2 text-green-300/75">{goal.description}</p>
         )}
-        {goal.forge_project && (
+        {expanded && goal.forge_project && (
           <Link
             href={`/forge?project=${goal.forge_project.id}`}
             onClick={(e) => e.stopPropagation()}
@@ -1784,15 +1919,17 @@ function CardHeader({
         )}
       </div>
 
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          onArchive();
-        }}
-        className="rounded-xl border border-red-500/30 px-3 py-2 text-sm text-red-300 transition hover:bg-red-500/10"
-      >
-        Archive
-      </button>
+      {expanded && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onArchive();
+          }}
+          className="rounded-xl border border-red-500/30 px-3 py-2 text-sm text-red-300 transition hover:bg-red-500/10"
+        >
+          Archive
+        </button>
+      )}
     </div>
   );
 }

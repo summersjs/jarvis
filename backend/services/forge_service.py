@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import datetime
 
+from backend.core.config import LOCAL_TZ
 from backend.db.supabase_client import supabase
 from backend.schemas.forge import (
     ForgeFileCreate,
@@ -401,6 +403,8 @@ def update_forge_task(task_id: str, payload: ForgeTaskUpdate) -> dict | None:
     task = response.data[0]
     if is_task_complete(task):
         sync_task_completion_goal(task)
+    else:
+        remove_task_completion_goal_logs(task)
     return task
 
 
@@ -444,12 +448,41 @@ def sync_task_completion_goal(task: dict) -> None:
                 "value": 1,
                 "notes": f"Forge task completed: {task.get('title')}",
                 "log_type": "progress",
+                "planned_for": datetime.now(LOCAL_TZ).date().isoformat(),
                 "metadata": {
                     "forge_task_id": task.get("id"),
+                    "forge_task_title": task.get("title"),
                     "forge_project_id": project_id,
                     "milestone_group": task.get("milestone_group"),
                     "source": "forge_task_completion",
                 },
             }).execute()
+    except Exception:
+        return
+
+
+def remove_task_completion_goal_logs(task: dict) -> None:
+    task_id = task.get("id")
+    project_id = task.get("project_id")
+    if not task_id or not project_id:
+        return
+
+    try:
+        goals = list_goals(task.get("user_id") or "john", active_only=True)
+        for goal in goals:
+            metadata = goal.get("metadata") or {}
+            if metadata.get("forge_goal_type") != "task_completion" or metadata.get("forge_project_id") != project_id:
+                continue
+
+            existing = (
+                supabase.table("goal_logs")
+                .select("id, metadata")
+                .eq("goal_id", goal["id"])
+                .eq("log_type", "progress")
+                .execute()
+            )
+            for row in existing.data or []:
+                if (row.get("metadata") or {}).get("forge_task_id") == task_id:
+                    supabase.table("goal_logs").delete().eq("id", row["id"]).execute()
     except Exception:
         return

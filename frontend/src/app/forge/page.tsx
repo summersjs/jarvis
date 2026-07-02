@@ -48,9 +48,44 @@ type ForgeProject = {
   next_milestone?: string | null;
   progress_percent?: number | null;
   project_type?: string | null;
+  cover_image_url?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
   linked_goal?: LinkedGoal | null;
+};
+
+type ForgeSpark = {
+  id: string;
+  spark_text: string;
+  category?: ForgeCategory | null;
+  project_id?: string | null;
+  tags?: string[] | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+type ForgeNote = {
+  id: string;
+  title: string;
+  body?: string | null;
+  category?: ForgeCategory | null;
+  project_id?: string | null;
+  tags?: string[] | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+type ForgeFile = {
+  id: string;
+  file_name: string;
+  file_type?: string | null;
+  file_url?: string | null;
+  caption?: string | null;
+  category?: ForgeCategory | null;
+  project_id?: string | null;
+  tags?: string[] | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
 type GoalMilestone = {
@@ -92,9 +127,9 @@ type ForgeGoalOption = {
 type ForgeDashboard = {
   status: string;
   projects: ForgeProject[];
-  sparks: unknown[];
-  notes: unknown[];
-  files: unknown[];
+  sparks: ForgeSpark[];
+  notes: ForgeNote[];
+  files: ForgeFile[];
   goals: ForgeGoalOption[];
   category_counts: Record<ForgeCategory, number>;
   recently_updated: ForgeProject[];
@@ -124,6 +159,8 @@ type FormState = {
   file_name: string;
   file_type: string;
   file_size: string;
+  file_url: string;
+  use_as_cover: string;
   caption: string;
   goal_id: string;
 };
@@ -207,6 +244,8 @@ const emptyForm: FormState = {
   file_name: "",
   file_type: "",
   file_size: "",
+  file_url: "",
+  use_as_cover: "",
   caption: "",
   goal_id: "",
 };
@@ -261,10 +300,14 @@ export default function ForgePage() {
     }
   }
 
-  function openModal(nextModal: ModalType) {
+  function openModal(nextModal: ModalType, project: ForgeProject | null = selectedProject, category?: ForgeCategory) {
     setMessage("");
     setError("");
-    setForm(emptyForm);
+    setForm({
+      ...emptyForm,
+      project_id: nextModal && ["spark", "note", "file"].includes(nextModal) && project ? project.id : "",
+      category: category || (nextModal && ["spark", "note", "file"].includes(nextModal) && project ? project.category : emptyForm.category),
+    });
     setModal(nextModal);
   }
 
@@ -287,7 +330,23 @@ export default function ForgePage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Forge save failed.");
-      setMessage(modal === "project" ? "Project placed on the bench." : modal === "spark" ? "Spark captured." : modal === "note" ? "Note stored." : "File metadata attached.");
+      if (modal === "file" && form.use_as_cover === "true" && form.project_id && form.file_url) {
+        await fetch(`${API_BASE}/forge/projects/${form.project_id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+          body: JSON.stringify({ cover_image_url: form.file_url }),
+        });
+      }
+      const projectTitle = dashboard.projects.find((project) => project.id === form.project_id)?.title;
+      setMessage(
+        modal === "project"
+          ? "Project placed on the bench."
+          : modal === "spark"
+            ? `Spark saved${projectTitle ? ` to ${projectTitle}` : " to the Forge Inbox"}.`
+            : modal === "note"
+              ? `Note added${projectTitle ? ` to ${projectTitle}` : " to the Forge Inbox"}.`
+              : `File attached${projectTitle ? ` to ${projectTitle}` : " to the Forge Inbox"}.`
+      );
       setModal(null);
       await loadForge();
     } catch (err) {
@@ -349,7 +408,7 @@ export default function ForgePage() {
               <h2>{selectedCategory}</h2>
               <span>{filteredProjects.length ? `${filteredProjects.length} project${filteredProjects.length === 1 ? "" : "s"} on this bench.` : "No projects on this bench yet."}</span>
             </div>
-            <button onClick={() => openModal("project")}>New {selectedCategory} Project</button>
+            <button onClick={() => openModal("project", null, selectedCategory)}>New {selectedCategory} Project</button>
           </section>
         )}
 
@@ -359,7 +418,16 @@ export default function ForgePage() {
           <SparkOfDay spark={spark} />
         </section>
 
-        <ProjectDesk project={selectedProject} onClose={() => setSelectedProject(null)} onCompleteMilestone={completeLinkedMilestone} />
+        <ProjectDesk
+          project={selectedProject}
+          sparks={dashboard.sparks}
+          notes={dashboard.notes}
+          files={dashboard.files}
+          onClose={() => setSelectedProject(null)}
+          onCompleteMilestone={completeLinkedMilestone}
+          onOpenModal={openModal}
+        />
+        <UnassignedInbox sparks={dashboard.sparks} notes={dashboard.notes} files={dashboard.files} />
         <BottomActions onOpen={openModal} />
       </section>
       <ForgeModal
@@ -378,6 +446,11 @@ export default function ForgePage() {
           category: goal?.title === "Build the Jarvis Workstation" ? "Hardware" : goal?.category?.toLowerCase() === "jarvis" ? "Jarvis" : prev.category,
           progress_percent: goal?.project?.percent != null ? String(goal.project.percent) : prev.progress_percent,
           next_milestone: goal?.project?.next_milestone?.title || prev.next_milestone,
+        }))}
+        onProjectSelect={(project) => setForm((prev) => ({
+          ...prev,
+          project_id: project?.id || "",
+          category: project?.category || prev.category,
         }))}
       />
       <ForgeStyles />
@@ -431,25 +504,25 @@ function ForgeHero({ stats }: { stats: ForgeDashboard["stats"] }) {
         <Image src="/images/Forge/new_forge_plaque.png" alt="" fill sizes="280px" className="forge-plaque-image" />
       </div>
       <div className="forge-stat-strip">
-        <Stat label="Active Projects" value={stats.active_projects} Icon={FolderKanban} />
-        <Stat label="Building" value={stats.building} Icon={Hammer} tone="orange" />
-        <Stat label="Incubating" value={stats.incubating} Icon={Lightbulb} tone="green" />
-        <Stat label="Archived" value={stats.archived} Icon={Archive} tone="muted" />
-        <Stat label="Recently Updated" value={stats.recently_updated} Icon={Clock3} tone="blue" />
+        <Stat label="Active Projects" value={stats.active_projects} Icon={FolderKanban} href="/forge/projects?filter=active" />
+        <Stat label="Building" value={stats.building} Icon={Hammer} tone="orange" href="/forge/projects?filter=building" />
+        <Stat label="Incubating" value={stats.incubating} Icon={Lightbulb} tone="green" href="/forge/projects?filter=incubating" />
+        <Stat label="Archived" value={stats.archived} Icon={Archive} tone="muted" href="/forge/projects?filter=archived" />
+        <Stat label="Recently Updated" value={stats.recently_updated} Icon={Clock3} tone="blue" href="/forge/projects?filter=recent" />
       </div>
     </header>
   );
 }
 
-function Stat({ label, value, Icon, tone = "green" }: { label: string; value: number; Icon: LucideIcon; tone?: string }) {
+function Stat({ label, value, Icon, tone = "green", href }: { label: string; value: number; Icon: LucideIcon; tone?: string; href: string }) {
   return (
-    <article className={`forge-stat ${tone}`}>
+    <Link href={href} className={`forge-stat ${tone}`}>
       <span>{label}</span>
       <div>
         <strong>{value}</strong>
         <Icon size={24} />
       </div>
-    </article>
+    </Link>
   );
 }
 
@@ -530,7 +603,7 @@ function RecentlyUpdated({ projects, onSelect }: { projects: ForgeProject[]; onS
           ))}
         </div>
       )}
-      <button className="forge-text-link">View all projects →</button>
+      <Link href="/forge/projects?filter=all" className="forge-text-link">View all projects →</Link>
     </Panel>
   );
 }
@@ -581,7 +654,7 @@ function IncubationShelf({ projects, onSelect }: { projects: ForgeProject[]; onS
           fallback={<span className="forge-sticky-fallback">Finish what you started.</span>}
         />
       </span>
-      <button className="forge-text-link">View incubation shelf →</button>
+      <Link href="/forge/projects?filter=incubating" className="forge-text-link">View incubation shelf →</Link>
     </Panel>
   );
 }
@@ -727,14 +800,14 @@ function ForgeModal({
           <div className="forge-form-grid">
             <ForgeTextarea label="Spark Text" value={form.spark_text} onChange={(value) => onChange("spark_text", value)} required />
             <ForgeSelect label="Category" value={form.category} options={FORGE_CATEGORIES.map((item) => item.name)} onChange={(value) => onChange("category", value)} />
-            <ProjectSelect projects={projects} value={form.project_id} onChange={(value) => onChange("project_id", value)} />
+            <ProjectSelect projects={projects} value={form.project_id} onChange={(value) => onProjectSelect(projects.find((project) => project.id === value) || null)} />
             <ForgeInput label="Tags" value={form.tags} onChange={(value) => onChange("tags", value)} placeholder="comma, separated, tags" />
           </div>
         ) : modal === "note" ? (
           <div className="forge-form-grid">
             <ForgeInput label="Note Title" value={form.note_title} onChange={(value) => onChange("note_title", value)} required />
             <ForgeSelect label="Category" value={form.category} options={FORGE_CATEGORIES.map((item) => item.name)} onChange={(value) => onChange("category", value)} />
-            <ProjectSelect projects={projects} value={form.project_id} onChange={(value) => onChange("project_id", value)} />
+            <ProjectSelect projects={projects} value={form.project_id} onChange={(value) => onProjectSelect(projects.find((project) => project.id === value) || null)} />
             <ForgeInput label="Tags" value={form.tags} onChange={(value) => onChange("tags", value)} placeholder="comma, separated, tags" />
             <ForgeTextarea label="Body" value={form.note_body} onChange={(value) => onChange("note_body", value)} />
           </div>
@@ -750,11 +823,26 @@ function ForgeModal({
                   onChange("file_name", file.name);
                   onChange("file_type", file.type);
                   onChange("file_size", String(file.size));
+                  if (file.type.startsWith("image/")) {
+                    const reader = new FileReader();
+                    reader.onload = () => onChange("file_url", String(reader.result || ""));
+                    reader.readAsDataURL(file);
+                  } else {
+                    onChange("file_url", "");
+                  }
                 }}
               />
             </label>
-            <ProjectSelect projects={projects} value={form.project_id} onChange={(value) => onChange("project_id", value)} />
+            <ProjectSelect projects={projects} value={form.project_id} onChange={(value) => onProjectSelect(projects.find((project) => project.id === value) || null)} />
             <ForgeSelect label="Category" value={form.category} options={FORGE_CATEGORIES.map((item) => item.name)} onChange={(value) => onChange("category", value)} />
+            <label className="forge-check">
+              <input
+                type="checkbox"
+                checked={form.use_as_cover === "true"}
+                onChange={(event) => onChange("use_as_cover", event.target.checked ? "true" : "")}
+              />
+              <span>Use this image as the project cover</span>
+            </label>
             <ForgeInput label="Tags" value={form.tags} onChange={(value) => onChange("tags", value)} placeholder="comma, separated, tags" />
             <ForgeTextarea label="Caption / Note" value={form.caption} onChange={(value) => onChange("caption", value)} />
           </div>
@@ -812,18 +900,45 @@ function ProjectSelect({ projects, value, onChange }: { projects: ForgeProject[]
 
 function ProjectDesk({
   project,
+  sparks,
+  notes,
+  files,
   onClose,
   onCompleteMilestone,
+  onOpenModal,
 }: {
   project: ForgeProject | null;
+  sparks: ForgeSpark[];
+  notes: ForgeNote[];
+  files: ForgeFile[];
   onClose: () => void;
   onCompleteMilestone: (milestoneId: string) => void;
+  onOpenModal: (modal: ModalType, project?: ForgeProject | null) => void;
 }) {
+  const [activeTab, setActiveTab] = useState("Overview");
   if (!project) return null;
   const linkedGoal = project.linked_goal;
   const linkedSnapshot = linkedGoal?.project;
   const milestones = linkedGoal?.milestones || [];
   const progress = linkedSnapshot?.percent ?? project.progress_percent;
+  const projectSparks = sparks.filter((spark) => spark.project_id === project.id);
+  const projectNotes = notes.filter((note) => note.project_id === project.id);
+  const projectFiles = files.filter((file) => file.project_id === project.id);
+  const projectImages = projectFiles.filter(isForgeImage);
+  const latestSpark = projectSparks[0];
+  const latestNote = projectNotes[0];
+  const latestFile = projectFiles[0];
+  const tabs = [
+    { label: "Overview", count: null },
+    { label: "Tasks", count: 0 },
+    { label: "Spark Log", count: projectSparks.length },
+    { label: "Timeline", count: milestones.length || null },
+    { label: "Research", count: 0 },
+    { label: "Notes", count: projectNotes.length },
+    { label: "Files", count: projectFiles.length },
+    { label: "Images", count: projectImages.length },
+    { label: "Activity", count: projectSparks.length + projectNotes.length + projectFiles.length },
+  ];
   return (
     <section className="forge-desk">
       <button type="button" onClick={onClose} aria-label="Close Project Desk"><X size={18} /></button>
@@ -833,8 +948,14 @@ function ProjectDesk({
         <span>{project.category} · {project.status}{linkedGoal ? " · Synced with Goals" : ""}</span>
         <p>{project.summary || "No summary recorded yet."}</p>
       </div>
+      {project.cover_image_url && (
+        <figure className="forge-desk-cover">
+          <Image src={project.cover_image_url} alt={`${project.title} cover`} width={420} height={210} unoptimized />
+        </figure>
+      )}
       <ProgressLine value={progress} large />
-      {linkedGoal ? (
+      <Link href={`/forge/projects/${project.id}`} className="forge-open-workspace">Open Project Desk</Link>
+      {linkedGoal && (
         <>
           <div className="forge-linked-goal-panel">
             <div>
@@ -875,13 +996,86 @@ function ProjectDesk({
             })}
           </div>
         </>
-      ) : (
-        <div className="forge-desk-tabs">
-          {["Overview", "Tasks", "Spark Log", "Timeline", "Research", "Notes", "Files", "Images"].map((tab) => <span key={tab}>{tab}</span>)}
-        </div>
       )}
+      <div className="forge-desk-tabs">
+        {tabs.map((tab) => (
+          <button key={tab.label} type="button" className={activeTab === tab.label ? "active" : ""} onClick={() => setActiveTab(tab.label)}>
+            {tab.label}{tab.count != null ? ` ${tab.count}` : ""}
+          </button>
+        ))}
+      </div>
+      <ProjectPreviewTab
+        tab={activeTab}
+        project={project}
+        sparks={projectSparks}
+        notes={projectNotes}
+        files={projectFiles}
+        images={projectImages}
+        latestSpark={latestSpark}
+        latestNote={latestNote}
+        latestFile={latestFile}
+        onOpenModal={onOpenModal}
+      />
       <strong>Next Milestone: {linkedSnapshot?.next_milestone?.title || project.next_milestone || "Not assigned"}</strong>
     </section>
+  );
+}
+
+function ProjectPreviewTab({
+  tab,
+  project,
+  sparks,
+  notes,
+  files,
+  images,
+  latestSpark,
+  latestNote,
+  latestFile,
+  onOpenModal,
+}: {
+  tab: string;
+  project: ForgeProject;
+  sparks: ForgeSpark[];
+  notes: ForgeNote[];
+  files: ForgeFile[];
+  images: ForgeFile[];
+  latestSpark?: ForgeSpark;
+  latestNote?: ForgeNote;
+  latestFile?: ForgeFile;
+  onOpenModal: (modal: ModalType, project?: ForgeProject | null) => void;
+}) {
+  if (tab === "Spark Log") {
+    return <PreviewList title="Spark Log" empty="No sparks captured for this project yet." items={sparks.map((spark) => spark.spark_text)} action="New Spark" onAction={() => onOpenModal("spark", project)} />;
+  }
+  if (tab === "Notes") {
+    return <PreviewList title="Notes" empty="No notes yet." items={notes.map((note) => `${note.title}${note.body ? ` - ${note.body.slice(0, 90)}` : ""}`)} action="New Note" onAction={() => onOpenModal("note", project)} />;
+  }
+  if (tab === "Files") {
+    return <PreviewList title="Files" empty="No files attached yet." items={files.map((file) => file.file_name)} action="Upload File" onAction={() => onOpenModal("file", project)} />;
+  }
+  if (tab === "Images") {
+    return (
+      <div className="forge-preview-pane">
+        <div className="forge-preview-head"><strong>Images</strong><button type="button" onClick={() => onOpenModal("file", project)}>Upload Image</button></div>
+        {images.length ? <ImageStrip files={images} /> : <EmptyState title="No images on the board yet." text="Attach concept art, sketches, screenshots, or references." />}
+      </div>
+    );
+  }
+  if (tab === "Tasks" || tab === "Research" || tab === "Timeline") {
+    return <PreviewList title={tab} empty={tab === "Tasks" ? "No tasks on the bench yet." : tab === "Research" ? "No research pinned yet." : "No timeline yet."} items={[]} />;
+  }
+  if (tab === "Activity") {
+    return <PreviewList title="Activity" empty="No activity yet." items={[...sparks.map((spark) => `Spark added: ${spark.spark_text}`), ...notes.map((note) => `Note added: ${note.title}`), ...files.map((file) => `File uploaded: ${file.file_name}`)]} />;
+  }
+  return (
+    <div className="forge-preview-pane">
+      <div className="forge-preview-grid">
+        <PreviewBlock label="Latest Spark" value={latestSpark?.spark_text || "No spark captured yet."} />
+        <PreviewBlock label="Latest Note" value={latestNote?.title || "No note written yet."} />
+        <PreviewBlock label="Latest Upload" value={latestFile?.file_name || "No file uploaded yet."} />
+      </div>
+      {images.length > 0 && <ImageStrip files={images.slice(0, 3)} />}
+    </div>
   );
 }
 
@@ -892,6 +1086,85 @@ function MetricLite({ label, value }: { label: string; value: string }) {
       <strong>{value}</strong>
     </span>
   );
+}
+
+function PreviewList({
+  title,
+  empty,
+  items,
+  action,
+  onAction,
+}: {
+  title: string;
+  empty: string;
+  items: string[];
+  action?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <div className="forge-preview-pane">
+      <div className="forge-preview-head">
+        <strong>{title}</strong>
+        {action && <button type="button" onClick={onAction}>{action}</button>}
+      </div>
+      {items.length ? (
+        <div className="forge-preview-list">
+          {items.slice(0, 4).map((item, index) => <span key={`${item}-${index}`}>{item}</span>)}
+        </div>
+      ) : (
+        <EmptyState title={empty} text="Open the full workspace to build this section out." />
+      )}
+    </div>
+  );
+}
+
+function PreviewBlock({ label, value }: { label: string; value: string }) {
+  return (
+    <span>
+      <small>{label}</small>
+      <strong>{value}</strong>
+    </span>
+  );
+}
+
+function ImageStrip({ files }: { files: ForgeFile[] }) {
+  return (
+    <div className="forge-image-strip">
+      {files.map((file) => (
+        <figure key={file.id}>
+          {file.file_url ? <Image src={file.file_url} alt={file.caption || file.file_name} width={180} height={120} unoptimized /> : <span>{file.file_name}</span>}
+          <figcaption>{file.caption || file.file_name}</figcaption>
+        </figure>
+      ))}
+    </div>
+  );
+}
+
+function UnassignedInbox({
+  sparks,
+  notes,
+  files,
+}: {
+  sparks: ForgeSpark[];
+  notes: ForgeNote[];
+  files: ForgeFile[];
+}) {
+  const count = sparks.filter((item) => !item.project_id).length + notes.filter((item) => !item.project_id).length + files.filter((item) => !item.project_id).length;
+  if (!count) return null;
+  return (
+    <section className="forge-inbox-panel">
+      <div>
+        <p>Unassigned Forge Inbox</p>
+        <h2>{count} item{count === 1 ? "" : "s"} need a project</h2>
+        <span>Open the inbox workspace to move sparks, notes, and files to the right project.</span>
+      </div>
+      <Link href="/forge/projects/inbox">Open Inbox</Link>
+    </section>
+  );
+}
+
+function isForgeImage(file: ForgeFile) {
+  return Boolean((file.file_type || "").startsWith("image/") || (file.file_url || "").startsWith("data:image/"));
 }
 
 function isForgeMilestoneComplete(milestone: GoalMilestone) {
@@ -1000,6 +1273,7 @@ function buildPayload(modal: Exclude<ModalType, null>, form: FormState) {
     file_name: form.file_name || "Unassigned Forge File",
     file_type: form.file_type || null,
     file_size: form.file_size ? Number(form.file_size) : null,
+    file_url: form.file_url || null,
     caption: form.caption || null,
     category: form.category || null,
     project_id: form.project_id || null,
@@ -1856,9 +2130,20 @@ function ForgeStyles() {
         cursor: pointer;
         display: flex;
         gap: 12px;
+        overflow: hidden;
         padding: 13px;
+        position: relative;
         text-align: left;
         transition: transform 180ms, border-color 180ms, box-shadow 180ms, background 180ms;
+      }
+
+      .forge-action-bar button::after {
+        background: linear-gradient(90deg, transparent, rgba(143, 220, 124, 0.28), transparent);
+        content: "";
+        inset: 0;
+        position: absolute;
+        transform: translateX(-120%) skewX(-18deg);
+        transition: transform 420ms ease;
       }
 
       .forge-action-bar button:hover {
@@ -1868,17 +2153,66 @@ function ForgeStyles() {
         transform: translateY(-2px);
       }
 
+      .forge-action-bar button:hover::after {
+        transform: translateX(120%) skewX(-18deg);
+      }
+
       .forge-action-bar svg {
         color: #8fdc7c;
+        z-index: 1;
       }
 
       .forge-action-bar strong,
       .forge-action-bar small {
         display: block;
+        position: relative;
+        z-index: 1;
       }
 
       .forge-action-bar small {
         color: rgba(234, 223, 199, 0.58);
+      }
+
+      .forge-inbox-panel {
+        align-items: center;
+        border: 1px solid rgba(212, 173, 101, 0.18);
+        border-radius: 10px;
+        background: rgba(6, 8, 7, 0.88);
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        margin-top: 16px;
+        padding: 14px 16px;
+      }
+
+      .forge-inbox-panel p {
+        color: #f0a44d;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .forge-inbox-panel h2 {
+        color: #fff1c8;
+      }
+
+      .forge-inbox-panel span {
+        color: rgba(234, 223, 199, 0.68);
+      }
+
+      .forge-inbox-panel a {
+        border: 1px solid rgba(143, 220, 124, 0.35);
+        border-radius: 8px;
+        color: #caffbf;
+        padding: 9px 12px;
+        text-decoration: none;
+        transition: transform 180ms, border-color 180ms, box-shadow 180ms;
+      }
+
+      .forge-inbox-panel a:hover {
+        border-color: rgba(143, 220, 124, 0.65);
+        box-shadow: 0 0 20px rgba(143, 220, 124, 0.16);
+        transform: translateY(-1px);
       }
 
       .forge-desk {
@@ -1887,6 +2221,22 @@ function ForgeStyles() {
         margin-top: 16px;
         padding: 16px;
         position: relative;
+      }
+
+      .forge-desk-cover {
+        border: 1px solid rgba(212, 173, 101, 0.2);
+        border-radius: 12px;
+        margin: 0;
+        max-width: 420px;
+        overflow: hidden;
+        box-shadow: 0 18px 42px rgba(0, 0, 0, 0.34), 0 0 24px rgba(196, 111, 45, 0.14);
+      }
+
+      .forge-desk-cover img {
+        display: block;
+        height: 210px;
+        object-fit: cover;
+        width: 100%;
       }
 
       .forge-desk > button {
@@ -1905,11 +2255,113 @@ function ForgeStyles() {
         gap: 8px;
       }
 
-      .forge-desk-tabs span {
+      .forge-desk-tabs span,
+      .forge-desk-tabs button,
+      .forge-open-workspace {
         border: 1px solid rgba(212, 173, 101, 0.18);
         border-radius: 999px;
+        background: rgba(0, 0, 0, 0.22);
         color: #f4d38f;
+        cursor: pointer;
         padding: 5px 9px;
+        text-decoration: none;
+        transition: transform 180ms, border-color 180ms, box-shadow 180ms, background 180ms;
+      }
+
+      .forge-desk-tabs button:hover,
+      .forge-desk-tabs button.active,
+      .forge-open-workspace:hover {
+        background: rgba(196, 111, 45, 0.12);
+        border-color: rgba(196, 111, 45, 0.52);
+        box-shadow: 0 0 20px rgba(196, 111, 45, 0.16);
+        transform: translateY(-1px);
+      }
+
+      .forge-open-workspace {
+        justify-self: start;
+      }
+
+      .forge-preview-pane {
+        border: 1px solid rgba(212, 173, 101, 0.16);
+        border-radius: 10px;
+        background: rgba(0, 0, 0, 0.2);
+        padding: 12px;
+      }
+
+      .forge-preview-head {
+        align-items: center;
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .forge-preview-head strong,
+      .forge-preview-grid small {
+        color: #f0a44d;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .forge-preview-head button {
+        border: 1px solid rgba(143, 220, 124, 0.3);
+        border-radius: 8px;
+        background: rgba(143, 220, 124, 0.08);
+        color: #caffbf;
+        cursor: pointer;
+        padding: 7px 10px;
+      }
+
+      .forge-preview-list,
+      .forge-preview-grid {
+        display: grid;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .forge-preview-grid {
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      }
+
+      .forge-preview-list span,
+      .forge-preview-grid span {
+        border: 1px solid rgba(212, 173, 101, 0.13);
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.24);
+        color: rgba(234, 223, 199, 0.76);
+        padding: 9px;
+      }
+
+      .forge-preview-grid strong {
+        color: #fff1c8;
+        display: block;
+        margin-top: 4px;
+      }
+
+      .forge-image-strip {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        margin-top: 12px;
+      }
+
+      .forge-image-strip figure {
+        border: 1px solid rgba(212, 173, 101, 0.15);
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.24);
+        padding: 8px;
+      }
+
+      .forge-image-strip img {
+        border-radius: 6px;
+        height: 96px;
+        object-fit: cover;
+        width: 100%;
+      }
+
+      .forge-image-strip figcaption {
+        color: rgba(234, 223, 199, 0.66);
+        font-size: 0.74rem;
+        margin-top: 6px;
       }
 
       .forge-linked-preview,
@@ -2118,6 +2570,26 @@ function ForgeStyles() {
 
       .forge-input.wide {
         grid-column: 1 / -1;
+      }
+
+      .forge-check {
+        align-items: center;
+        border: 1px solid rgba(143, 220, 124, 0.22);
+        border-radius: 8px;
+        background: rgba(143, 220, 124, 0.06);
+        color: #caffbf;
+        display: flex;
+        gap: 9px;
+        padding: 10px 11px;
+      }
+
+      .forge-check input {
+        accent-color: #8fdc7c;
+      }
+
+      .forge-check span {
+        font-size: 0.82rem;
+        font-weight: 800;
       }
 
       .forge-input span {

@@ -637,6 +637,10 @@ function GoalsPageInner() {
                   <option value="career">Career</option>
                   <option value="business">Business</option>
                   <option value="jarvis">Jarvis</option>
+                  <option value="Games">Games</option>
+                  <option value="Hardware">Hardware</option>
+                  <option value="Writing">Writing</option>
+                  <option value="Life">Life</option>
                   <option value="personal">Personal</option>
                   <option value="finance">Finance</option>
                 </select>

@@ -3,7 +3,18 @@ from __future__ import annotations
 from collections import defaultdict
 
 from backend.db.supabase_client import supabase
-from backend.schemas.forge import ForgeFileCreate, ForgeNoteCreate, ForgeProjectCreate, ForgeProjectUpdate, ForgeSparkCreate
+from backend.schemas.forge import (
+    ForgeFileCreate,
+    ForgeFileUpdate,
+    ForgeNoteCreate,
+    ForgeNoteUpdate,
+    ForgeProjectCreate,
+    ForgeProjectUpdate,
+    ForgeSparkCreate,
+    ForgeSparkUpdate,
+    ForgeTaskCreate,
+    ForgeTaskUpdate,
+)
 from backend.services.goal_service import get_goal, list_goals
 
 FORGE_CATEGORIES = ["Games", "Jarvis", "Business", "Hardware", "Writing", "Life"]
@@ -19,7 +30,10 @@ def build_forge_dashboard(user_id: str = "john") -> dict:
     sparks = list_forge_sparks(user_id)
     notes = list_forge_notes(user_id)
     files = list_forge_files(user_id)
+    tasks = list_forge_tasks(user_id)
     goals = list_goals(user_id, active_only=False)
+    apply_task_progress(projects, tasks)
+    attach_task_goals(projects, goals)
 
     by_category = defaultdict(list)
     for project in projects:
@@ -28,7 +42,14 @@ def build_forge_dashboard(user_id: str = "john") -> dict:
     category_counts = {category: len(by_category[category]) for category in FORGE_CATEGORIES}
     recently_updated = []
     for category in FORGE_CATEGORIES:
-        category_projects = sorted(by_category[category], key=lambda item: item.get("updated_at") or item.get("created_at") or "", reverse=True)
+        category_projects = sorted(
+            [
+                project for project in by_category[category]
+                if project.get("status") not in {"Incubating", "Archived", "Completed"}
+            ],
+            key=lambda item: item.get("updated_at") or item.get("created_at") or "",
+            reverse=True,
+        )
         if category_projects:
             recently_updated.append(category_projects[0])
 
@@ -43,6 +64,7 @@ def build_forge_dashboard(user_id: str = "john") -> dict:
         "sparks": sparks,
         "notes": notes,
         "files": files,
+        "tasks": tasks,
         "goals": goals,
         "category_counts": category_counts,
         "recently_updated": recently_updated[:6],
@@ -68,6 +90,64 @@ def list_forge_projects(user_id: str = "john") -> list[dict]:
     return [enrich_forge_project(project) for project in response.data or []]
 
 
+def apply_task_progress(projects: list[dict], tasks: list[dict]) -> None:
+    by_project: dict[str, list[dict]] = defaultdict(list)
+    for task in tasks:
+        project_id = task.get("project_id")
+        if project_id:
+            by_project[project_id].append(task)
+
+    for project in projects:
+        project_tasks = by_project.get(project.get("id"), [])
+        if not project_tasks:
+            continue
+
+        complete = [task for task in project_tasks if is_task_complete(task)]
+        incomplete = [task for task in project_tasks if not is_task_complete(task)]
+        total = len(project_tasks)
+        percent = round((len(complete) / total) * 100, 1) if total else 0
+        sorted_incomplete = sorted(incomplete, key=lambda item: (item.get("sort_order") or 0, item.get("created_at") or ""))
+        recently_unlocked = sorted(complete, key=lambda item: item.get("completed_at") or item.get("updated_at") or "", reverse=True)[:1]
+
+        project["task_summary"] = {
+            "completed": len(complete),
+            "total": total,
+            "remaining": len(incomplete),
+            "current_mission": sorted_incomplete[0].get("title") if sorted_incomplete else None,
+            "next_suggested_task": sorted_incomplete[1].get("title") if len(sorted_incomplete) > 1 else None,
+            "recently_unlocked": recently_unlocked[0].get("title") if recently_unlocked else None,
+        }
+        if not project.get("goal_id"):
+            project["progress_percent"] = percent
+            project["next_milestone"] = sorted_incomplete[0].get("title") if sorted_incomplete else project.get("next_milestone")
+
+
+def attach_task_goals(projects: list[dict], goals: list[dict]) -> None:
+    task_goals_by_project = {}
+    for goal in goals:
+        metadata = goal.get("metadata") or {}
+        project_id = metadata.get("forge_project_id")
+        if metadata.get("forge_goal_type") == "task_completion" and project_id:
+            task_goals_by_project[project_id] = {
+                "id": goal.get("id"),
+                "title": goal.get("title"),
+                "frequency": goal.get("frequency"),
+                "target_value": goal.get("target_value"),
+                "unit": goal.get("unit"),
+                "standard": goal.get("standard"),
+                "period": goal.get("period"),
+            }
+
+    for project in projects:
+        task_goal = task_goals_by_project.get(project.get("id"))
+        if task_goal:
+            project["task_goal"] = task_goal
+
+
+def is_task_complete(task: dict) -> bool:
+    return (task.get("status") or "").lower() in {"done", "complete", "completed"} or bool(task.get("completed_at"))
+
+
 def create_forge_project(payload: ForgeProjectCreate) -> dict:
     insert_data = prepare_project_payload(payload.model_dump())
     response = supabase.table("forge_projects").insert(insert_data).execute()
@@ -85,6 +165,11 @@ def update_forge_project(project_id: str, payload: ForgeProjectUpdate) -> dict |
         .execute()
     )
     return enrich_forge_project(response.data[0]) if response.data else None
+
+
+def delete_forge_project(project_id: str) -> list[dict]:
+    response = supabase.table("forge_projects").delete().eq("id", project_id).execute()
+    return response.data or []
 
 
 def prepare_project_payload(data: dict) -> dict:
@@ -199,6 +284,21 @@ def create_forge_spark(payload: ForgeSparkCreate) -> dict:
     return response.data[0]
 
 
+def update_forge_spark(spark_id: str, payload: ForgeSparkUpdate) -> dict | None:
+    response = (
+        supabase.table("forge_sparks")
+        .update(payload.model_dump(exclude_unset=True))
+        .eq("id", spark_id)
+        .execute()
+    )
+    return response.data[0] if response.data else None
+
+
+def delete_forge_spark(spark_id: str) -> list[dict]:
+    response = supabase.table("forge_sparks").delete().eq("id", spark_id).execute()
+    return response.data or []
+
+
 def list_forge_notes(user_id: str = "john") -> list[dict]:
     response = (
         supabase.table("forge_notes")
@@ -217,6 +317,21 @@ def create_forge_note(payload: ForgeNoteCreate) -> dict:
     return response.data[0]
 
 
+def update_forge_note(note_id: str, payload: ForgeNoteUpdate) -> dict | None:
+    response = (
+        supabase.table("forge_notes")
+        .update(payload.model_dump(exclude_unset=True))
+        .eq("id", note_id)
+        .execute()
+    )
+    return response.data[0] if response.data else None
+
+
+def delete_forge_note(note_id: str) -> list[dict]:
+    response = supabase.table("forge_notes").delete().eq("id", note_id).execute()
+    return response.data or []
+
+
 def list_forge_files(user_id: str = "john") -> list[dict]:
     response = (
         supabase.table("forge_files")
@@ -233,3 +348,108 @@ def create_forge_file(payload: ForgeFileCreate) -> dict:
     if not response.data:
         raise Exception("Failed to save Forge file metadata.")
     return response.data[0]
+
+
+def update_forge_file(file_id: str, payload: ForgeFileUpdate) -> dict | None:
+    response = (
+        supabase.table("forge_files")
+        .update(payload.model_dump(exclude_unset=True))
+        .eq("id", file_id)
+        .execute()
+    )
+    return response.data[0] if response.data else None
+
+
+def delete_forge_file(file_id: str) -> list[dict]:
+    response = supabase.table("forge_files").delete().eq("id", file_id).execute()
+    return response.data or []
+
+
+def list_forge_tasks(user_id: str = "john") -> list[dict]:
+    try:
+        response = (
+            supabase.table("forge_tasks")
+            .select("*")
+            .eq("user_id", user_id)
+            .order("sort_order", desc=False)
+            .order("created_at", desc=False)
+            .execute()
+        )
+        return response.data or []
+    except Exception:
+        return []
+
+
+def create_forge_task(payload: ForgeTaskCreate) -> dict:
+    response = supabase.table("forge_tasks").insert(payload.model_dump()).execute()
+    if not response.data:
+        raise Exception("Failed to create Forge task.")
+    return response.data[0]
+
+
+def update_forge_task(task_id: str, payload: ForgeTaskUpdate) -> dict | None:
+    update_data = payload.model_dump(exclude_unset=True)
+    response = (
+        supabase.table("forge_tasks")
+        .update(update_data)
+        .eq("id", task_id)
+        .execute()
+    )
+    if not response.data:
+        return None
+
+    task = response.data[0]
+    if is_task_complete(task):
+        sync_task_completion_goal(task)
+    return task
+
+
+def delete_forge_task(task_id: str) -> list[dict]:
+    response = supabase.table("forge_tasks").delete().eq("id", task_id).execute()
+    return response.data or []
+
+
+def sync_task_completion_goal(task: dict) -> None:
+    project_id = task.get("project_id")
+    if not project_id:
+        return
+
+    try:
+        goals = list_goals(task.get("user_id") or "john", active_only=True)
+        task_goals = [
+            goal for goal in goals
+            if (goal.get("metadata") or {}).get("forge_goal_type") == "task_completion"
+            and (goal.get("metadata") or {}).get("forge_project_id") == project_id
+        ]
+        if not task_goals:
+            return
+
+        for goal in task_goals:
+            existing = (
+                supabase.table("goal_logs")
+                .select("id, metadata")
+                .eq("goal_id", goal["id"])
+                .eq("log_type", "progress")
+                .execute()
+            )
+            duplicate = any(
+                (row.get("metadata") or {}).get("forge_task_id") == task.get("id")
+                for row in existing.data or []
+            )
+            if duplicate:
+                continue
+
+            supabase.table("goal_logs").insert({
+                "goal_id": goal["id"],
+                "value": 1,
+                "notes": f"Forge task completed: {task.get('title')}",
+                "log_type": "progress",
+                "metadata": {
+                    "forge_task_id": task.get("id"),
+                    "forge_project_id": project_id,
+                    "milestone_group": task.get("milestone_group"),
+                    "source": "forge_task_completion",
+                },
+            }).execute()
+    except Exception:
+        return

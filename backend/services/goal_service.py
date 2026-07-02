@@ -23,7 +23,7 @@ LIFT_GOAL_KEYWORDS = {
     "overhead_press": {"overhead press", "ohp", "press"},
 }
 PERIODIC_GOAL_TYPES = {"habit", "count", "binary"}
-PERIODIC_FREQUENCIES = {"daily", "weekly"}
+PERIODIC_FREQUENCIES = {"daily", "weekly", "monthly"}
 MISSION_TYPES = {"objective", "standard", "project"}
 PROJECT_MILESTONE_COMPLETE_STATUSES = {"complete", "completed", "purchased", "already acquired", "already_acquired"}
 STANDARD_ACTION_LOG_TYPES = {"progress", "completed", "milestone"}
@@ -594,6 +594,9 @@ def get_period_bounds_for_date(goal: dict, anchor_date: date):
     if frequency == "weekly":
         start_date = anchor_date - timedelta(days=anchor_date.weekday())
         end_date = start_date + timedelta(days=7)
+    elif frequency == "monthly":
+        start_date = anchor_date.replace(day=1)
+        end_date = add_months(start_date, 1)
     else:
         start_date = anchor_date
         end_date = start_date + timedelta(days=1)
@@ -626,11 +629,14 @@ def build_period_history(goal: dict, logs: list[dict], periods: int = 8):
 
     frequency = (goal.get("frequency") or "").lower()
     today = datetime.now(LOCAL_TZ).date()
-    step_days = 7 if frequency == "weekly" else 1
     history = []
 
     for index in range(max(1, periods)):
-        anchor_date = today - timedelta(days=index * step_days)
+        if frequency == "monthly":
+            anchor_date = add_months(today.replace(day=1), -index)
+        else:
+            step_days = 7 if frequency == "weekly" else 1
+            anchor_date = today - timedelta(days=index * step_days)
         period_start, period_end = get_period_bounds_for_date(goal, anchor_date)
         value = sum_log_values_for_period(logs, period_start, period_end)
         history.append(build_period_snapshot(goal, logs, period_start, period_end, value, index == 0))
@@ -784,11 +790,28 @@ def build_project_snapshot(goal: dict, milestones: list[dict], logs: list[dict])
 def format_period_label(goal: dict, period_start: datetime, period_end: datetime):
     frequency = (goal.get("frequency") or "").lower()
 
+    if frequency == "monthly":
+        return period_start.strftime("%Y-%m")
+
     if frequency == "weekly":
         inclusive_end = (period_end - timedelta(days=1)).date()
         return f"{period_start.date().isoformat()} to {inclusive_end.isoformat()}"
 
     return period_start.date().isoformat()
+
+
+def add_months(value: date, months: int) -> date:
+    month_index = value.month - 1 + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(value.day, days_in_month(year, month))
+    return date(year, month, day)
+
+
+def days_in_month(year: int, month: int) -> int:
+    if month == 12:
+        return 31
+    return (date(year, month + 1, 1) - timedelta(days=1)).day
 
 
 def parse_datetime(value: str | None):

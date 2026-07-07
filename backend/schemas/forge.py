@@ -135,3 +135,41 @@ class ForgeTaskUpdate(BaseModel):
     counts_toward_goal: Optional[bool] = None
     goal_event_id: Optional[str] = None
     metadata: Optional[dict[str, Any]] = None
+
+
+class ForgeLedgerEntryCreate(BaseModel):
+    user_id: str = "john"
+    project_id: str
+    note_id: Optional[str] = None
+    entry_type: str
+    title: Optional[str] = None
+    body: str
+    tags: list[str] = Field(default_factory=list)
+    folder: Optional[str] = None
+    subfolder: Optional[str] = None
+    linked_task_id: Optional[str] = None
+    linked_milestone: Optional[str] = None
+    is_pinned: bool = False
+    status: str = "active"
+    resolved: bool = False
+    resolution_text: Optional[str] = None
+    resolved_into_entry_id: Optional[str] = None
+    resolved_at: Optional[str] = None
+
+
+class ForgeLedgerEntryUpdate(BaseModel):
+    note_id: Optional[str] = None
+    entry_type: Optional[str] = None
+    title: Optional[str] = None
+    body: Optional[str] = None
+    tags: Optional[list[str]] = None
+    folder: Optional[str] = None
+    subfolder: Optional[str] = None
+    linked_task_id: Optional[str] = None
+    linked_milestone: Optional[str] = None
+    is_pinned: Optional[bool] = None
+    status: Optional[str] = None
+    resolved: Optional[bool] = None
+    resolution_text: Optional[str] = None
+    resolved_into_entry_id: Optional[str] = None
+    resolved_at: Optional[str] = None

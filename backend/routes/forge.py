@@ -4,6 +4,8 @@ from backend.core.security import verify_api_key
 from backend.schemas.forge import (
     ForgeFileCreate,
     ForgeFileUpdate,
+    ForgeLedgerEntryCreate,
+    ForgeLedgerEntryUpdate,
     ForgeNoteCreate,
     ForgeNoteUpdate,
     ForgeProjectCreate,
@@ -16,16 +18,19 @@ from backend.schemas.forge import (
 from backend.services.forge_service import (
     build_forge_dashboard,
     create_forge_file,
+    create_forge_ledger_entry,
     create_forge_note,
     create_forge_project,
     create_forge_spark,
     delete_forge_file,
+    delete_forge_ledger_entry,
     delete_forge_note,
     delete_forge_project,
     delete_forge_spark,
     delete_forge_task,
     create_forge_task,
     update_forge_file,
+    update_forge_ledger_entry,
     update_forge_note,
     update_forge_project,
     update_forge_spark,
@@ -129,6 +134,27 @@ def update_file(file_id: str, payload: ForgeFileUpdate):
 @router.delete("/files/{file_id}")
 def delete_file(file_id: str):
     return {"status": "ok", "deleted": delete_forge_file(file_id)}
+
+
+@router.post("/ledger-entries")
+def create_ledger_entry(payload: ForgeLedgerEntryCreate):
+    try:
+        return {"status": "ok", "entry": create_forge_ledger_entry(payload)}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.patch("/ledger-entries/{entry_id}")
+def update_ledger_entry(entry_id: str, payload: ForgeLedgerEntryUpdate):
+    entry = update_forge_ledger_entry(entry_id, payload)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Forge ledger entry not found.")
+    return {"status": "ok", "entry": entry}
+
+
+@router.delete("/ledger-entries/{entry_id}")
+def delete_ledger_entry(entry_id: str):
+    return {"status": "ok", "deleted": delete_forge_ledger_entry(entry_id)}
 
 
 @router.post("/tasks")

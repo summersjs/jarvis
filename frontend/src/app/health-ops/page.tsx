@@ -312,32 +312,28 @@ const DETAIL_CONFIG: Record<string, DetailConfig> = {
 };
 
 const CAFFEINE_BUTTONS = [
-  ["Coffee 12 oz", 140],
-  ["Coffee 16 oz", 190],
-  ["Coffee 20 oz", 240],
-  ["Iced Coffee 12 oz", 120],
-  ["Iced Coffee 16 oz", 165],
-  ["Iced Coffee 20 oz", 205],
+  ["Coffee 8 oz + 4 Vanilla Creamers", 95],
+  ["Iced White Chocolate Coffee 12 oz", 75],
+  ["Iced White Chocolate Coffee 16 oz", 150],
+  ["Iced White Chocolate Coffee 24 oz", 225],
   ["Red Bull 8.4 oz", 80],
   ["Red Bull 12 oz", 114],
   ["Red Bull 16 oz", 151],
   ["Red Bull 20 oz", 189],
-  ["Monster", 160],
-  ["Celsius", 200],
-  ["C4 Powder", 150],
 ] as const;
 
 const CAFFEINE_NUTRITION: Record<string, { calories: number; protein_g: number; carbs_g: number; fat_g: number }> = {
-  "Iced Coffee 12 oz": { calories: 120, protein_g: 2, carbs_g: 20, fat_g: 3 },
-  "Iced Coffee 16 oz": { calories: 160, protein_g: 3, carbs_g: 27, fat_g: 4 },
-  "Iced Coffee 20 oz": { calories: 200, protein_g: 4, carbs_g: 34, fat_g: 5 },
+  // Coffee includes four International Delight vanilla creamer servings.
+  "Coffee 8 oz + 4 Vanilla Creamers": { calories: 142, protein_g: 0, carbs_g: 20, fat_g: 6 },
+  // Starbucks-style iced white chocolate mocha, no whip.
+  "Iced White Chocolate Coffee 12 oz": { calories: 270, protein_g: 9, carbs_g: 43, fat_g: 7 },
+  "Iced White Chocolate Coffee 16 oz": { calories: 360, protein_g: 13, carbs_g: 56, fat_g: 9 },
+  "Iced White Chocolate Coffee 24 oz": { calories: 480, protein_g: 16, carbs_g: 75, fat_g: 12 },
   "Red Bull 8.4 oz": { calories: 110, protein_g: 1, carbs_g: 28, fat_g: 0 },
   "Red Bull 12 oz": { calories: 160, protein_g: 1, carbs_g: 40, fat_g: 0 },
   "Red Bull 16 oz": { calories: 210, protein_g: 2, carbs_g: 54, fat_g: 0 },
   "Red Bull 20 oz": { calories: 270, protein_g: 2, carbs_g: 69, fat_g: 0 },
-  Monster: { calories: 210, protein_g: 0, carbs_g: 54, fat_g: 0 },
-  Celsius: { calories: 10, protein_g: 0, carbs_g: 2, fat_g: 0 },
-  "C4 Powder": { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 },
+  C4: { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 },
 };
 
 type CaffeineNutrition = {
@@ -572,7 +568,7 @@ export default function HealthOpsPage() {
           body: JSON.stringify({
             user_id: USER_ID,
             meal_date: today,
-            meal_type: "snack1",
+            meal_type: label === "C4" ? "preworkout" : "snack1",
             recipe_id: null,
             custom_meal_name: label,
             notes: buildCaffeineMealNotes(label, nutrition),
@@ -583,6 +579,14 @@ export default function HealthOpsPage() {
         });
       })
     );
+  }
+
+  function handleSupplementToggle(supplement: string) {
+    const alreadySelected = checkin.supplements.includes(supplement);
+    setCheckin((prev) => toggleSupplement(prev, supplement));
+    if (supplement === "C4" && !alreadySelected) {
+      setPendingCaffeineButtons((prev) => [...prev, "C4"]);
+    }
   }
 
   const summary = dashboard?.doctor_summaries?.[doctorRange];
@@ -682,7 +686,7 @@ export default function HealthOpsPage() {
                     {dashboard.supplements.map((supplement) => (
                       <button
                         key={supplement}
-                        onClick={() => setCheckin((prev) => toggleSupplement(prev, supplement))}
+                        onClick={() => handleSupplementToggle(supplement)}
                         className={`command-action-button border px-3 py-2 text-xs ${
                           checkin.supplements.includes(supplement)
                             ? "border-sky-300/60 bg-sky-400/15 text-sky-100"

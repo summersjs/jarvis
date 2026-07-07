@@ -103,12 +103,34 @@ type ForgeTask = {
   project_id: string;
   created_at?: string | null;
 };
+type ForgeLedgerEntry = {
+  id: string;
+  project_id: string;
+  note_id?: string | null;
+  entry_type: "canon" | "decision" | "question" | "draft" | "idea" | "reference";
+  title?: string | null;
+  body: string;
+  tags?: string[] | null;
+  folder?: string | null;
+  subfolder?: string | null;
+  linked_task_id?: string | null;
+  linked_milestone?: string | null;
+  is_pinned?: boolean | null;
+  status?: string | null;
+  resolved?: boolean | null;
+  resolution_text?: string | null;
+  resolved_into_entry_id?: string | null;
+  resolved_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  forge_notes?: { id: string; title: string } | null;
+};
 
 type EditingForgeItem =
   | { kind: "spark"; item: ForgeSpark; text: string; projectId: string; category: string; tags: string; folderPrimary: string; folderChild: string; newFolderPrimary: string; newFolderChild: string }
   | { kind: "note"; item: ForgeNote; title: string; body: string; projectId: string; category: string; tags: string; noteType: string; status: string; isPinned: boolean; linkedMilestone: string; folderPrimary: string; folderChild: string; newFolderPrimary: string; newFolderChild: string };
 
-const TABS = ["Overview", "Writing Desk", "Tasks", "Spark Log", "Timeline", "Research", "Notes", "Files", "Images", "Activity"];
+const TABS = ["Overview", "Shared Goals", "Writing Desk", "Canon Board", "Tasks", "Spark Log", "Timeline", "Research", "Notes", "Files", "Images", "Activity"];
 
 export default function ForgeProjectWorkspace() {
   const params = useParams<{ id: string }>();
@@ -119,6 +141,7 @@ export default function ForgeProjectWorkspace() {
   const [notes, setNotes] = useState<ForgeNote[]>([]);
   const [files, setFiles] = useState<ForgeFile[]>([]);
   const [tasks, setTasks] = useState<ForgeTask[]>([]);
+  const [ledgerEntries, setLedgerEntries] = useState<ForgeLedgerEntry[]>([]);
   const [tab, setTab] = useState("Overview");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -140,6 +163,7 @@ export default function ForgeProjectWorkspace() {
   const visibleFiles = files.filter((item) => inbox ? !item.project_id : item.project_id === projectId);
   const visibleImages = visibleFiles.filter(isImage);
   const visibleTasks = tasks.filter((item) => !inbox && item.project_id === projectId);
+  const visibleLedgerEntries = ledgerEntries.filter((item) => !inbox && item.project_id === projectId);
   const progress = project?.linked_goal?.project?.percent ?? project?.progress_percent ?? 0;
 
   const counts = useMemo(() => ({
@@ -151,8 +175,10 @@ export default function ForgeProjectWorkspace() {
     Timeline: project?.linked_goal?.milestones?.length || 0,
     Tasks: visibleTasks.length,
     "Writing Desk": visibleNotes.length,
+    "Canon Board": visibleLedgerEntries.length + visibleNotes.filter((note) => ["canon", "decision", "question", "draft", "idea"].includes(note.note_type || "")).length,
+    "Shared Goals": (project?.linked_goal ? 1 : 0) + (project?.linked_goals?.length || 0),
     Research: 0,
-  }), [visibleSparks.length, visibleNotes.length, visibleFiles.length, visibleImages.length, visibleTasks.length, project]);
+  }), [visibleSparks.length, visibleNotes, visibleFiles.length, visibleImages.length, visibleTasks.length, visibleLedgerEntries.length, project]);
 
   const folderOptions = useMemo(() => buildFolderOptions(visibleNotes, visibleSparks), [visibleNotes, visibleSparks]);
 
@@ -170,6 +196,7 @@ export default function ForgeProjectWorkspace() {
       setNotes(data.notes || []);
       setFiles(data.files || []);
       setTasks(data.tasks || []);
+      setLedgerEntries(data.ledger_entries || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load Forge workspace.");
     }
@@ -268,6 +295,89 @@ export default function ForgeProjectWorkspace() {
     await loadForge();
   }
 
+  async function createLedgerExtract(entryType: ForgeLedgerEntry["entry_type"], note?: ForgeNote) {
+    if (!project) return;
+    const selectedText = typeof window !== "undefined" ? window.getSelection()?.toString().trim() || "" : "";
+    const fallback = note?.body || note?.title || "";
+    const body = window.prompt(`Add ${ledgerTypeLabel(entryType)} extract`, selectedText || fallback.slice(0, 320));
+    if (!body?.trim()) return;
+    const title = window.prompt("Optional ledger title", note?.title || ledgerTypeLabel(entryType)) || "";
+    const tags = note?.tags || [];
+    const folderPath = normalizeFolderPath(note?.folder_path || []);
+    const res = await fetch(`${API_BASE}/forge/ledger-entries`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+      body: JSON.stringify({
+        user_id: USER_ID,
+        project_id: project.id,
+        note_id: note?.id || null,
+        entry_type: entryType,
+        title: title.trim() || null,
+        body: body.trim(),
+        tags,
+        folder: folderPath[0] || null,
+        subfolder: folderPath[1] || null,
+        is_pinned: ["canon", "decision"].includes(entryType),
+        status: "active",
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setError(data.detail || "Canon Board entry could not be saved. Run the Canon Board SQL migration if the table is missing.");
+      return;
+    }
+    setMessage(`${ledgerTypeLabel(entryType)} added to Canon Board.`);
+    await loadForge();
+  }
+
+  async function updateLedgerEntry(entry: ForgeLedgerEntry, payload: Partial<ForgeLedgerEntry>) {
+    const res = await fetch(`${API_BASE}/forge/ledger-entries/${entry.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setError(data.detail || "Canon Board update failed.");
+      return;
+    }
+    setMessage("Canon Board updated.");
+    await loadForge();
+  }
+
+  async function resolveLedgerQuestion(entry: ForgeLedgerEntry, nextType: "canon" | "decision") {
+    const resolution = window.prompt("Resolution", entry.resolution_text || "");
+    if (!resolution?.trim()) return;
+    const created = await fetch(`${API_BASE}/forge/ledger-entries`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+      body: JSON.stringify({
+        user_id: USER_ID,
+        project_id: entry.project_id,
+        note_id: entry.note_id || null,
+        entry_type: nextType,
+        title: entry.title ? `${entry.title} Resolution` : `Resolved ${ledgerTypeLabel(nextType)}`,
+        body: resolution.trim(),
+        tags: entry.tags || [],
+        folder: entry.folder || null,
+        subfolder: entry.subfolder || null,
+        is_pinned: true,
+        status: "active",
+      }),
+    });
+    const createdData = await created.json();
+    if (!created.ok) {
+      setError(createdData.detail || "Resolution entry could not be saved.");
+      return;
+    }
+    await updateLedgerEntry(entry, {
+      resolved: true,
+      resolution_text: resolution.trim(),
+      resolved_into_entry_id: createdData.entry?.id || null,
+      resolved_at: new Date().toISOString(),
+    });
+  }
+
   async function saveWritingDraft() {
     if (!project || !writingDraft.title.trim()) {
       setError("Writing Desk needs a title before saving.");
@@ -343,7 +453,7 @@ export default function ForgeProjectWorkspace() {
     await loadForge();
   }
 
-  async function deleteItem(kind: "projects" | "sparks" | "notes" | "files" | "tasks", id: string, label: string): Promise<boolean> {
+  async function deleteItem(kind: "projects" | "sparks" | "notes" | "files" | "tasks" | "ledger-entries", id: string, label: string): Promise<boolean> {
     if (!window.confirm(`Delete ${label}? This cannot be undone.`)) return false;
     const res = await fetch(`${API_BASE}/forge/${kind}/${id}`, {
       method: "DELETE",
@@ -557,14 +667,31 @@ export default function ForgeProjectWorkspace() {
             {visibleImages.length > 0 && <ImageGrid files={visibleImages.slice(0, 3)} onPreview={setPreviewImage} />}
           </div>
         )}
+        {tab === "Shared Goals" && !inbox && project && (
+          <SharedGoalsScreen project={project} />
+        )}
         {tab === "Writing Desk" && !inbox && project && (
           <WritingDesk
             draft={writingDraft}
             notes={visibleNotes}
+            ledgerEntries={visibleLedgerEntries}
             folderOptions={folderOptions}
             onDraftChange={setWritingDraft}
             onSave={saveWritingDraft}
             onEdit={openNoteDrawer}
+            onExtract={createLedgerExtract}
+          />
+        )}
+        {tab === "Canon Board" && !inbox && project && (
+          <CanonBoard
+            entries={visibleLedgerEntries}
+            notes={visibleNotes}
+            tasks={visibleTasks}
+            onOpenNote={openNoteDrawer}
+            onCreateExtract={createLedgerExtract}
+            onUpdate={updateLedgerEntry}
+            onResolve={resolveLedgerQuestion}
+            onDelete={(id, label) => deleteItem("ledger-entries", id, label)}
           />
         )}
         {tab === "Spark Log" && <SparkList sparks={visibleSparks} folderOptions={folderOptions} onEdit={openSparkDrawer} />}
@@ -613,6 +740,7 @@ export default function ForgeProjectWorkspace() {
           folderOptions={folderOptions}
           onChange={setEditingItem}
           onSave={saveEditingItem}
+          onExtract={createLedgerExtract}
           onDelete={(kind, id, label) => deleteItem(kind, id, label).then((deleted) => {
             if (deleted) setEditingItem(null);
           })}
@@ -690,22 +818,210 @@ function LinkedGoalsPanel({ project }: { project: ForgeProject }) {
   );
 }
 
+function SharedGoalsScreen({ project }: { project: ForgeProject }) {
+  const goals = [
+    ...(project.linked_goal ? [{ ...project.linked_goal, relationship_type: "primary", notes: "Primary synced project goal." }] : []),
+    ...(project.linked_goals || []),
+  ];
+  return (
+    <div className="shared-goals-screen">
+      <header>
+        <p>Shared Goals</p>
+        <h2>Dependencies and weekly standards connected to this project.</h2>
+        <span>Use this when one goal matters to multiple Forge projects, like the workstation build supporting other systems.</span>
+      </header>
+      {!goals.length ? (
+        <Empty title="No shared goals linked yet." text="Link a goal when this project depends on another active build or weekly standard." />
+      ) : (
+        <div className="shared-goal-grid">
+          {goals.map((goal) => {
+            const percent = goal.project?.percent ?? goal.progress?.percent ?? 0;
+            const projectRemaining = (goal.project as { remaining_count?: number } | null | undefined)?.remaining_count;
+            const remaining = projectRemaining ?? goal.progress?.remaining;
+            return (
+              <article key={`${goal.id}-${goal.relationship_type || "goal"}`} className="shared-goal-card">
+                <p>{goal.relationship_type || "linked goal"}</p>
+                <h3>{goal.title}</h3>
+                <span>{goal.notes || "This goal is connected to the project workspace."}</span>
+                <Progress value={percent} />
+                <div>
+                  <b>{Math.round(percent)}%</b>
+                  <small>{remaining ?? "?"} remaining</small>
+                </div>
+                <Link href={`/goals?focus=${goal.id}`}>Open Goal</Link>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CanonBoard({
+  entries,
+  notes,
+  tasks,
+  onOpenNote,
+  onCreateExtract,
+  onUpdate,
+  onResolve,
+  onDelete,
+}: {
+  entries: ForgeLedgerEntry[];
+  notes: ForgeNote[];
+  tasks: ForgeTask[];
+  onOpenNote: (note: ForgeNote) => void;
+  onCreateExtract: (entryType: ForgeLedgerEntry["entry_type"], note?: ForgeNote) => void;
+  onUpdate: (entry: ForgeLedgerEntry, payload: Partial<ForgeLedgerEntry>) => void;
+  onResolve: (entry: ForgeLedgerEntry, nextType: "canon" | "decision") => void;
+  onDelete: (id: string, label: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState("All");
+  const ledgerItems = useMemo(() => buildCanonBoardItems(entries, notes), [entries, notes]);
+  const filtered = ledgerItems.filter((item) => matchesCanonFilter(item, filter, query));
+  const sections = [
+    { key: "canon", title: "Canon", items: filtered.filter((item) => item.entry_type === "canon") },
+    { key: "decision", title: "Decisions", items: filtered.filter((item) => item.entry_type === "decision") },
+    { key: "question", title: "Open Questions", items: filtered.filter((item) => item.entry_type === "question" && !item.resolved) },
+    { key: "draft", title: "Draft Ideas", items: filtered.filter((item) => ["draft", "idea"].includes(item.entry_type)) },
+  ];
+  const recentCanon = ledgerItems.filter((item) => item.entry_type === "canon").sort((a, b) => timestampValue(b.updated_at) - timestampValue(a.updated_at))[0];
+  const recentDecision = ledgerItems.filter((item) => item.entry_type === "decision").sort((a, b) => timestampValue(b.updated_at) - timestampValue(a.updated_at))[0];
+  const oldestQuestion = ledgerItems.filter((item) => item.entry_type === "question" && !item.resolved).sort((a, b) => timestampValue(a.created_at) - timestampValue(b.created_at))[0];
+
+  return (
+    <div className="canon-board">
+      <header className="canon-header">
+        <div>
+          <p>Canon Board</p>
+          <h2>Project truth without digging through folders.</h2>
+        </div>
+        <div className="canon-summary">
+          {sections.map((section) => <span key={section.key}>{section.title}: <b>{section.items.length}</b></span>)}
+        </div>
+      </header>
+      <div className="canon-highlight-row">
+        <InfoCard title="Recently Changed Canon" value={recentCanon?.title || recentCanon?.body || "No canon recorded yet."} />
+        <InfoCard title="Most Recent Decision" value={recentDecision?.title || recentDecision?.body || "No decisions recorded yet."} />
+        <InfoCard title="Oldest Unresolved Question" value={oldestQuestion?.title || oldestQuestion?.body || "No open questions."} />
+      </div>
+      <div className="canon-tools">
+        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search canon, decisions, tags, folders..." />
+        <div>
+          {CANON_FILTERS.map((chip) => (
+            <button key={chip} type="button" className={filter === chip ? "active" : ""} onClick={() => setFilter(chip)}>{chip}</button>
+          ))}
+        </div>
+      </div>
+      <div className="ledger-quick-actions">
+        <button type="button" onClick={() => onCreateExtract("canon")}>Add Canon Extract</button>
+        <button type="button" onClick={() => onCreateExtract("decision")}>Add Decision Extract</button>
+        <button type="button" onClick={() => onCreateExtract("question")}>Add Question Extract</button>
+        <button type="button" onClick={() => onCreateExtract("draft")}>Add Draft Idea</button>
+      </div>
+      <div className="canon-section-grid">
+        {sections.map((section) => (
+          <section key={section.key}>
+            <h3>{section.title}</h3>
+            {section.items.length ? (
+              <div className="workspace-list">
+                {section.items.map((item) => (
+                  <CanonBoardCard
+                    key={`${item.source}-${item.id}`}
+                    item={item}
+                    notes={notes}
+                    tasks={tasks}
+                    onOpenNote={onOpenNote}
+                    onUpdate={onUpdate}
+                    onResolve={onResolve}
+                    onDelete={onDelete}
+                  />
+                ))}
+              </div>
+            ) : (
+              <Empty title={`No ${section.title.toLowerCase()} yet.`} text="Use extracts or note types to build this ledger." />
+            )}
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CanonBoardCard({
+  item,
+  notes,
+  tasks,
+  onOpenNote,
+  onUpdate,
+  onResolve,
+  onDelete,
+}: {
+  item: CanonBoardItem;
+  notes: ForgeNote[];
+  tasks: ForgeTask[];
+  onOpenNote: (note: ForgeNote) => void;
+  onUpdate: (entry: ForgeLedgerEntry, payload: Partial<ForgeLedgerEntry>) => void;
+  onResolve: (entry: ForgeLedgerEntry, nextType: "canon" | "decision") => void;
+  onDelete: (id: string, label: string) => void;
+}) {
+  const sourceNote = item.note_id ? notes.find((note) => note.id === item.note_id) : null;
+  const linkedTask = item.linked_task_id ? tasks.find((task) => task.id === item.linked_task_id) : null;
+  const canMutate = item.source === "ledger" && item.raw;
+  return (
+    <article className={`canon-card ${item.entry_type}`}>
+      <div className="canon-card-top">
+        <span>{ledgerTypeLabel(item.entry_type)}</span>
+        {item.is_pinned && <em>Pinned</em>}
+        {item.resolved && <em>Resolved</em>}
+      </div>
+      <h4>{item.title || firstLine(item.body)}</h4>
+      <p>{item.body}</p>
+      <div className="canon-tags">
+        {(item.tags || []).slice(0, 6).map((tag) => <small key={tag}>{tag}</small>)}
+      </div>
+      {(item.folder || item.subfolder || sourceNote || linkedTask) && (
+        <span className="canon-source">
+          {[item.folder, item.subfolder].filter(Boolean).join(" / ")}
+          {sourceNote ? ` · Source: ${sourceNote.title}` : ""}
+          {linkedTask ? ` · Task: ${linkedTask.title}` : ""}
+        </span>
+      )}
+      <div className="canon-card-actions">
+        {sourceNote && <button type="button" onClick={() => onOpenNote(sourceNote)}>Open Source Note</button>}
+        <button type="button" onClick={() => navigator.clipboard.writeText(item.body)}>Copy</button>
+        {canMutate && item.raw && <button type="button" onClick={() => onUpdate(item.raw as ForgeLedgerEntry, { is_pinned: !item.is_pinned })}>{item.is_pinned ? "Unpin" : "Pin"}</button>}
+        {canMutate && item.raw && item.entry_type === "question" && !item.resolved && <button type="button" onClick={() => onResolve(item.raw as ForgeLedgerEntry, "canon")}>Resolve as Canon</button>}
+        {canMutate && item.raw && item.entry_type === "question" && !item.resolved && <button type="button" onClick={() => onResolve(item.raw as ForgeLedgerEntry, "decision")}>Resolve as Decision</button>}
+        {canMutate && item.raw && <button type="button" onClick={() => onUpdate(item.raw as ForgeLedgerEntry, { status: item.status === "archived" ? "active" : "archived" })}>{item.status === "archived" ? "Restore" : "Archive"}</button>}
+        {canMutate && <button type="button" className="danger" onClick={() => onDelete(item.id, `ledger entry: ${item.title || firstLine(item.body)}`)}>Delete</button>}
+      </div>
+    </article>
+  );
+}
+
 function WritingDesk({
   draft,
   notes,
+  ledgerEntries,
   folderOptions,
   onDraftChange,
   onSave,
   onEdit,
+  onExtract,
 }: {
   draft: { title: string; body: string; noteType: string; folderPrimary: string; folderChild: string; tags: string };
   notes: ForgeNote[];
+  ledgerEntries: ForgeLedgerEntry[];
   folderOptions: FolderOptions;
   onDraftChange: (draft: { title: string; body: string; noteType: string; folderPrimary: string; folderChild: string; tags: string }) => void;
   onSave: () => void;
   onEdit: (note: ForgeNote) => void;
+  onExtract: (entryType: ForgeLedgerEntry["entry_type"], note?: ForgeNote) => void;
 }) {
-  const bible = buildProjectBible(notes);
+  const bible = buildProjectBible(notes, ledgerEntries);
   return (
     <div className="writing-desk">
       <section className="writing-editor">
@@ -749,6 +1065,12 @@ function WritingDesk({
       <section className="writing-library">
         <h3>Writing Library</h3>
         <NoteList notes={notes} folderOptions={folderOptions} onEdit={onEdit} />
+        <div className="ledger-quick-actions">
+          <button type="button" onClick={() => onExtract("canon")}>Add Canon Extract</button>
+          <button type="button" onClick={() => onExtract("decision")}>Add Decision Extract</button>
+          <button type="button" onClick={() => onExtract("question")}>Add Question Extract</button>
+          <button type="button" onClick={() => onExtract("draft")}>Add Draft Idea</button>
+        </div>
       </section>
     </div>
   );
@@ -924,18 +1246,66 @@ function NoteList({ notes, folderOptions, onEdit }: { notes: ForgeNote[]; folder
 }
 
 function FolderBoard<T extends { id: string; folder_path?: string[] | null }>({ items, renderItem }: { items: T[]; folderOptions: FolderOptions; renderItem: (item: T) => ReactNode }) {
-  const folders = groupByFolder(items);
+  const tree = useMemo(() => buildFolderTree(items), [items]);
+  const [openPrimary, setOpenPrimary] = useState("");
+  const [openChild, setOpenChild] = useState("");
+  const activePrimary = tree.find((folder) => folder.key === openPrimary);
+  const childFolders = activePrimary?.children || [];
+  const directItems = activePrimary?.items || [];
+  const activeChild = childFolders.find((folder) => folder.key === openChild);
+  const visibleItems = activeChild ? activeChild.items : childFolders.length ? directItems : directItems;
   return (
-    <div className="folder-board">
-      {folders.map((folder) => (
-        <section key={folder.key} className="folder-section">
-          <div className="forge-folder-label">
+    <div className="folder-board folder-explorer">
+      <div className="folder-level">
+        {tree.map((folder) => (
+          <button
+            key={folder.key}
+            type="button"
+            className={`forge-folder-label ${openPrimary === folder.key ? "active" : ""}`}
+            onClick={() => {
+              const next = openPrimary === folder.key ? "" : folder.key;
+              setOpenPrimary(next);
+              setOpenChild("");
+            }}
+          >
             <Image src="/images/Forge/cleaned/forge-incubation-folder-small.png" alt="" width={72} height={52} unoptimized />
             <span>{folder.label}</span>
-          </div>
-          <div className="workspace-list">{folder.items.map(renderItem)}</div>
+            <small>{folder.count}</small>
+          </button>
+        ))}
+      </div>
+      {activePrimary && (
+        <section className="folder-section">
+          {childFolders.length > 0 && (
+            <div className="folder-level child-folders">
+              {directItems.length > 0 && (
+                <button type="button" className={`forge-folder-label ${!openChild ? "active" : ""}`} onClick={() => setOpenChild("")}>
+                  <Image src="/images/Forge/cleaned/forge-incubation-folder-small.png" alt="" width={62} height={45} unoptimized />
+                  <span>{activePrimary.label}</span>
+                  <small>{directItems.length}</small>
+                </button>
+              )}
+              {childFolders.map((folder) => (
+                <button
+                  key={folder.key}
+                  type="button"
+                  className={`forge-folder-label ${openChild === folder.key ? "active" : ""}`}
+                  onClick={() => setOpenChild(openChild === folder.key ? "" : folder.key)}
+                >
+                  <Image src="/images/Forge/cleaned/forge-incubation-folder-small.png" alt="" width={62} height={45} unoptimized />
+                  <span>{folder.label}</span>
+                  <small>{folder.items.length}</small>
+                </button>
+              ))}
+            </div>
+          )}
+          {visibleItems.length > 0 ? (
+            <div className="workspace-list">{visibleItems.map(renderItem)}</div>
+          ) : (
+            <Empty title="Folder selected." text="Open a subfolder to see its Forge items." />
+          )}
         </section>
-      ))}
+      )}
     </div>
   );
 }
@@ -1042,6 +1412,7 @@ function ForgeItemDrawer({
   folderOptions,
   onChange,
   onSave,
+  onExtract,
   onDelete,
   onCancel,
 }: {
@@ -1050,6 +1421,7 @@ function ForgeItemDrawer({
   folderOptions: FolderOptions;
   onChange: (item: EditingForgeItem) => void;
   onSave: () => void;
+  onExtract: (entryType: ForgeLedgerEntry["entry_type"], note?: ForgeNote) => void;
   onDelete: (kind: "sparks" | "notes", id: string, label: string) => void;
   onCancel: () => void;
 }) {
@@ -1084,6 +1456,12 @@ function ForgeItemDrawer({
               Pinned project-bible item
             </label>
             <input value={item.linkedMilestone} onChange={(event) => onChange({ ...item, linkedMilestone: event.target.value })} placeholder="Linked milestone" />
+            <div className="ledger-quick-actions drawer-ledger-actions">
+              <button type="button" onClick={() => onExtract("canon", item.item)}>Canon Extract</button>
+              <button type="button" onClick={() => onExtract("decision", item.item)}>Decision Extract</button>
+              <button type="button" onClick={() => onExtract("question", item.item)}>Question Extract</button>
+              <button type="button" onClick={() => onExtract("draft", item.item)}>Draft Idea</button>
+            </div>
           </>
         )}
         <FolderPicker
@@ -1308,23 +1686,180 @@ function normalizeFolderPath(path: string[]) {
   return (path || []).map(titleCaseFolder).filter(Boolean).slice(0, 2);
 }
 
-function groupByFolder<T extends { id: string; folder_path?: string[] | null }>(items: T[]) {
-  const groups = new Map<string, { key: string; label: string; items: T[] }>();
+type FolderTree<T> = {
+  key: string;
+  label: string;
+  items: T[];
+  children: Array<{ key: string; label: string; items: T[] }>;
+  count: number;
+};
+
+function buildFolderTree<T extends { id: string; folder_path?: string[] | null; created_at?: string | null; updated_at?: string | null }>(items: T[]): FolderTree<T>[] {
+  const folders = new Map<string, FolderTree<T>>();
   items.forEach((item) => {
     const path = normalizeFolderPath(item.folder_path || []);
-    const label = path.length ? path.join(" / ") : "Unfiled";
-    const key = label.toLowerCase();
-    if (!groups.has(key)) groups.set(key, { key, label, items: [] });
-    groups.get(key)?.items.push(item);
+    const primary = path[0] || "Unfiled";
+    const child = path[1] || "";
+    const primaryKey = primary.toLowerCase();
+    if (!folders.has(primaryKey)) {
+      folders.set(primaryKey, { key: primaryKey, label: primary, items: [], children: [], count: 0 });
+    }
+    const folder = folders.get(primaryKey);
+    if (!folder) return;
+    folder.count += 1;
+    if (!child) {
+      folder.items.push(item);
+      return;
+    }
+    const childKey = `${primaryKey}/${child.toLowerCase()}`;
+    let childFolder = folder.children.find((entry) => entry.key === childKey);
+    if (!childFolder) {
+      childFolder = { key: childKey, label: child, items: [] };
+      folder.children.push(childFolder);
+    }
+    childFolder.items.push(item);
   });
-  return [...groups.values()].sort((a, b) => a.label.localeCompare(b.label));
+  return [...folders.values()]
+    .map((folder) => ({
+      ...folder,
+      items: folder.items.sort(sortFolderItems),
+      children: folder.children
+        .map((child) => ({ ...child, items: child.items.sort(sortFolderItems) }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 }
 
-function buildProjectBible(notes: ForgeNote[]) {
+function sortFolderItems<T extends { created_at?: string | null; updated_at?: string | null }>(a: T, b: T) {
+  return timestampValue(b.updated_at || b.created_at) - timestampValue(a.updated_at || a.created_at);
+}
+
+type CanonBoardItem = {
+  source: "ledger" | "note";
+  raw?: ForgeLedgerEntry;
+  id: string;
+  entry_type: ForgeLedgerEntry["entry_type"];
+  title?: string | null;
+  body: string;
+  tags?: string[] | null;
+  folder?: string | null;
+  subfolder?: string | null;
+  note_id?: string | null;
+  linked_task_id?: string | null;
+  is_pinned?: boolean | null;
+  status?: string | null;
+  resolved?: boolean | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+const CANON_FILTERS = [
+  "All",
+  "Pinned",
+  "Characters",
+  "Story",
+  "Gameplay",
+  "Class System",
+  "World Visits",
+  "Art Direction",
+  "Development",
+  "MVP",
+  "Lucien",
+  "Aldric",
+  "Liora",
+  "Placement Trial",
+  "Guild System",
+  "Hybrid Classes",
+  "Unreal",
+  "Visual Style",
+];
+
+function buildCanonBoardItems(entries: ForgeLedgerEntry[], notes: ForgeNote[]): CanonBoardItem[] {
+  const ledgerItems = entries
+    .filter((entry) => entry.status !== "archived")
+    .map((entry) => ({
+      source: "ledger" as const,
+      raw: entry,
+      id: entry.id,
+      entry_type: entry.entry_type,
+      title: entry.title,
+      body: entry.body,
+      tags: entry.tags,
+      folder: entry.folder,
+      subfolder: entry.subfolder,
+      note_id: entry.note_id,
+      linked_task_id: entry.linked_task_id,
+      is_pinned: entry.is_pinned,
+      status: entry.status,
+      resolved: entry.resolved,
+      created_at: entry.created_at,
+      updated_at: entry.updated_at,
+    }));
+  const noteItems = notes
+    .filter((note) => ["canon", "decision", "question", "draft", "idea"].includes(note.note_type || ""))
+    .map((note) => {
+      const path = normalizeFolderPath(note.folder_path || []);
+      return {
+        source: "note" as const,
+        id: note.id,
+        entry_type: note.note_type as ForgeLedgerEntry["entry_type"],
+        title: note.title,
+        body: note.body || "No body recorded yet.",
+        tags: note.tags,
+        folder: path[0] || null,
+        subfolder: path[1] || null,
+        note_id: note.id,
+        is_pinned: note.is_pinned,
+        status: note.status,
+        created_at: note.created_at,
+        updated_at: note.updated_at,
+      };
+    });
+  return [...ledgerItems, ...noteItems].sort((a, b) => timestampValue(b.updated_at || b.created_at) - timestampValue(a.updated_at || a.created_at));
+}
+
+function matchesCanonFilter(item: CanonBoardItem, filter: string, query: string) {
+  const haystack = [
+    item.title,
+    item.body,
+    item.folder,
+    item.subfolder,
+    item.entry_type,
+    ...(item.tags || []),
+  ].join(" ").toLowerCase();
+  const normalizedQuery = query.trim().toLowerCase();
+  if (normalizedQuery && !haystack.includes(normalizedQuery)) return false;
+  if (filter === "All") return true;
+  if (filter === "Pinned") return Boolean(item.is_pinned);
+  const filterKey = filter.toLowerCase();
+  return haystack.includes(filterKey) || haystack.includes(filterKey.replace(/\s+/g, "-"));
+}
+
+function ledgerTypeLabel(type: ForgeLedgerEntry["entry_type"]) {
+  return {
+    canon: "Canon",
+    decision: "Decision",
+    question: "Question",
+    draft: "Draft Idea",
+    idea: "Idea",
+    reference: "Reference",
+  }[type] || type;
+}
+
+function firstLine(value: string) {
+  return value.split(/\n+/)[0]?.slice(0, 90) || "Untitled";
+}
+
+function buildProjectBible(notes: ForgeNote[], ledgerEntries: ForgeLedgerEntry[] = []) {
   const source = notes
     .filter((note) => ["gdd_section", "canon", "decision", "reference"].includes(note.note_type || "") || note.is_pinned)
     .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0) || a.title.localeCompare(b.title));
-  return source.map((note) => `## ${note.title}\n\n${note.body || "_No body recorded yet._"}`).join("\n\n---\n\n");
+  const noteMarkdown = source.map((note) => `## ${note.title}\n\n${note.body || "_No body recorded yet._"}`);
+  const ledgerMarkdown = ledgerEntries
+    .filter((entry) => entry.status !== "archived" && (entry.is_pinned || ["canon", "decision"].includes(entry.entry_type)))
+    .sort((a, b) => ledgerTypeLabel(a.entry_type).localeCompare(ledgerTypeLabel(b.entry_type)) || (a.title || "").localeCompare(b.title || ""))
+    .map((entry) => `## ${entry.title || ledgerTypeLabel(entry.entry_type)}\n\n_${ledgerTypeLabel(entry.entry_type)}_\n\n${entry.body}`);
+  return [...noteMarkdown, ...ledgerMarkdown].join("\n\n---\n\n");
 }
 
 function DocumentPreview({ file, onClose }: { file: ForgeFile; onClose: () => void }) {
@@ -1636,6 +2171,11 @@ function WorkspaceStyles() {
       display: grid;
       gap: 14px;
     }
+    .folder-explorer .folder-level {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
     .folder-section {
       border: 1px solid rgba(212,173,101,.12);
       border-radius: 12px;
@@ -1654,8 +2194,34 @@ function WorkspaceStyles() {
       letter-spacing: .12em;
       text-transform: uppercase;
     }
+    button.forge-folder-label {
+      border: 1px solid rgba(212,173,101,.16);
+      border-radius: 10px;
+      background: rgba(0,0,0,.22);
+      cursor: pointer;
+      padding: 7px 10px;
+      transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease, background 180ms ease;
+    }
+    button.forge-folder-label:hover,
+    button.forge-folder-label.active {
+      background: rgba(196,111,45,.08);
+      border-color: rgba(196,111,45,.42);
+      box-shadow: 0 0 24px rgba(196,111,45,.16), inset 0 0 16px rgba(143,220,124,.04);
+      transform: translateY(-2px);
+    }
+    .forge-folder-label small {
+      border: 1px solid rgba(143,220,124,.22);
+      border-radius: 999px;
+      color: #caffbf;
+      font-size: .68rem;
+      padding: 2px 7px;
+    }
     .forge-folder-label img {
       filter: drop-shadow(0 0 14px rgba(196,111,45,.24));
+    }
+    .child-folders {
+      border-bottom: 1px solid rgba(212,173,101,.12);
+      padding-bottom: 10px;
     }
     .folder-picker {
       display: grid;
@@ -1793,6 +2359,205 @@ function WorkspaceStyles() {
       width: 100%;
     }
     .workspace-images figcaption { margin-top: 8px; color: rgba(234,223,199,.72); }
+    .shared-goals-screen,
+    .canon-board {
+      display: grid;
+      gap: 16px;
+    }
+    .shared-goals-screen > header,
+    .canon-header {
+      border: 1px solid rgba(212,173,101,.18);
+      border-radius: 12px;
+      background:
+        radial-gradient(circle at 82% 10%, rgba(196,111,45,.16), transparent 28%),
+        rgba(0,0,0,.26);
+      padding: 16px;
+    }
+    .shared-goals-screen p,
+    .canon-header p,
+    .canon-section-grid h3 {
+      color: #f0a44d;
+      font-size: .74rem;
+      font-weight: 900;
+      letter-spacing: .15em;
+      text-transform: uppercase;
+    }
+    .shared-goals-screen h2,
+    .canon-header h2 {
+      color: #fff1c8;
+      margin-top: 5px;
+    }
+    .shared-goals-screen span,
+    .canon-header span {
+      color: rgba(234,223,199,.72);
+      display: block;
+      margin-top: 6px;
+    }
+    .shared-goal-grid,
+    .canon-highlight-row {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    }
+    .shared-goal-card {
+      border: 1px solid rgba(212,173,101,.18);
+      border-radius: 12px;
+      background: rgba(0,0,0,.28);
+      display: grid;
+      gap: 10px;
+      padding: 15px;
+    }
+    .shared-goal-card h3 {
+      color: #fff1c8;
+    }
+    .shared-goal-card a {
+      border: 1px solid rgba(143,220,124,.3);
+      border-radius: 999px;
+      color: #caffbf;
+      justify-self: start;
+      padding: 8px 11px;
+      text-decoration: none;
+      transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+    }
+    .shared-goal-card a:hover {
+      border-color: rgba(143,220,124,.68);
+      box-shadow: 0 0 24px rgba(143,220,124,.16);
+      transform: translateY(-2px);
+    }
+    .canon-header {
+      align-items: end;
+      display: flex;
+      gap: 16px;
+      justify-content: space-between;
+    }
+    .canon-summary {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+    .canon-summary span {
+      border: 1px solid rgba(212,173,101,.18);
+      border-radius: 999px;
+      margin: 0;
+      padding: 7px 10px;
+    }
+    .canon-summary b {
+      color: #caffbf;
+    }
+    .canon-tools {
+      display: grid;
+      gap: 10px;
+    }
+    .canon-tools input {
+      border: 1px solid rgba(212,173,101,.22);
+      border-radius: 10px;
+      background: rgba(0,0,0,.34);
+      color: #eadfc7;
+      padding: 11px 12px;
+    }
+    .canon-tools > div,
+    .ledger-quick-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .canon-tools button,
+    .ledger-quick-actions button,
+    .canon-card-actions button {
+      border: 1px solid rgba(212,173,101,.24);
+      border-radius: 999px;
+      background: rgba(0,0,0,.28);
+      color: #eadfc7;
+      cursor: pointer;
+      font-size: .78rem;
+      font-weight: 800;
+      padding: 8px 10px;
+      transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease, color 180ms ease;
+    }
+    .canon-tools button:hover,
+    .canon-tools button.active,
+    .ledger-quick-actions button:hover,
+    .canon-card-actions button:hover {
+      border-color: rgba(196,111,45,.58);
+      box-shadow: 0 0 22px rgba(196,111,45,.16);
+      color: #ffc46c;
+      transform: translateY(-2px);
+    }
+    .drawer-ledger-actions {
+      border: 1px solid rgba(212,173,101,.12);
+      border-radius: 10px;
+      padding: 10px;
+    }
+    .canon-section-grid {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    }
+    .canon-section-grid section {
+      display: grid;
+      gap: 10px;
+    }
+    .canon-card {
+      border-color: rgba(212,173,101,.2) !important;
+      background:
+        radial-gradient(circle at 90% 0%, rgba(196,111,45,.1), transparent 30%),
+        rgba(0,0,0,.28) !important;
+    }
+    .canon-card.canon { box-shadow: inset 3px 0 0 rgba(143,220,124,.62); }
+    .canon-card.decision { box-shadow: inset 3px 0 0 rgba(240,164,77,.62); }
+    .canon-card.question { box-shadow: inset 3px 0 0 rgba(80,176,255,.58); }
+    .canon-card.draft,
+    .canon-card.idea { box-shadow: inset 3px 0 0 rgba(181,130,255,.52); }
+    .canon-card-top {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .canon-card-top span,
+    .canon-card-top em {
+      border: 1px solid rgba(212,173,101,.2);
+      border-radius: 999px;
+      color: #f4d38f;
+      font-size: .68rem;
+      font-style: normal;
+      font-weight: 900;
+      letter-spacing: .12em;
+      padding: 4px 7px;
+      text-transform: uppercase;
+    }
+    .canon-card h4 {
+      color: #fff1c8;
+      font-size: 1rem;
+    }
+    .canon-card p {
+      color: rgba(234,223,199,.78);
+      line-height: 1.5;
+    }
+    .canon-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .canon-tags small {
+      border: 1px solid rgba(143,220,124,.18);
+      border-radius: 999px;
+      color: #caffbf;
+      padding: 3px 7px;
+    }
+    .canon-source {
+      color: rgba(234,223,199,.58);
+      font-size: .78rem;
+    }
+    .canon-card-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+    .canon-card-actions .danger {
+      border-color: rgba(255,112,92,.38);
+      color: #ffd0c8;
+    }
     .workspace-empty { display: grid; place-content: center; min-height: 180px; text-align: center; }
     .workspace-alert { margin-top: 12px; padding: 12px; color: #caffbf; }
     .workspace-alert.danger { color: #ffb0a8; }

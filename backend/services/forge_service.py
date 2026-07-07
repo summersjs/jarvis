@@ -8,6 +8,8 @@ from backend.db.supabase_client import supabase
 from backend.schemas.forge import (
     ForgeFileCreate,
     ForgeFileUpdate,
+    ForgeLedgerEntryCreate,
+    ForgeLedgerEntryUpdate,
     ForgeNoteCreate,
     ForgeNoteUpdate,
     ForgeProjectCreate,
@@ -24,16 +26,41 @@ FORGE_STATUSES = ["Active", "Building", "Experiment", "Incubating", "Archived", 
 WORKSTATION_TITLE = "Build the Jarvis Workstation"
 WORKSTATION_SUMMARY = "Investing consistently turns Jarvis from an idea into a permanent tool. One component at a time builds the command center."
 WORKSTATION_TAGS = ["jarvis", "hardware", "workstation", "command-center", "build"]
+WORLD_WALKER_LEDGER_SEEDS = [
+    ("canon", "Lucien Vale", "Lucien Vale is the protagonist.", ["lucien", "protagonist", "world-walker"]),
+    ("canon", "Unclassified Worldwalker", "Lucien cannot be properly classified within the world's job system.", ["lucien", "class-system", "worldwalking"]),
+    ("canon", "Aldric Aegis Knight", "Aldric is the only known Aegis Knight.", ["aldric", "aegis-knight", "character"]),
+    ("canon", "Liora White Mage", "Liora is Lucien's mother and a retired White Mage.", ["liora", "white-mage", "character"]),
+    ("canon", "Liora Farewell Line", 'Liora’s recurring farewell line is "Come home to me."', ["liora", "dialogue", "canon"]),
+    ("canon", "The Witness", "The Witness exists outside every world and is never fully explained.", ["the-witness", "lore", "mystery"]),
+    ("decision", "Engine Direction", "World Walker will be built in Unreal Engine.", ["unreal", "development", "decision"]),
+    ("decision", "Character Pipeline", "Main characters will use Character Creator.", ["art", "characters", "decision"]),
+    ("decision", "Cinematic Pipeline", "Cinematic story moments will use Unreal cinematic sequences.", ["unreal", "story", "cinematics"]),
+    ("decision", "Visual Target", "The overworld visual target is stylized storybook JRPG / Ni no Kuni-inspired fantasy.", ["visual-style", "art-direction", "jrpg"]),
+    ("decision", "Game One Scope", "Game One scope should stay limited to one continent, Ashmoor, two other towns max, and a few major dungeons/trials.", ["mvp", "scope", "ashmoor"]),
+    ("question", "Cloud Consequences", "What are the consequences of taking Cloud out of his world?", ["world-visits", "ff7", "question"]),
+    ("question", "Hybrid Classes", "What hybrid classes exist besides Red Mage and Paladin?", ["hybrid-classes", "class-system", "question"]),
+    ("question", "Unstable Ability Pool", "How does Lucien's unstable ability pool calculate each turn?", ["lucien", "combat", "question"]),
+    ("question", "Game One Town Count", "How many towns should be available in Game One?", ["mvp", "world-building", "question"]),
+    ("question", "Memory Wipe", "How does the memory wipe work after the dream/coma arc?", ["story", "nexus", "question"]),
+    ("draft", "Changing Command Menu", "During the Placement Trial, Lucien's command menu may change each turn.", ["placement-trial", "combat", "draft"]),
+    ("draft", "Guild Master Claims", "Guild masters may claim Lucien based on observed player actions.", ["guild-system", "placement-trial", "draft"]),
+    ("draft", "Hybrid Class Controversy", "Hybrid classes are rare and controversial because of class purism and jealousy.", ["hybrid-classes", "class-system", "draft"]),
+    ("draft", "Aldric Power Fantasy", "Aldric's presence should make the player feel protected and almost overpowered.", ["aldric", "story", "draft"]),
+    ("draft", "Lucien Early Arc", "Lucien should be weak or unreliable early, then become dangerous as he gains control.", ["lucien", "progression", "draft"]),
+]
 
 
 def build_forge_dashboard(user_id: str = "john") -> dict:
     ensure_workstation_project_link(user_id)
     ensure_shared_goal_links(user_id)
+    ensure_world_walker_ledger_entries(user_id)
     projects = list_forge_projects(user_id)
     sparks = list_forge_sparks(user_id)
     notes = list_forge_notes(user_id)
     files = list_forge_files(user_id)
     tasks = list_forge_tasks(user_id)
+    ledger_entries = list_forge_ledger_entries(user_id)
     goals = list_goals(user_id, active_only=False)
     apply_task_progress(projects, tasks)
     attach_task_goals(projects, goals)
@@ -69,6 +96,7 @@ def build_forge_dashboard(user_id: str = "john") -> dict:
         "notes": notes,
         "files": files,
         "tasks": tasks,
+        "ledger_entries": ledger_entries,
         "goals": goals,
         "category_counts": category_counts,
         "recently_updated": recently_updated[:6],
@@ -402,6 +430,118 @@ def update_forge_note(note_id: str, payload: ForgeNoteUpdate) -> dict | None:
 def delete_forge_note(note_id: str) -> list[dict]:
     response = supabase.table("forge_notes").delete().eq("id", note_id).execute()
     return response.data or []
+
+
+def list_forge_ledger_entries(user_id: str = "john") -> list[dict]:
+    try:
+        response = (
+            supabase.table("forge_note_ledger_entries")
+            .select("*, forge_notes(id, title)")
+            .eq("user_id", user_id)
+            .order("updated_at", desc=True)
+            .execute()
+        )
+        return response.data or []
+    except Exception:
+        return []
+
+
+def create_forge_ledger_entry(payload: ForgeLedgerEntryCreate) -> dict:
+    response = supabase.table("forge_note_ledger_entries").insert(payload.model_dump()).execute()
+    if not response.data:
+        raise Exception("Failed to save Forge Canon Board entry.")
+    return response.data[0]
+
+
+def update_forge_ledger_entry(entry_id: str, payload: ForgeLedgerEntryUpdate) -> dict | None:
+    response = (
+        supabase.table("forge_note_ledger_entries")
+        .update(payload.model_dump(exclude_unset=True))
+        .eq("id", entry_id)
+        .execute()
+    )
+    return response.data[0] if response.data else None
+
+
+def delete_forge_ledger_entry(entry_id: str) -> list[dict]:
+    response = supabase.table("forge_note_ledger_entries").delete().eq("id", entry_id).execute()
+    return response.data or []
+
+
+def ensure_world_walker_ledger_entries(user_id: str = "john") -> None:
+    try:
+        projects_response = (
+            supabase.table("forge_projects")
+            .select("id, title")
+            .eq("user_id", user_id)
+            .eq("title", "World Walker")
+            .limit(1)
+            .execute()
+        )
+        if not projects_response.data:
+            return
+        project_id = projects_response.data[0]["id"]
+        existing_response = (
+            supabase.table("forge_note_ledger_entries")
+            .select("id, title, body")
+            .eq("user_id", user_id)
+            .eq("project_id", project_id)
+            .execute()
+        )
+        existing_keys = {
+            ((entry.get("title") or "").strip().lower(), (entry.get("body") or "").strip().lower())
+            for entry in existing_response.data or []
+        }
+        rows = []
+        for entry_type, title, body, tags in WORLD_WALKER_LEDGER_SEEDS:
+            key = (title.strip().lower(), body.strip().lower())
+            if key in existing_keys:
+                continue
+            rows.append({
+                "user_id": user_id,
+                "project_id": project_id,
+                "entry_type": entry_type,
+                "title": title,
+                "body": body,
+                "tags": tags,
+                "folder": infer_ledger_folder(tags),
+                "subfolder": infer_ledger_subfolder(tags),
+                "is_pinned": entry_type in {"canon", "decision"},
+                "status": "active",
+            })
+        if rows:
+            supabase.table("forge_note_ledger_entries").insert(rows).execute()
+    except Exception:
+        return
+
+
+def infer_ledger_folder(tags: list[str]) -> str | None:
+    if any(tag in tags for tag in ["lucien", "aldric", "liora", "the-witness"]):
+        return "Characters"
+    if any(tag in tags for tag in ["combat", "class-system", "guild-system", "placement-trial", "hybrid-classes"]):
+        return "Gameplay"
+    if any(tag in tags for tag in ["story", "nexus", "world-visits", "ff7"]):
+        return "Story"
+    if any(tag in tags for tag in ["art", "visual-style", "art-direction"]):
+        return "Art Direction"
+    if "development" in tags or "unreal" in tags:
+        return "Development"
+    return None
+
+
+def infer_ledger_subfolder(tags: list[str]) -> str | None:
+    for tag, label in {
+        "lucien": "Lucien",
+        "aldric": "Aldric",
+        "liora": "Liora",
+        "the-witness": "The Witness",
+        "guild-system": "Guild System",
+        "class-system": "Class System",
+        "world-visits": "World Visits",
+    }.items():
+        if tag in tags:
+            return label
+    return None
 
 
 def list_forge_files(user_id: str = "john") -> list[dict]:

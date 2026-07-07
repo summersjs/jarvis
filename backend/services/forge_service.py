@@ -65,9 +65,10 @@ def build_forge_dashboard(user_id: str = "john") -> dict:
     sessions = list_forge_sessions(user_id)
     ledger_entries = list_forge_ledger_entries(user_id)
     goals = list_goals(user_id, active_only=False)
+    attach_shared_goals(projects, goals, user_id)
     apply_task_progress(projects, tasks)
     attach_task_goals(projects, goals)
-    attach_shared_goals(projects, goals, user_id)
+    apply_linked_goal_progress(projects)
 
     by_category = defaultdict(list)
     for project in projects:
@@ -156,6 +157,57 @@ def apply_task_progress(projects: list[dict], tasks: list[dict]) -> None:
         if not project.get("goal_id"):
             project["progress_percent"] = percent
             project["next_milestone"] = sorted_incomplete[0].get("title") if sorted_incomplete else project.get("next_milestone")
+
+
+def apply_linked_goal_progress(projects: list[dict]) -> None:
+    for project in projects:
+        linked_goals = []
+        if project.get("linked_goal"):
+            linked_goals.append(project["linked_goal"])
+        linked_goals.extend(project.get("linked_goals") or [])
+        if not linked_goals:
+            continue
+
+        native_total = (project.get("task_summary") or {}).get("total") or 0
+        native_complete = (project.get("task_summary") or {}).get("completed") or 0
+        linked_milestones = [
+            milestone
+            for goal in linked_goals
+            for milestone in (goal.get("milestones") or [])
+        ]
+        linked_total = len(linked_milestones)
+        linked_complete = len([milestone for milestone in linked_milestones if is_milestone_complete(milestone)])
+        total = native_total + linked_total
+        if not total:
+            continue
+
+        incomplete_linked = [
+            milestone for milestone in linked_milestones
+            if not is_milestone_complete(milestone)
+        ]
+        percent = round(((native_complete + linked_complete) / total) * 100, 1)
+        summary = project.get("task_summary") or {}
+        summary.update({
+            "completed": native_complete + linked_complete,
+            "total": total,
+            "remaining": total - native_complete - linked_complete,
+            "native_completed": native_complete,
+            "native_total": native_total,
+            "linked_completed": linked_complete,
+            "linked_total": linked_total,
+        })
+        if not summary.get("current_mission") and incomplete_linked:
+            summary["current_mission"] = incomplete_linked[0].get("title")
+        if not summary.get("next_suggested_task") and len(incomplete_linked) > 1:
+            summary["next_suggested_task"] = incomplete_linked[1].get("title")
+        project["task_summary"] = summary
+        project["progress_percent"] = percent
+        if incomplete_linked and not project.get("next_milestone"):
+            project["next_milestone"] = incomplete_linked[0].get("title")
+
+
+def is_milestone_complete(milestone: dict) -> bool:
+    return (milestone.get("status") or "").strip().lower() in {"done", "complete", "completed", "already acquired", "acquired"} or bool(milestone.get("completed_at"))
 
 
 def attach_task_goals(projects: list[dict], goals: list[dict]) -> None:

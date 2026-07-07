@@ -186,8 +186,20 @@ export default function ForgeProjectWorkspace() {
   const [uploadForm, setUploadForm] = useState({ fileName: "", fileType: "", fileSize: "", fileUrl: "", caption: "", tags: "", useAsCover: false });
   const [previewFile, setPreviewFile] = useState<ForgeFile | null>(null);
   const [writingDraft, setWritingDraft] = useState({ title: "", body: "", noteType: "draft", folderPrimary: "", folderChild: "", tags: "" });
-  const [quickSpark, setQuickSpark] = useState("");
-  const [quickNote, setQuickNote] = useState({ title: "", body: "" });
+  const [captureModal, setCaptureModal] = useState<"spark" | "note" | null>(null);
+  const [captureForm, setCaptureForm] = useState({
+    sparkText: "",
+    noteTitle: "",
+    noteBody: "",
+    noteType: "idea",
+    projectId: "",
+    category: "",
+    tags: "",
+    folderPrimary: "",
+    folderChild: "",
+    newFolderPrimary: "",
+    newFolderChild: "",
+  });
   const [sessionDraft, setSessionDraft] = useState({
     open: false,
     sessionType: "Continue Current Mission",
@@ -464,62 +476,72 @@ export default function ForgeProjectWorkspace() {
     }
   }
 
-  async function createQuickSpark() {
-    if (!project || !quickSpark.trim()) return;
-    setTaskBusy({ title: "New Spark", action: "create" });
-    setError("");
-    try {
-      const res = await fetch(`${API_BASE}/forge/sparks`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-        body: JSON.stringify({
-          user_id: USER_ID,
-          project_id: project.id,
-          category: project.category,
-          spark_text: quickSpark.trim(),
-          tags: [],
-          folder_path: ["Sparks"],
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Spark could not be saved.");
-      setQuickSpark("");
-      setMessage(`Spark saved to ${project.title}.`);
-      await loadForge();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Spark could not be saved.");
-    } finally {
-      setTaskBusy(null);
-    }
+  function openCaptureModal(kind: "spark" | "note") {
+    setCaptureModal(kind);
+    setCaptureForm({
+      sparkText: "",
+      noteTitle: "",
+      noteBody: "",
+      noteType: "idea",
+      projectId: project?.id || "",
+      category: project?.category || "",
+      tags: "",
+      folderPrimary: "",
+      folderChild: "",
+      newFolderPrimary: "",
+      newFolderChild: "",
+    });
   }
 
-  async function createQuickNote() {
-    if (!project || !quickNote.title.trim()) return;
-    setTaskBusy({ title: quickNote.title.trim(), action: "create" });
+  async function saveCaptureModal() {
+    if (!captureModal) return;
+    const selectedProject = projects.find((item) => item.id === captureForm.projectId);
+    const isSpark = captureModal === "spark";
+    if (isSpark && !captureForm.sparkText.trim()) {
+      setError("Spark text is required.");
+      return;
+    }
+    if (!isSpark && !captureForm.noteTitle.trim()) {
+      setError("Note title is required.");
+      return;
+    }
+    setTaskBusy({ title: isSpark ? "New Spark" : captureForm.noteTitle.trim(), action: "create" });
     setError("");
     try {
-      const res = await fetch(`${API_BASE}/forge/notes`, {
+      const tags = captureForm.tags.split(",").map((tag) => tag.trim()).filter(Boolean);
+      const folder_path = resolveFolderPath(folderOptions, captureForm.folderPrimary, captureForm.folderChild, captureForm.newFolderPrimary, captureForm.newFolderChild);
+      const res = await fetch(`${API_BASE}/forge/${isSpark ? "sparks" : "notes"}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-        body: JSON.stringify({
-          user_id: USER_ID,
-          project_id: project.id,
-          category: project.category,
-          title: quickNote.title.trim(),
-          body: quickNote.body || null,
-          note_type: "idea",
-          status: "active",
-          tags: [],
-          folder_path: ["Notes"],
-        }),
+        body: JSON.stringify(isSpark
+          ? {
+              user_id: USER_ID,
+              project_id: captureForm.projectId || null,
+              category: selectedProject?.category || captureForm.category || null,
+              spark_text: captureForm.sparkText.trim(),
+              tags,
+              folder_path,
+            }
+          : {
+              user_id: USER_ID,
+              project_id: captureForm.projectId || null,
+              category: selectedProject?.category || captureForm.category || null,
+              title: captureForm.noteTitle.trim(),
+              body: captureForm.noteBody || null,
+              note_type: captureForm.noteType,
+              status: "active",
+              tags,
+              folder_path,
+              is_pinned: ["canon", "decision", "gdd_section"].includes(captureForm.noteType),
+            }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Note could not be saved.");
-      setQuickNote({ title: "", body: "" });
-      setMessage(`Note saved to ${project.title}.`);
+      if (!res.ok) throw new Error(data.detail || `${isSpark ? "Spark" : "Note"} could not be saved.`);
+      setCaptureModal(null);
+      setMessage(isSpark ? `Spark saved${selectedProject ? ` to ${selectedProject.title}` : " to Forge Inbox"}.` : `Note saved${selectedProject ? ` to ${selectedProject.title}` : " to Forge Inbox"}.`);
       await loadForge();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Note could not be saved.");
+      setError(err instanceof Error ? err.message : "Forge capture could not be saved.");
     } finally {
       setTaskBusy(null);
     }
@@ -861,13 +883,13 @@ export default function ForgeProjectWorkspace() {
         )}
         {tab === "Spark Log" && (
           <>
-            {!inbox && project && <QuickSparkComposer value={quickSpark} onChange={setQuickSpark} onSave={createQuickSpark} projectTitle={project.title} />}
+            {!inbox && project && <CaptureLaunchBar kind="spark" projectTitle={project.title} onOpen={() => openCaptureModal("spark")} />}
             <SparkList sparks={visibleSparks} folderOptions={folderOptions} onEdit={openSparkDrawer} />
           </>
         )}
         {tab === "Notes" && (
           <>
-            {!inbox && project && <QuickNoteComposer value={quickNote} onChange={setQuickNote} onSave={createQuickNote} projectTitle={project.title} />}
+            {!inbox && project && <CaptureLaunchBar kind="note" projectTitle={project.title} onOpen={() => openCaptureModal("note")} />}
             <NoteList notes={visibleNotes} folderOptions={folderOptions} onEdit={openNoteDrawer} />
           </>
         )}
@@ -933,6 +955,17 @@ export default function ForgeProjectWorkspace() {
           onChange={setSessionDraft}
           onComplete={completeForgeSession}
           onCancel={() => setSessionDraft((prev) => ({ ...prev, open: false }))}
+        />
+      )}
+      {captureModal && (
+        <ProjectCaptureModal
+          kind={captureModal}
+          form={captureForm}
+          projects={projects}
+          folderOptions={folderOptions}
+          onChange={setCaptureForm}
+          onSave={saveCaptureModal}
+          onClose={() => setCaptureModal(null)}
         />
       )}
       <WorkspaceStyles />
@@ -1468,15 +1501,15 @@ function SparkList({ sparks, folderOptions, onEdit }: { sparks: ForgeSpark[]; fo
   )} />;
 }
 
-function QuickSparkComposer({ value, onChange, onSave, projectTitle }: { value: string; onChange: (value: string) => void; onSave: () => void; projectTitle: string }) {
+function CaptureLaunchBar({ kind, projectTitle, onOpen }: { kind: "spark" | "note"; projectTitle: string; onOpen: () => void }) {
   return (
-    <div className="quick-forge-composer">
+    <div className="quick-forge-composer compact-capture">
       <div>
-        <p>New Spark</p>
-        <strong>Capture a raw idea for {projectTitle}.</strong>
+        <p>{kind === "spark" ? "Spark Log" : "Notes"}</p>
+        <strong>{kind === "spark" ? "Capture a raw idea." : "Write a project note."}</strong>
+        <span>Default project: {projectTitle}</span>
       </div>
-      <input value={value} onChange={(event) => onChange(event.target.value)} placeholder="What sparked?" />
-      <button type="button" onClick={onSave} disabled={!value.trim()}>Save Spark</button>
+      <button type="button" onClick={onOpen}>{kind === "spark" ? "New Spark" : "New Note"}</button>
     </div>
   );
 }
@@ -1491,16 +1524,97 @@ function NoteList({ notes, folderOptions, onEdit }: { notes: ForgeNote[]; folder
   )} />;
 }
 
-function QuickNoteComposer({ value, onChange, onSave, projectTitle }: { value: { title: string; body: string }; onChange: (value: { title: string; body: string }) => void; onSave: () => void; projectTitle: string }) {
+function ProjectCaptureModal({
+  kind,
+  form,
+  projects,
+  folderOptions,
+  onChange,
+  onSave,
+  onClose,
+}: {
+  kind: "spark" | "note";
+  form: {
+    sparkText: string;
+    noteTitle: string;
+    noteBody: string;
+    noteType: string;
+    projectId: string;
+    category: string;
+    tags: string;
+    folderPrimary: string;
+    folderChild: string;
+    newFolderPrimary: string;
+    newFolderChild: string;
+  };
+  projects: ForgeProject[];
+  folderOptions: FolderOptions;
+  onChange: (form: {
+    sparkText: string;
+    noteTitle: string;
+    noteBody: string;
+    noteType: string;
+    projectId: string;
+    category: string;
+    tags: string;
+    folderPrimary: string;
+    folderChild: string;
+    newFolderPrimary: string;
+    newFolderChild: string;
+  }) => void;
+  onSave: () => void;
+  onClose: () => void;
+}) {
+  const title = kind === "spark" ? "New Spark" : "New Note";
   return (
-    <div className="quick-forge-composer note-composer">
-      <div>
-        <p>New Note</p>
-        <strong>Start a project note for {projectTitle}.</strong>
-      </div>
-      <input value={value.title} onChange={(event) => onChange({ ...value, title: event.target.value })} placeholder="Note title" />
-      <textarea value={value.body} onChange={(event) => onChange({ ...value, body: event.target.value })} placeholder="Details, outline, or draft text..." rows={3} />
-      <button type="button" onClick={onSave} disabled={!value.title.trim()}>Save Note</button>
+    <div className="forge-drawer-backdrop capture-modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="forge-edit-drawer capture-modal" role="dialog" aria-modal="true" aria-label={title} onMouseDown={(event) => event.stopPropagation()}>
+        <p>Forge Capture</p>
+        <h2>{title}</h2>
+        {kind === "spark" ? (
+          <textarea value={form.sparkText} onChange={(event) => onChange({ ...form, sparkText: event.target.value })} placeholder="Spark text" rows={7} />
+        ) : (
+          <>
+            <input value={form.noteTitle} onChange={(event) => onChange({ ...form, noteTitle: event.target.value })} placeholder="Note title" />
+            <select value={form.noteType} onChange={(event) => onChange({ ...form, noteType: event.target.value })}>
+              <option value="idea">Idea</option>
+              <option value="draft">Draft</option>
+              <option value="decision">Decision</option>
+              <option value="canon">Canon</option>
+              <option value="question">Question</option>
+              <option value="reference">Reference</option>
+              <option value="gdd_section">GDD Section</option>
+            </select>
+            <textarea value={form.noteBody} onChange={(event) => onChange({ ...form, noteBody: event.target.value })} placeholder="Body" rows={10} />
+          </>
+        )}
+        <select value={form.projectId} onChange={(event) => {
+          const project = projects.find((item) => item.id === event.target.value);
+          onChange({ ...form, projectId: event.target.value, category: project?.category || form.category });
+        }}>
+          <option value="">Unassigned Forge Inbox</option>
+          {projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
+        </select>
+        <FolderPicker
+          folderOptions={folderOptions}
+          primary={form.folderPrimary}
+          child={form.folderChild}
+          newPrimary={form.newFolderPrimary}
+          newChild={form.newFolderChild}
+          onChange={(next) => onChange({
+            ...form,
+            folderPrimary: next.primary,
+            folderChild: next.child,
+            newFolderPrimary: next.newPrimary,
+            newFolderChild: next.newChild,
+          })}
+        />
+        <input value={form.tags} onChange={(event) => onChange({ ...form, tags: event.target.value })} placeholder="tags, comma separated" />
+        <div className="drawer-actions">
+          <button type="button" onClick={onSave}>Save</button>
+          <button type="button" onClick={onClose}>Cancel</button>
+        </div>
+      </section>
     </div>
   );
 }

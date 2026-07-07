@@ -30,8 +30,8 @@ def _run_check(label: str, probe):
 
 def _env_check():
     required = {
-        "Supabase URL": os.getenv("NEXT_PUBLIC_SUPABASE_URL"),
-        "Supabase key": os.getenv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"),
+        "Supabase URL": os.getenv("NEXT_PUBLIC_SUPABASE_URL") or os.getenv("SUPABASE_URL"),
+        "Supabase key": os.getenv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY") or os.getenv("SUPABASE_KEY") or os.getenv("SUPABASE_ANON_KEY"),
         "Jarvis API key": os.getenv("JARVIS_API_KEY"),
     }
     missing = [label for label, value in required.items() if not value]
@@ -42,8 +42,19 @@ def _env_check():
 
 def _table_check(table_name: str):
     def probe():
-        supabase.table(table_name).select("id").limit(1).execute()
+        supabase.table(table_name).select("id", count="exact").limit(1).execute()
         return f"{table_name} reachable"
+
+    return probe
+
+
+def _optional_table_check(table_name: str):
+    def probe():
+        try:
+            supabase.table(table_name).select("id", count="exact").limit(1).execute()
+            return f"{table_name} reachable"
+        except Exception as exc:
+            return f"{table_name} pending migration: {exc}"
 
     return probe
 
@@ -66,7 +77,8 @@ def get_status():
         _run_check("Supabase Database", _table_check("goals")),
         _run_check("Goals", _table_check("goal_milestones")),
         _run_check("Forge Projects", _table_check("forge_projects")),
-        _run_check("Forge Tasks", _table_check("forge_tasks")),
+        _run_check("Forge Tasks", _optional_table_check("forge_tasks")),
+        _run_check("Forge Sessions", _optional_table_check("forge_sessions")),
         _run_check("Meal Planner", _table_check("meal_plan_entries")),
         _run_check("Health Ops", _table_check("health_events")),
         _run_check("Food Vault", _table_check("food_vault_items")),

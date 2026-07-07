@@ -461,5 +461,82 @@
       "win": "Finished bench and pushed the training chain forward. Worked on Jarvis and Completed more of the Forge. Worked on World Walker some more. "
     },
     "weekly_score": 100
+  },
+  {
+    "completed_at": "2026-07-03T21:32:22.293+00:00",
+    "created_at": "2026-07-03T21:32:22.316207+00:00",
+    "daily_score": 88,
+    "date": "2026-07-03",
+    "finance": {
+      "category": "Food",
+      "money_spent_today": 3.99,
+      "notes": null,
+      "spending_status": "UNDER CONTROL",
+      "unexpected_expense": false
+    },
+    "id": "78fc8b4d-6c02-45c8-9a76-6573781f53b6",
+    "is_finalized": true,
+    "lessons": {
+      "adjust_tomorrow": "Tomorrow is a 12 hour shift. Just make it through. ",
+      "did_not_work": "I was out of codex credits.",
+      "worked": "I got to start assembling the computer. It felt like a win. "
+    },
+    "lifetime_rank": "Legend",
+    "lifetime_score": 100,
+    "mission_score": 88,
+    "notes": null,
+    "nutrition": {
+      "ate_out_today": false,
+      "estimated_food_spend": 3.99,
+      "meals_completed": 2,
+      "meals_planned_today": 2,
+      "notes": null
+    },
+    "objectives": [
+      {
+        "blocker": "",
+        "completed": true,
+        "id": "3d228f21-2f4b-4009-a4ae-d370983c282d",
+        "notes": "Auto-updated from squat top set: 170.0 x 5.",
+        "title": "Squat 225"
+      }
+    ],
+    "overall_status": "ok",
+    "summary": "Evening debrief, John. Today was complete. Daily score 88. Weekly score 86. Lifetime rank Legend. squat was scheduled today. You completed 1 of 1 goal impacts today. Workout logged: squat. That session moved Squat 225 moved today: Completed. Stayed under control on spending. Planned standard: 1 Date weekly is planned for today. Chronicles logged today. Archive total is 3 documented days, current streak 3. Next protocol is overhead press on Sunday. Tomorrow looks like a rest day. Main lesson: Keep rest day simple and stay on plan. Top priority tomorrow is Prepare for overhead press.",
+    "tomorrow": {
+      "calendar": [
+        "Scheduled To Work"
+      ],
+      "meal_prep": "You have 1 events tomorrow. Scheduled To Work from 6:00 AM to 6:00 PM at Northrop - 1001 Shenandoah Village.",
+      "priorities": [
+        "Prepare for overhead press"
+      ],
+      "reminder": "Next protocol: overhead_press",
+      "shopping_items": [],
+      "top_priorities": [
+        "Prepare for overhead press"
+      ],
+      "workout": {
+        "label": "overhead press",
+        "lift": "overhead_press",
+        "weekday": "Sunday"
+      }
+    },
+    "training": {
+      "energy_level": 3,
+      "lift_completed": "squat",
+      "pain_notes": "none",
+      "top_set_reps": 5,
+      "top_set_weight": 170.0,
+      "training_notes": "The 170lbs felt so easy. I may consider going up even more weight. I think the pause sets have been helping a lot. ",
+      "workout_completed": true
+    },
+    "updated_at": "2026-07-03T21:32:22.441383+00:00",
+    "user_id": "john",
+    "victory": {
+      "category": "Personal",
+      "win": "I got the Chloe computer put together with all the parts I had on hand. I cleared off some desk space for it. "
+    },
+    "weekly_score": 86
   }
 ]

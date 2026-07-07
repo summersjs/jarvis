@@ -1440,12 +1440,44 @@ function TaskRow({
 }
 
 function ImportedGoalTaskSection({ tasks }: { tasks: ImportedGoalTask[] }) {
-  if (!tasks.length) return null;
-  const groups = tasks.reduce<Record<string, ImportedGoalTask[]>>((acc, task) => {
+  const groups = useMemo(() => tasks.reduce<Record<string, ImportedGoalTask[]>>((acc, task) => {
     acc[task.section] ||= [];
     acc[task.section].push(task);
     return acc;
-  }, {});
+  }, {}), [tasks]);
+  const groupEntries = useMemo(() => Object.entries(groups), [groups]);
+  const groupNames = useMemo(() => groupEntries.map(([group]) => group), [groupEntries]);
+  const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set(groupEntries.map(([group]) => group)));
+
+  useEffect(() => {
+    setOpenGroups((prev) => {
+      const validNames = new Set(groupNames);
+      const next = new Set([...prev].filter((group) => validNames.has(group)));
+      if (prev.size === 0) {
+        groupNames.forEach((group) => next.add(group));
+      }
+      return next;
+    });
+  }, [groupNames]);
+
+  if (!tasks.length) return null;
+
+  function toggleGroup(group: string) {
+    setOpenGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(group)) {
+        next.delete(group);
+      } else {
+        next.add(group);
+      }
+      return next;
+    });
+  }
+
+  function setAllGroups(open: boolean) {
+    setOpenGroups(open ? new Set(groupNames) : new Set());
+  }
+
   return (
     <section className="imported-goal-section">
       <div className="task-command">
@@ -1454,24 +1486,38 @@ function ImportedGoalTaskSection({ tasks }: { tasks: ImportedGoalTask[] }) {
           <h2>Read-only milestones feeding overall progress.</h2>
           <span>These rows come from linked goals. Update the source goal to change them.</span>
         </div>
-        <strong>{tasks.filter((task) => task.complete).length} / {tasks.length}</strong>
-      </div>
-      {Object.entries(groups).map(([group, groupTasks]) => (
-        <div className="workspace-list" key={group}>
-          <h3>{group}</h3>
-          {groupTasks.map((task) => (
-            <article key={task.id} className={`task-row imported ${task.complete ? "done" : ""}`}>
-              <span className="task-check read-only">{task.complete ? "✓" : ""}</span>
-              <div>
-                <b>{task.title}</b>
-                <span>{task.goalTitle} · {task.status}{task.targetDate ? ` · due ${task.targetDate}` : ""}{task.cost ? ` · $${task.cost}` : ""}</span>
-                {task.notes && <small>{task.notes}</small>}
-              </div>
-              <Link className="workspace-secondary" href={`/goals?focus=${task.goalId}`}>Open Goal</Link>
-            </article>
-          ))}
+        <div className="imported-goal-controls">
+          <strong>{tasks.filter((task) => task.complete).length} / {tasks.length}</strong>
+          <button type="button" onClick={() => setAllGroups(true)}>Expand All</button>
+          <button type="button" onClick={() => setAllGroups(false)}>Collapse All</button>
         </div>
-      ))}
+      </div>
+      {groupEntries.map(([group, groupTasks]) => {
+        const isOpen = openGroups.has(group);
+        const done = groupTasks.filter((task) => task.complete).length;
+        return (
+          <div className={`workspace-list imported-goal-list ${isOpen ? "open" : "collapsed"}`} key={group}>
+            <button type="button" className="imported-goal-header" onClick={() => toggleGroup(group)} aria-expanded={isOpen}>
+              <span>
+                <b>{group}</b>
+                <em>{done} / {groupTasks.length} complete</em>
+              </span>
+              <strong>{isOpen ? "Collapse" : "Expand"}</strong>
+            </button>
+            {isOpen && groupTasks.map((task) => (
+              <article key={task.id} className={`task-row imported ${task.complete ? "done" : ""}`}>
+                <span className="task-check read-only">{task.complete ? "✓" : ""}</span>
+                <div>
+                  <b>{task.title}</b>
+                  <span>{task.goalTitle} · {task.status}{task.targetDate ? ` · due ${task.targetDate}` : ""}{task.cost ? ` · $${task.cost}` : ""}</span>
+                  {task.notes && <small>{task.notes}</small>}
+                </div>
+                <Link className="workspace-secondary" href={`/goals?focus=${task.goalId}`}>Open Goal</Link>
+              </article>
+            ))}
+          </div>
+        );
+      })}
     </section>
   );
 }
@@ -3278,6 +3324,74 @@ function WorkspaceStyles() {
     .imported-goal-section {
       display: grid;
       gap: 12px;
+    }
+    .imported-goal-controls {
+      align-items: center;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+    .imported-goal-controls button,
+    .imported-goal-header {
+      border: 1px solid rgba(80,176,255,.26);
+      background:
+        linear-gradient(135deg, rgba(80,176,255,.12), rgba(212,173,101,.08)),
+        rgba(0,0,0,.28);
+      color: #dceeff;
+      cursor: pointer;
+      transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease, background .18s ease;
+    }
+    .imported-goal-controls button {
+      border-radius: 999px;
+      font-size: .68rem;
+      font-weight: 900;
+      letter-spacing: .1em;
+      padding: 7px 10px;
+      text-transform: uppercase;
+    }
+    .imported-goal-controls button:hover,
+    .imported-goal-header:hover {
+      border-color: rgba(212,173,101,.56);
+      box-shadow: 0 0 22px rgba(80,176,255,.16), 0 0 18px rgba(212,173,101,.1);
+      transform: translateY(-1px);
+    }
+    .imported-goal-list {
+      border: 1px solid rgba(80,176,255,.14);
+      border-radius: 12px;
+      padding: 8px;
+      background: rgba(0,0,0,.16);
+    }
+    .imported-goal-header {
+      align-items: center;
+      border-radius: 10px;
+      display: flex;
+      justify-content: space-between;
+      padding: 10px 12px;
+      text-align: left;
+      width: 100%;
+    }
+    .imported-goal-header span {
+      display: grid;
+      gap: 2px;
+    }
+    .imported-goal-header b {
+      color: #72c6ff;
+      font-size: .72rem;
+      font-weight: 900;
+      letter-spacing: .15em;
+      text-transform: uppercase;
+    }
+    .imported-goal-header em {
+      color: rgba(234,223,199,.64);
+      font-size: .74rem;
+      font-style: normal;
+    }
+    .imported-goal-header strong {
+      color: #d4ad65;
+      font-size: .68rem;
+      letter-spacing: .12em;
+      text-transform: uppercase;
     }
     .imported-goal-section .workspace-list h3 {
       color: #72c6ff;

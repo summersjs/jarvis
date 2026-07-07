@@ -116,6 +116,7 @@ def update_goal(goal_id: str, payload: GoalUpdate):
     if not response.data:
         return None
 
+    maybe_auto_archive_completed_goal(goal_id)
     return get_goal(goal_id)
 
 
@@ -223,6 +224,7 @@ def create_goal_log(goal_id: str, payload: GoalLogCreate):
             update_fields["status"] = "complete"
         supabase.table("goals").update(update_fields).eq("id", goal_id).execute()
 
+    maybe_auto_archive_completed_goal(goal_id)
     return {
         "log": created_log,
         "calendar": created_log.get("metadata", {}),
@@ -468,8 +470,41 @@ def update_goal_milestone(milestone_id: str, payload: GoalMilestoneUpdate):
                 "notes": milestone.get("notes"),
             },
         }).execute()
+        maybe_auto_archive_completed_goal(milestone["goal_id"])
 
     return milestone
+
+
+def maybe_auto_archive_completed_goal(goal_id: str):
+    goal = get_goal(goal_id)
+    if not goal or not goal.get("is_active", True):
+        return
+
+    mission_type = normalize_goal_mission_type(goal)
+    if mission_type == "standard":
+        return
+
+    should_archive = False
+    if mission_type == "project":
+        project = goal.get("project") or {}
+        total = int(project.get("total_count") or 0)
+        completed = int(project.get("completed_count") or 0)
+        should_archive = total > 0 and completed >= total
+    else:
+        frequency = (goal.get("frequency") or "").lower()
+        if frequency in PERIODIC_FREQUENCIES:
+            return
+        should_archive = bool((goal.get("progress") or {}).get("is_complete"))
+
+    if not should_archive:
+        return
+
+    supabase.table("goals").update({
+        "status": "archived",
+        "is_active": False,
+        "planned_date": None,
+        "planned_time": None,
+    }).eq("id", goal_id).execute()
 
 
 def delete_goal_milestone(milestone_id: str):

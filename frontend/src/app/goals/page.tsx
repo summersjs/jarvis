@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 const CONFIGURED_API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -196,10 +196,12 @@ function GoalsPageInner() {
   const [milestoneDrawer, setMilestoneDrawer] = useState<MilestoneDrawerState | null>(null);
   const [expandedGoalIds, setExpandedGoalIds] = useState<Set<string>>(new Set());
   const [goalExpansionInitialized, setGoalExpansionInitialized] = useState(false);
+  const [goalView, setGoalView] = useState<"active" | "archived">("active");
+  const searchParams = useSearchParams();
 
   async function loadGoals() {
     try {
-      const res = await fetch(apiUrl("/goals?user_id=john"), {
+      const res = await fetch(apiUrl("/goals?user_id=john&active_only=false"), {
         headers: {
           "x-api-key": API_KEY,
         },
@@ -213,6 +215,11 @@ function GoalsPageInner() {
       setError(err instanceof Error ? err.message : "Failed to load goals.");
     }
   }
+
+  const visibleGoals = useMemo(() => goals.filter((goal) => {
+    const archived = !goal.is_active || (goal.status || "").toLowerCase() === "archived";
+    return goalView === "archived" ? archived : !archived;
+  }), [goals, goalView]);
 
   async function createGoal() {
     setError("");
@@ -587,13 +594,13 @@ function GoalsPageInner() {
   }, []);
 
   useEffect(() => {
-    if (goals.length === 0) return;
+    if (visibleGoals.length === 0) return;
 
     setExpandedGoalIds((prev) => {
-      const validGoalIds = new Set(goals.map((goal) => goal.id));
+      const validGoalIds = new Set(visibleGoals.map((goal) => goal.id));
       const next = new Set([...prev].filter((goalId) => validGoalIds.has(goalId)));
       if (!goalExpansionInitialized) {
-        next.add(goals[0].id);
+        next.add(visibleGoals[0].id);
       }
       return next;
     });
@@ -601,7 +608,17 @@ function GoalsPageInner() {
     if (!goalExpansionInitialized) {
       setGoalExpansionInitialized(true);
     }
-  }, [goals, goalExpansionInitialized]);
+  }, [visibleGoals, goalExpansionInitialized]);
+
+  useEffect(() => {
+    const focus = searchParams.get("focus");
+    if (!focus || goals.length === 0) return;
+    const focused = goals.find((goal) => goal.id === focus);
+    if (focused && (!focused.is_active || (focused.status || "").toLowerCase() === "archived")) {
+      setGoalView("archived");
+      setGoalExpansionInitialized(false);
+    }
+  }, [goals, searchParams]);
 
   function toggleGoalExpanded(goalId: string) {
     setExpandedGoalIds((prev) => {
@@ -644,6 +661,37 @@ function GoalsPageInner() {
             </Link>
           </nav>
         </header>
+
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-green-500/25 bg-zinc-950/80 p-3">
+          <div>
+            <p className="text-xs uppercase tracking-[0.22em] text-green-500/70">Goal Archive</p>
+            <span className="text-sm text-green-300/70">
+              Active goals stay operational. Archived goals remain available for linked Forge progress.
+            </span>
+          </div>
+          <div className="flex rounded-xl border border-green-500/30 bg-black/60 p-1">
+            <button
+              type="button"
+              onClick={() => {
+                setGoalView("active");
+                setGoalExpansionInitialized(false);
+              }}
+              className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${goalView === "active" ? "bg-green-500/20 text-green-200 shadow-[0_0_18px_rgba(34,197,94,.18)]" : "text-green-500/70 hover:bg-green-500/10 hover:text-green-200"}`}
+            >
+              Active ({goals.filter((goal) => goal.is_active && (goal.status || "").toLowerCase() !== "archived").length})
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setGoalView("archived");
+                setGoalExpansionInitialized(false);
+              }}
+              className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${goalView === "archived" ? "bg-green-500/20 text-green-200 shadow-[0_0_18px_rgba(34,197,94,.18)]" : "text-green-500/70 hover:bg-green-500/10 hover:text-green-200"}`}
+            >
+              Archived ({goals.filter((goal) => !goal.is_active || (goal.status || "").toLowerCase() === "archived").length})
+            </button>
+          </div>
+        </div>
 
         {error && (
           <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-red-300">
@@ -862,13 +910,13 @@ function GoalsPageInner() {
           </section>
 
           <section className="space-y-4">
-            {goals.length === 0 && (
+            {visibleGoals.length === 0 && (
               <div className="rounded-2xl border border-green-500/30 bg-zinc-950 p-6">
-                No active goals yet.
+                {goalView === "archived" ? "No archived goals yet." : "No active goals yet."}
               </div>
             )}
 
-            {goals.map((goal) => (
+            {visibleGoals.map((goal) => (
               <GoalCard
                 key={goal.id}
                 goal={goal}
@@ -902,7 +950,7 @@ function GoalsPageInner() {
         </div>
       </div>
 
-      <GoalsFocusTracker goals={goals} onFocusGoalId={setFocusedGoalId} />
+      <GoalsFocusTracker goals={visibleGoals} onFocusGoalId={setFocusedGoalId} />
 
       {historyGoal && (
         <GoalHistoryModal goal={historyGoal} onClose={() => setHistoryGoal(null)} />

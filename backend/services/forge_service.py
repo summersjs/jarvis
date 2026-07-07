@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from backend.core.config import LOCAL_TZ
 from backend.db.supabase_client import supabase
@@ -75,12 +75,22 @@ def build_forge_dashboard(user_id: str = "john") -> dict:
         by_category[project.get("category")].append(project)
 
     category_counts = {category: len(by_category[category]) for category in FORGE_CATEGORIES}
+    now = datetime.now(LOCAL_TZ)
+    building_cutoff = now - timedelta(days=14)
+    recent_cutoff = now - timedelta(days=7)
+    inactive_statuses = {"Incubating", "Archived", "Completed"}
+    building_projects = [
+        project for project in projects
+        if project.get("status") not in {"Archived", "Completed"}
+        and get_project_activity_at(project) >= building_cutoff
+    ]
     recently_updated = []
     for category in FORGE_CATEGORIES:
         category_projects = sorted(
             [
                 project for project in by_category[category]
-                if project.get("status") not in {"Incubating", "Archived", "Completed"}
+                if project.get("status") not in inactive_statuses
+                and get_project_activity_at(project) >= recent_cutoff
             ],
             key=lambda item: item.get("updated_at") or item.get("created_at") or "",
             reverse=True,
@@ -108,12 +118,29 @@ def build_forge_dashboard(user_id: str = "john") -> dict:
         "incubating": incubating,
         "stats": {
             "active_projects": len([project for project in projects if project.get("status") not in {"Archived", "Completed"}]),
-            "building": len([project for project in projects if project.get("status") == "Building"]),
+            "building": len(building_projects),
             "incubating": len([project for project in projects if project.get("status") == "Incubating"]),
+            "completed": len([project for project in projects if project.get("status") == "Completed"]),
             "archived": len([project for project in projects if project.get("status") == "Archived"]),
             "recently_updated": len(recently_updated[:6]),
         },
     }
+
+
+def get_project_activity_at(project: dict) -> datetime:
+    value = project.get("updated_at") or project.get("created_at")
+    if not value:
+        return datetime.min.replace(tzinfo=LOCAL_TZ)
+    try:
+        if isinstance(value, datetime):
+            parsed = value
+        else:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=LOCAL_TZ)
+        return parsed.astimezone(LOCAL_TZ)
+    except Exception:
+        return datetime.min.replace(tzinfo=LOCAL_TZ)
 
 
 def list_forge_projects(user_id: str = "john") -> list[dict]:

@@ -15,6 +15,7 @@ type ForgeProject = {
   summary?: string | null;
   progress_percent?: number | null;
   next_milestone?: string | null;
+  created_at?: string | null;
   updated_at?: string | null;
 };
 
@@ -49,14 +50,22 @@ function ForgeProjectListInner() {
 
   const filtered = useMemo(() => {
     const activeStatuses = new Set(["Active", "Building", "Experiment"]);
+    const inactiveStatuses = new Set(["Incubating", "Archived", "Completed"]);
+    const buildingCutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
+    const recentCutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
     if (category) {
       return projects.filter((project) => project.category.toLowerCase() === category.toLowerCase());
     }
     if (filter === "active") return projects.filter((project) => activeStatuses.has(project.status));
-    if (filter === "building") return projects.filter((project) => project.status === "Building");
+    if (filter === "building") {
+      return projects.filter((project) => !["Archived", "Completed"].includes(project.status) && getProjectActivityTime(project) >= buildingCutoff);
+    }
     if (filter === "incubating") return projects.filter((project) => project.status === "Incubating");
     if (filter === "archived") return projects.filter((project) => project.status === "Archived");
-    if (filter === "recent") return projects.filter((project) => !["Incubating", "Archived", "Completed"].includes(project.status));
+    if (filter === "completed") return projects.filter((project) => project.status === "Completed");
+    if (filter === "recent") {
+      return projects.filter((project) => !inactiveStatuses.has(project.status) && getProjectActivityTime(project) >= recentCutoff);
+    }
     return projects;
   }, [projects, filter, category]);
 
@@ -176,5 +185,14 @@ function ForgeProjectListInner() {
 }
 
 function formatFilter(filter: string) {
-  return filter === "recent" ? "Recently Updated" : `${filter.charAt(0).toUpperCase()}${filter.slice(1)} Projects`;
+  if (filter === "recent") return "Recently Updated";
+  if (filter === "building") return "Building - Last 14 Days";
+  if (filter === "completed") return "Completed Projects";
+  return `${filter.charAt(0).toUpperCase()}${filter.slice(1)} Projects`;
+}
+
+function getProjectActivityTime(project: ForgeProject) {
+  const value = project.updated_at || project.created_at || "";
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
 }

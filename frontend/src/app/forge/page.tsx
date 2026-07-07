@@ -25,6 +25,7 @@ import {
   ScrollText,
   Search,
   Sparkles,
+  Trophy,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -140,6 +141,7 @@ type ForgeDashboard = {
     active_projects: number;
     building: number;
     incubating: number;
+    completed: number;
     archived: number;
     recently_updated: number;
   };
@@ -231,7 +233,7 @@ const emptyDashboard: ForgeDashboard = {
   category_counts: { Games: 0, Jarvis: 0, Business: 0, Hardware: 0, Writing: 0, Life: 0 },
   recently_updated: [],
   incubating: [],
-  stats: { active_projects: 0, building: 0, incubating: 0, archived: 0, recently_updated: 0 },
+  stats: { active_projects: 0, building: 0, incubating: 0, completed: 0, archived: 0, recently_updated: 0 },
 };
 
 const emptyForm: FormState = {
@@ -517,10 +519,10 @@ function ForgeHero({ stats }: { stats: ForgeDashboard["stats"] }) {
         <Image src="/images/Forge/new_forge_plaque.png" alt="" fill sizes="280px" className="forge-plaque-image" />
       </div>
       <div className="forge-stat-strip">
-        <Stat label="Active Projects" value={stats.active_projects} Icon={FolderKanban} href="/forge/projects?filter=active" />
+        <Stat label="Active" value={stats.active_projects} Icon={FolderKanban} href="/forge/projects?filter=active" />
         <Stat label="Building" value={stats.building} Icon={Hammer} tone="orange" href="/forge/projects?filter=building" />
         <Stat label="Incubating" value={stats.incubating} Icon={Lightbulb} tone="green" href="/forge/projects?filter=incubating" />
-        <Stat label="Archived" value={stats.archived} Icon={Archive} tone="muted" href="/forge/projects?filter=archived" />
+        <Stat label="Completed" value={stats.completed ?? 0} Icon={Trophy} tone="completed" href="/forge/projects?filter=completed" />
         <Stat label="Recently Updated" value={stats.recently_updated} Icon={Clock3} tone="blue" href="/forge/projects?filter=recent" />
       </div>
     </header>
@@ -1599,16 +1601,17 @@ function ForgeStyles() {
       .forge-stat {
         border: 1px solid rgba(212, 173, 101, 0.2);
         background: rgba(5, 7, 6, 0.7);
-        min-height: 70px;
-        padding: 10px 12px;
+        min-height: 58px;
+        padding: 8px 10px;
+        text-align: center;
       }
 
       .forge-stat span {
         color: rgba(234, 223, 199, 0.58);
         display: block;
-        font-size: 0.64rem;
+        font-size: 0.56rem;
         font-weight: 700;
-        letter-spacing: 0.14em;
+        letter-spacing: 0.11em;
         text-transform: uppercase;
       }
 
@@ -1616,22 +1619,28 @@ function ForgeStyles() {
         align-items: center;
         color: var(--forge-green);
         display: flex;
-        gap: 8px;
-        margin-top: 8px;
+        gap: 6px;
+        justify-content: center;
+        margin-top: 6px;
       }
 
       .forge-stat svg {
-        height: 20px;
-        width: 20px;
+        height: 17px;
+        width: 17px;
       }
 
       .forge-stat strong {
-        font-size: 1.55rem;
+        font-size: 1.32rem;
+        line-height: 1;
       }
 
       .forge-stat.orange div { color: #ff8a34; }
       .forge-stat.blue div { color: var(--forge-blue); }
       .forge-stat.muted div { color: #a99d86; }
+      .forge-stat.completed div {
+        color: #ffd87a;
+        filter: drop-shadow(0 0 7px rgba(255, 216, 122, .24));
+      }
 
       .forge-alert {
         border: 1px solid rgba(212, 173, 101, 0.34);

@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends
 from backend.core.security import verify_api_key
 from backend.db.supabase_client import supabase
-from backend.integrations.google_calendar import CREDS_PATH, TOKEN_PATH
+from backend.integrations.google_calendar import CREDS_PATH, TOKEN_PATH, refresh_calendar_auth
 
 router = APIRouter()
 STARTED_AT = datetime.now(timezone.utc)
@@ -64,7 +64,8 @@ def _calendar_credentials_check():
         raise RuntimeError("credentials.json missing")
     if not TOKEN_PATH.exists():
         raise RuntimeError("token.json missing")
-    return "Google Calendar credentials and token files present"
+    auth = refresh_calendar_auth()
+    return f"Google Calendar auth verified · {auth.get('calendar_summary', 'Primary calendar')}"
 
 
 @router.get("/status", dependencies=[Depends(verify_api_key)])

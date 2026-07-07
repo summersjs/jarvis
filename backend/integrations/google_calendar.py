@@ -58,6 +58,38 @@ def get_calendar_service():
     return build("calendar", "v3", credentials=creds)
 
 
+def refresh_calendar_auth() -> dict:
+    if not CREDS_PATH.exists():
+        raise CalendarAuthRequired("Google Calendar credentials.json is missing.")
+    if not TOKEN_PATH.exists():
+        raise CalendarAuthRequired("Google Calendar token.json is missing. Reconnect Calendar from a local shell.")
+
+    creds = Credentials.from_authorized_user_file(str(TOKEN_PATH), SCOPES)
+    if not creds.has_scopes(SCOPES):
+        raise CalendarAuthRequired("Google Calendar token does not include calendar scope. Reconnect Calendar from a local shell.")
+
+    refreshed = False
+    if creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+            TOKEN_PATH.write_text(creds.to_json())
+            refreshed = True
+        except RefreshError as exc:
+            raise CalendarAuthRequired(f"Google Calendar token refresh failed: {exc}") from exc
+
+    service = build("calendar", "v3", credentials=creds)
+    profile = service.calendarList().get(calendarId="primary").execute()
+    return {
+        "credentials_file": str(CREDS_PATH),
+        "token_file": str(TOKEN_PATH),
+        "token_valid": creds.valid,
+        "token_expired": creds.expired,
+        "token_refreshed": refreshed,
+        "calendar_id": profile.get("id", "primary"),
+        "calendar_summary": profile.get("summary", "Primary calendar"),
+    }
+
+
 def _event_body(
     summary: str,
     date_str: str,

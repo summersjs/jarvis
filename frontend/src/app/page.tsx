@@ -380,6 +380,8 @@ export default function CommandCenterPage() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [scoreDelta, setScoreDelta] = useState<number | null>(null);
+  const [isCalendarSyncing, setIsCalendarSyncing] = useState(false);
+  const [calendarSyncMessage, setCalendarSyncMessage] = useState("");
 
   async function loadDashboard() {
     setError("");
@@ -443,6 +445,43 @@ export default function CommandCenterPage() {
       setStatus(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not reach Jarvis backend.");
+    }
+  }
+
+  async function resyncCalendar() {
+    setError("");
+    setCalendarSyncMessage("");
+    setIsCalendarSyncing(true);
+
+    try {
+      const res = await fetch(`${API_BASE}/calendar/resync`, {
+        method: "POST",
+        headers: {
+          "x-api-key": API_KEY,
+        },
+      });
+
+      if (!res.ok) {
+        throw new Error(await parseApiError(res));
+      }
+
+      const data = await res.json();
+      if (data.status === "ok") {
+        setCalendarSyncMessage(`Calendar synced · ${data.auth?.calendar_summary || "Primary calendar"}`);
+        await loadDashboard();
+        if (status) {
+          const statusRes = await fetch(`${API_BASE}/status`, { headers: { "x-api-key": API_KEY } });
+          if (statusRes.ok) {
+            setStatus(await statusRes.json());
+          }
+        }
+      } else {
+        setCalendarSyncMessage(data.message || "Calendar needs re-authentication.");
+      }
+    } catch (err) {
+      setCalendarSyncMessage(err instanceof Error ? err.message : "Calendar resync failed.");
+    } finally {
+      setIsCalendarSyncing(false);
     }
   }
 
@@ -710,7 +749,7 @@ export default function CommandCenterPage() {
             </section>
 
             <section className="grid gap-6 lg:grid-cols-3">
-              <CalendarPanel dashboard={dashboard} />
+              <CalendarPanel dashboard={dashboard} onResync={resyncCalendar} isSyncing={isCalendarSyncing} syncMessage={calendarSyncMessage} />
               <MealPlanPanel meals={dashboard.meals} />
               <ShoppingPanel shopping={dashboard.shopping} />
             </section>
@@ -726,18 +765,41 @@ function HudPanel({
   Icon,
   children,
   className = "",
+  iconLabel,
+  onIconClick,
+  iconBusy = false,
 }: {
   title: string;
   Icon: LucideIcon;
   children: React.ReactNode;
   className?: string;
+  iconLabel?: string;
+  onIconClick?: () => void;
+  iconBusy?: boolean;
 }) {
+  const icon = (
+    <Icon className={`h-5 w-5 ${iconBusy ? "animate-spin" : ""}`} />
+  );
+
   return (
     <section className={`hud-panel ${className}`}>
       <div className="mb-5 flex items-center gap-3">
-        <div className="hud-panel-icon">
-          <Icon className="h-5 w-5" />
-        </div>
+        {onIconClick ? (
+          <button
+            type="button"
+            className="hud-panel-icon hud-panel-icon-button"
+            onClick={onIconClick}
+            disabled={iconBusy}
+            aria-label={iconLabel || title}
+            title={iconLabel || title}
+          >
+            {icon}
+          </button>
+        ) : (
+          <div className="hud-panel-icon">
+            {icon}
+          </div>
+        )}
         <h2 className="hud-panel-title">{title}</h2>
       </div>
       {children}
@@ -1092,10 +1154,31 @@ function BriefingBlock({ label, lines }: { label: string; lines: string[] }) {
   );
 }
 
-function CalendarPanel({ dashboard }: { dashboard: DashboardResponse }) {
+function CalendarPanel({
+  dashboard,
+  onResync,
+  isSyncing,
+  syncMessage,
+}: {
+  dashboard: DashboardResponse;
+  onResync: () => void;
+  isSyncing: boolean;
+  syncMessage: string;
+}) {
   return (
-    <HudPanel title="Calendar / Work" Icon={CalendarDays}>
+    <HudPanel
+      title="Calendar / Work"
+      Icon={CalendarDays}
+      onIconClick={onResync}
+      iconBusy={isSyncing}
+      iconLabel="Re-sync Google Calendar"
+    >
       <div className="space-y-5">
+        {syncMessage && (
+          <p className={`calendar-sync-message ${syncMessage.toLowerCase().includes("failed") || syncMessage.toLowerCase().includes("auth") ? "calendar-sync-warning" : ""}`}>
+            {syncMessage}
+          </p>
+        )}
         <CalendarDay label="Today" item={dashboard.calendar.today} />
         <CalendarDay label="Tomorrow" item={dashboard.calendar.tomorrow} />
       </div>

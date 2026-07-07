@@ -10,6 +10,8 @@ from backend.schemas.forge import (
     ForgeNoteUpdate,
     ForgeProjectCreate,
     ForgeProjectUpdate,
+    ForgeSessionCreate,
+    ForgeSessionUpdate,
     ForgeSparkCreate,
     ForgeSparkUpdate,
     ForgeTaskCreate,
@@ -21,11 +23,13 @@ from backend.services.forge_service import (
     create_forge_ledger_entry,
     create_forge_note,
     create_forge_project,
+    create_forge_session,
     create_forge_spark,
     delete_forge_file,
     delete_forge_ledger_entry,
     delete_forge_note,
     delete_forge_project,
+    delete_forge_session,
     delete_forge_spark,
     delete_forge_task,
     create_forge_task,
@@ -33,6 +37,7 @@ from backend.services.forge_service import (
     update_forge_ledger_entry,
     update_forge_note,
     update_forge_project,
+    update_forge_session,
     update_forge_spark,
     update_forge_task,
 )
@@ -155,6 +160,27 @@ def update_ledger_entry(entry_id: str, payload: ForgeLedgerEntryUpdate):
 @router.delete("/ledger-entries/{entry_id}")
 def delete_ledger_entry(entry_id: str):
     return {"status": "ok", "deleted": delete_forge_ledger_entry(entry_id)}
+
+
+@router.post("/sessions")
+def create_session(payload: ForgeSessionCreate):
+    try:
+        return {"status": "ok", "session": create_forge_session(payload)}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.patch("/sessions/{session_id}")
+def update_session(session_id: str, payload: ForgeSessionUpdate):
+    session = update_forge_session(session_id, payload)
+    if not session:
+        raise HTTPException(status_code=404, detail="Forge session not found.")
+    return {"status": "ok", "session": session}
+
+
+@router.delete("/sessions/{session_id}")
+def delete_session(session_id: str):
+    return {"status": "ok", "deleted": delete_forge_session(session_id)}
 
 
 @router.post("/tasks")

@@ -173,3 +173,39 @@ class ForgeLedgerEntryUpdate(BaseModel):
     resolution_text: Optional[str] = None
     resolved_into_entry_id: Optional[str] = None
     resolved_at: Optional[str] = None
+
+
+class ForgeSessionCreate(BaseModel):
+    user_id: str = "john"
+    project_id: str
+    task_id: Optional[str] = None
+    linked_goal_id: Optional[str] = None
+    session_type: str = "Continue Current Mission"
+    title: str
+    scratchpad: Optional[str] = None
+    decisions: Optional[str] = None
+    follow_up_task: Optional[str] = None
+    convert_scratchpad_to_note: bool = False
+    mark_task_complete: bool = False
+    count_toward_goal: bool = False
+    status: str = "completed"
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ForgeSessionUpdate(BaseModel):
+    task_id: Optional[str] = None
+    linked_goal_id: Optional[str] = None
+    session_type: Optional[str] = None
+    title: Optional[str] = None
+    scratchpad: Optional[str] = None
+    decisions: Optional[str] = None
+    follow_up_task: Optional[str] = None
+    convert_scratchpad_to_note: Optional[bool] = None
+    mark_task_complete: Optional[bool] = None
+    count_toward_goal: Optional[bool] = None
+    status: Optional[str] = None
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    metadata: Optional[dict[str, Any]] = None

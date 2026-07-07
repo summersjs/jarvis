@@ -14,6 +14,8 @@ from backend.schemas.forge import (
     ForgeNoteUpdate,
     ForgeProjectCreate,
     ForgeProjectUpdate,
+    ForgeSessionCreate,
+    ForgeSessionUpdate,
     ForgeSparkCreate,
     ForgeSparkUpdate,
     ForgeTaskCreate,
@@ -60,6 +62,7 @@ def build_forge_dashboard(user_id: str = "john") -> dict:
     notes = list_forge_notes(user_id)
     files = list_forge_files(user_id)
     tasks = list_forge_tasks(user_id)
+    sessions = list_forge_sessions(user_id)
     ledger_entries = list_forge_ledger_entries(user_id)
     goals = list_goals(user_id, active_only=False)
     apply_task_progress(projects, tasks)
@@ -96,6 +99,7 @@ def build_forge_dashboard(user_id: str = "john") -> dict:
         "notes": notes,
         "files": files,
         "tasks": tasks,
+        "sessions": sessions,
         "ledger_entries": ledger_entries,
         "goals": goals,
         "category_counts": category_counts,
@@ -353,7 +357,7 @@ def ensure_shared_goal_links(user_id: str = "john") -> None:
         )
         for project in projects_response.data or []:
             title = (project.get("title") or "").strip().lower()
-            if title not in {"chloe gf build", "jarvis life command center"}:
+            if title not in {"chloe gf build", "jarvis life command center", "secure internal ai assistant"}:
                 continue
             supabase.table("forge_project_goal_links").upsert({
                 "user_id": user_id,
@@ -575,6 +579,148 @@ def update_forge_file(file_id: str, payload: ForgeFileUpdate) -> dict | None:
 def delete_forge_file(file_id: str) -> list[dict]:
     response = supabase.table("forge_files").delete().eq("id", file_id).execute()
     return response.data or []
+
+
+def list_forge_sessions(user_id: str = "john") -> list[dict]:
+    try:
+        response = (
+            supabase.table("forge_sessions")
+            .select("*, forge_projects(id, title), forge_tasks(id, title)")
+            .eq("user_id", user_id)
+            .order("completed_at", desc=True)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        return response.data or []
+    except Exception:
+        return []
+
+
+def create_forge_session(payload: ForgeSessionCreate) -> dict:
+    data = payload.model_dump()
+    now = datetime.now(LOCAL_TZ).isoformat()
+    data["started_at"] = data.get("started_at") or now
+    if data.get("status") == "completed":
+        data["completed_at"] = data.get("completed_at") or now
+    response = supabase.table("forge_sessions").insert(data).execute()
+    if not response.data:
+        raise Exception("Failed to save Forge session.")
+    session = response.data[0]
+    finalize_forge_session(session)
+    return session
+
+
+def update_forge_session(session_id: str, payload: ForgeSessionUpdate) -> dict | None:
+    response = (
+        supabase.table("forge_sessions")
+        .update(payload.model_dump(exclude_unset=True))
+        .eq("id", session_id)
+        .execute()
+    )
+    if not response.data:
+        return None
+    session = response.data[0]
+    if session.get("status") == "completed":
+        finalize_forge_session(session)
+    return session
+
+
+def delete_forge_session(session_id: str) -> list[dict]:
+    response = supabase.table("forge_sessions").delete().eq("id", session_id).execute()
+    return response.data or []
+
+
+def finalize_forge_session(session: dict) -> None:
+    project_id = session.get("project_id")
+    user_id = session.get("user_id") or "john"
+    if not project_id:
+        return
+
+    try:
+        if session.get("convert_scratchpad_to_note") and session.get("scratchpad"):
+            title = f"Session Notes - {session.get('title') or session.get('session_type') or 'Forge Session'}"
+            existing = (
+                supabase.table("forge_notes")
+                .select("id")
+                .eq("user_id", user_id)
+                .eq("project_id", project_id)
+                .eq("title", title)
+                .limit(1)
+                .execute()
+            )
+            if not existing.data:
+                supabase.table("forge_notes").insert({
+                    "user_id": user_id,
+                    "project_id": project_id,
+                    "title": title,
+                    "body": session.get("scratchpad"),
+                    "note_type": "draft",
+                    "status": "active",
+                    "tags": ["forge-session"],
+                    "folder_path": ["Sessions"],
+                }).execute()
+
+        follow_up = (session.get("follow_up_task") or "").strip()
+        if follow_up:
+            existing_task = (
+                supabase.table("forge_tasks")
+                .select("id")
+                .eq("user_id", user_id)
+                .eq("project_id", project_id)
+                .ilike("title", follow_up)
+                .limit(1)
+                .execute()
+            )
+            if not existing_task.data:
+                supabase.table("forge_tasks").insert({
+                    "user_id": user_id,
+                    "project_id": project_id,
+                    "title": follow_up,
+                    "status": "Backlog",
+                    "milestone_group": "Follow Ups",
+                    "task_type": "task",
+                    "counts_toward_goal": True,
+                    "sort_order": 999,
+                    "metadata": {"source": "forge_session", "forge_session_id": session.get("id")},
+                }).execute()
+
+        task_id = session.get("task_id")
+        if task_id and session.get("mark_task_complete"):
+            update_forge_task(task_id, ForgeTaskUpdate(status="Done", completed_at=session.get("completed_at") or datetime.now(LOCAL_TZ).isoformat()))
+
+        linked_goal_id = session.get("linked_goal_id")
+        if linked_goal_id and session.get("count_toward_goal"):
+            goal_event = create_goal_progress_event({
+                "goal_id": linked_goal_id,
+                "amount": 1,
+                "unit": "session",
+                "note": f"Forge session completed: {session.get('title') or session.get('session_type')}",
+                "source_type": "forge_session",
+                "source_id": session.get("id"),
+                "source_project_id": project_id,
+                "counts_toward_goal": True,
+                "event_source": "confirmed",
+                "created_by": user_id,
+                "metadata": {
+                    "forge_session_type": session.get("session_type"),
+                    "forge_task_id": task_id,
+                },
+            })
+            supabase.table("goal_logs").insert({
+                "goal_id": linked_goal_id,
+                "value": 1,
+                "notes": f"Forge session completed: {session.get('title') or session.get('session_type')}",
+                "log_type": "progress",
+                "planned_for": datetime.now(LOCAL_TZ).date().isoformat(),
+                "metadata": {
+                    "forge_session_id": session.get("id"),
+                    "forge_project_id": project_id,
+                    "goal_progress_event_id": (goal_event or {}).get("id"),
+                    "source": "forge_session",
+                },
+            }).execute()
+    except Exception:
+        return
 
 
 def list_forge_tasks(user_id: str = "john") -> list[dict]:

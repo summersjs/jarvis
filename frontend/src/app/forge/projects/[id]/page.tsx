@@ -56,6 +56,7 @@ type ForgeProject = {
     category?: string | null;
     relationship_type?: string | null;
     notes?: string | null;
+    milestones?: Array<{ id: string; title: string; status: string; target_date?: string | null; cost?: number | null; notes?: string | null }>;
     project?: {
       completed_count?: number;
       total_count?: number;
@@ -103,6 +104,21 @@ type ForgeTask = {
   project_id: string;
   created_at?: string | null;
 };
+type ForgeSession = {
+  id: string;
+  project_id: string;
+  task_id?: string | null;
+  linked_goal_id?: string | null;
+  session_type: string;
+  title: string;
+  scratchpad?: string | null;
+  decisions?: string | null;
+  follow_up_task?: string | null;
+  status?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  created_at?: string | null;
+};
 type ForgeLedgerEntry = {
   id: string;
   project_id: string;
@@ -125,6 +141,19 @@ type ForgeLedgerEntry = {
   updated_at?: string | null;
   forge_notes?: { id: string; title: string } | null;
 };
+type ProjectGoalOption = { id: string; title: string };
+type ImportedGoalTask = {
+  id: string;
+  goalId: string;
+  goalTitle: string;
+  section: string;
+  title: string;
+  status: string;
+  complete: boolean;
+  targetDate?: string | null;
+  cost?: number | null;
+  notes?: string | null;
+};
 
 type EditingForgeItem =
   | { kind: "spark"; item: ForgeSpark; text: string; projectId: string; category: string; tags: string; folderPrimary: string; folderChild: string; newFolderPrimary: string; newFolderChild: string }
@@ -141,6 +170,7 @@ export default function ForgeProjectWorkspace() {
   const [notes, setNotes] = useState<ForgeNote[]>([]);
   const [files, setFiles] = useState<ForgeFile[]>([]);
   const [tasks, setTasks] = useState<ForgeTask[]>([]);
+  const [sessions, setSessions] = useState<ForgeSession[]>([]);
   const [ledgerEntries, setLedgerEntries] = useState<ForgeLedgerEntry[]>([]);
   const [tab, setTab] = useState("Overview");
   const [message, setMessage] = useState("");
@@ -156,6 +186,21 @@ export default function ForgeProjectWorkspace() {
   const [uploadForm, setUploadForm] = useState({ fileName: "", fileType: "", fileSize: "", fileUrl: "", caption: "", tags: "", useAsCover: false });
   const [previewFile, setPreviewFile] = useState<ForgeFile | null>(null);
   const [writingDraft, setWritingDraft] = useState({ title: "", body: "", noteType: "draft", folderPrimary: "", folderChild: "", tags: "" });
+  const [quickSpark, setQuickSpark] = useState("");
+  const [quickNote, setQuickNote] = useState({ title: "", body: "" });
+  const [sessionDraft, setSessionDraft] = useState({
+    open: false,
+    sessionType: "Continue Current Mission",
+    taskId: "",
+    title: "",
+    scratchpad: "",
+    decisions: "",
+    followUpTask: "",
+    convertScratchpadToNote: true,
+    markTaskComplete: false,
+    countTowardGoal: true,
+    linkedGoalId: "",
+  });
 
   const project = projects.find((item) => item.id === projectId) || null;
   const visibleSparks = sparks.filter((item) => inbox ? !item.project_id : item.project_id === projectId);
@@ -163,6 +208,8 @@ export default function ForgeProjectWorkspace() {
   const visibleFiles = files.filter((item) => inbox ? !item.project_id : item.project_id === projectId);
   const visibleImages = visibleFiles.filter(isImage);
   const visibleTasks = tasks.filter((item) => !inbox && item.project_id === projectId);
+  const visibleSessions = sessions.filter((item) => !inbox && item.project_id === projectId);
+  const importedGoalTasks = useMemo(() => project ? buildLinkedGoalTasks(project) : [], [project]);
   const visibleLedgerEntries = ledgerEntries.filter((item) => !inbox && item.project_id === projectId);
   const progress = project?.linked_goal?.project?.percent ?? project?.progress_percent ?? 0;
 
@@ -171,14 +218,14 @@ export default function ForgeProjectWorkspace() {
     Notes: visibleNotes.length,
     Files: visibleFiles.length,
     Images: visibleImages.length,
-    Activity: visibleSparks.length + visibleNotes.length + visibleFiles.length + visibleTasks.length,
+    Activity: visibleSparks.length + visibleNotes.length + visibleFiles.length + visibleTasks.length + visibleSessions.length,
     Timeline: project?.linked_goal?.milestones?.length || 0,
-    Tasks: visibleTasks.length,
+    Tasks: visibleTasks.length + importedGoalTasks.length,
     "Writing Desk": visibleNotes.length,
     "Canon Board": visibleLedgerEntries.length + visibleNotes.filter((note) => ["canon", "decision", "question", "draft", "idea"].includes(note.note_type || "")).length,
     "Shared Goals": (project?.linked_goal ? 1 : 0) + (project?.linked_goals?.length || 0),
     Research: 0,
-  }), [visibleSparks.length, visibleNotes, visibleFiles.length, visibleImages.length, visibleTasks.length, visibleLedgerEntries.length, project]);
+  }), [visibleSparks.length, visibleNotes, visibleFiles.length, visibleImages.length, visibleTasks.length, visibleSessions.length, visibleLedgerEntries.length, importedGoalTasks.length, project]);
 
   const folderOptions = useMemo(() => buildFolderOptions(visibleNotes, visibleSparks), [visibleNotes, visibleSparks]);
 
@@ -196,6 +243,7 @@ export default function ForgeProjectWorkspace() {
       setNotes(data.notes || []);
       setFiles(data.files || []);
       setTasks(data.tasks || []);
+      setSessions(data.sessions || []);
       setLedgerEntries(data.ledger_entries || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load Forge workspace.");
@@ -416,6 +464,122 @@ export default function ForgeProjectWorkspace() {
     }
   }
 
+  async function createQuickSpark() {
+    if (!project || !quickSpark.trim()) return;
+    setTaskBusy({ title: "New Spark", action: "create" });
+    setError("");
+    try {
+      const res = await fetch(`${API_BASE}/forge/sparks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        body: JSON.stringify({
+          user_id: USER_ID,
+          project_id: project.id,
+          category: project.category,
+          spark_text: quickSpark.trim(),
+          tags: [],
+          folder_path: ["Sparks"],
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Spark could not be saved.");
+      setQuickSpark("");
+      setMessage(`Spark saved to ${project.title}.`);
+      await loadForge();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Spark could not be saved.");
+    } finally {
+      setTaskBusy(null);
+    }
+  }
+
+  async function createQuickNote() {
+    if (!project || !quickNote.title.trim()) return;
+    setTaskBusy({ title: quickNote.title.trim(), action: "create" });
+    setError("");
+    try {
+      const res = await fetch(`${API_BASE}/forge/notes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        body: JSON.stringify({
+          user_id: USER_ID,
+          project_id: project.id,
+          category: project.category,
+          title: quickNote.title.trim(),
+          body: quickNote.body || null,
+          note_type: "idea",
+          status: "active",
+          tags: [],
+          folder_path: ["Notes"],
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Note could not be saved.");
+      setQuickNote({ title: "", body: "" });
+      setMessage(`Note saved to ${project.title}.`);
+      await loadForge();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Note could not be saved.");
+    } finally {
+      setTaskBusy(null);
+    }
+  }
+
+  function openForgeSession(task?: ForgeTask) {
+    if (!project) return;
+    const nextTask = task || visibleTasks.filter((item) => !isTaskComplete(item)).sort(sortTasks)[0];
+    const goalId = project.task_goal?.id || project.linked_goal?.id || project.linked_goals?.[0]?.id || "";
+    setSessionDraft({
+      open: true,
+      sessionType: nextTask ? "Work on Selected Task" : "Continue Current Mission",
+      taskId: nextTask?.id || "",
+      title: nextTask?.title || project.next_milestone || "Forge Session",
+      scratchpad: "",
+      decisions: "",
+      followUpTask: "",
+      convertScratchpadToNote: true,
+      markTaskComplete: false,
+      countTowardGoal: Boolean(goalId),
+      linkedGoalId: goalId,
+    });
+  }
+
+  async function completeForgeSession() {
+    if (!project || !sessionDraft.title.trim()) return;
+    setTaskBusy({ title: sessionDraft.title.trim(), action: "create" });
+    setError("");
+    try {
+      const res = await fetch(`${API_BASE}/forge/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        body: JSON.stringify({
+          user_id: USER_ID,
+          project_id: project.id,
+          task_id: sessionDraft.taskId || null,
+          linked_goal_id: sessionDraft.linkedGoalId || null,
+          session_type: sessionDraft.sessionType,
+          title: sessionDraft.title.trim(),
+          scratchpad: sessionDraft.scratchpad || null,
+          decisions: sessionDraft.decisions || null,
+          follow_up_task: sessionDraft.followUpTask || null,
+          convert_scratchpad_to_note: sessionDraft.convertScratchpadToNote,
+          mark_task_complete: sessionDraft.markTaskComplete,
+          count_toward_goal: sessionDraft.countTowardGoal,
+          status: "completed",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Forge session could not be saved. Run the Forge sessions SQL migration if the table is missing.");
+      setSessionDraft((prev) => ({ ...prev, open: false }));
+      setMessage(`Forge session completed: ${data.session?.title || sessionDraft.title}`);
+      await loadForge();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Forge session could not be saved.");
+    } finally {
+      setTaskBusy(null);
+    }
+  }
+
   async function uploadWorkspaceFile() {
     if (!project || !uploadForm.fileName.trim()) return;
     setError("");
@@ -616,6 +780,7 @@ export default function ForgeProjectWorkspace() {
               <b>Next: {project?.linked_goal?.project?.next_milestone?.title || project?.next_milestone || "Not assigned"}</b>
               {project?.linked_goal && <Link href={`/goals?focus=${project.linked_goal.id}`}>Open Goal</Link>}
               {project?.task_goal ? <Link href={`/goals?focus=${project.task_goal.id}`}>Open Task Goal</Link> : <button type="button" onClick={() => setShowTaskGoalForm((value) => !value)}>Add Tasks to Goals</button>}
+              <button type="button" onClick={() => openForgeSession()}>Start Forge Session</button>
               {project && <button type="button" className="workspace-delete project-delete" onClick={() => deleteItem("projects", project.id, project.title)}>Delete Project</button>}
             </div>
             {showTaskGoalForm && (
@@ -694,8 +859,18 @@ export default function ForgeProjectWorkspace() {
             onDelete={(id, label) => deleteItem("ledger-entries", id, label)}
           />
         )}
-        {tab === "Spark Log" && <SparkList sparks={visibleSparks} folderOptions={folderOptions} onEdit={openSparkDrawer} />}
-        {tab === "Notes" && <NoteList notes={visibleNotes} folderOptions={folderOptions} onEdit={openNoteDrawer} />}
+        {tab === "Spark Log" && (
+          <>
+            {!inbox && project && <QuickSparkComposer value={quickSpark} onChange={setQuickSpark} onSave={createQuickSpark} projectTitle={project.title} />}
+            <SparkList sparks={visibleSparks} folderOptions={folderOptions} onEdit={openSparkDrawer} />
+          </>
+        )}
+        {tab === "Notes" && (
+          <>
+            {!inbox && project && <QuickNoteComposer value={quickNote} onChange={setQuickNote} onSave={createQuickNote} projectTitle={project.title} />}
+            <NoteList notes={visibleNotes} folderOptions={folderOptions} onEdit={openNoteDrawer} />
+          </>
+        )}
         {tab === "Files" && (
           <>
             {!inbox && project && <WorkspaceUploadForm form={uploadForm} onChange={setUploadForm} onUpload={uploadWorkspaceFile} />}
@@ -718,18 +893,20 @@ export default function ForgeProjectWorkspace() {
         {tab === "Tasks" && (
           <TaskBoard
             tasks={visibleTasks}
+            importedTasks={importedGoalTasks}
             title={newTaskTitle}
             group={newTaskGroup}
             onTitleChange={setNewTaskTitle}
             onGroupChange={setNewTaskGroup}
             onAdd={addTask}
             onToggle={toggleTask}
+            onStartSession={openForgeSession}
             onDelete={(id, label) => deleteItem("tasks", id, label)}
             busyTaskId={taskBusy?.id || null}
           />
         )}
         {tab === "Research" && <Empty title="No research pinned yet." text="Research storage is prepared in SQL; save articles, videos, references, and sources here next." />}
-        {tab === "Activity" && <Activity sparks={visibleSparks} notes={visibleNotes} files={visibleFiles} tasks={visibleTasks} project={project} inbox={inbox} />}
+        {tab === "Activity" && <Activity sparks={visibleSparks} notes={visibleNotes} files={visibleFiles} tasks={visibleTasks} sessions={visibleSessions} project={project} inbox={inbox} />}
       </section>
       {previewImage && <ImageLightbox file={previewImage} onClose={() => setPreviewImage(null)} />}
       {previewFile && <DocumentPreview file={previewFile} onClose={() => setPreviewFile(null)} />}
@@ -745,6 +922,17 @@ export default function ForgeProjectWorkspace() {
             if (deleted) setEditingItem(null);
           })}
           onCancel={() => setEditingItem(null)}
+        />
+      )}
+      {sessionDraft.open && project && (
+        <ForgeSessionDrawer
+          draft={sessionDraft}
+          project={project}
+          tasks={visibleTasks}
+          goals={getProjectGoals(project)}
+          onChange={setSessionDraft}
+          onComplete={completeForgeSession}
+          onCancel={() => setSessionDraft((prev) => ({ ...prev, open: false }))}
         />
       )}
       <WorkspaceStyles />
@@ -1078,22 +1266,26 @@ function WritingDesk({
 
 function TaskBoard({
   tasks,
+  importedTasks,
   title,
   group,
   onTitleChange,
   onGroupChange,
   onAdd,
   onToggle,
+  onStartSession,
   onDelete,
   busyTaskId,
 }: {
   tasks: ForgeTask[];
+  importedTasks: ImportedGoalTask[];
   title: string;
   group: string;
   onTitleChange: (value: string) => void;
   onGroupChange: (value: string) => void;
   onAdd: () => void;
   onToggle: (task: ForgeTask) => void;
+  onStartSession: (task?: ForgeTask) => void;
   onDelete: (id: string, label: string) => void;
   busyTaskId: string | null;
 }) {
@@ -1104,7 +1296,7 @@ function TaskBoard({
   const groups = groupTasks(incomplete);
   const milestoneGroups = ["Milestone 1 - Foundation", "Milestone 2 - Characters", "Milestone 3 - Story", "Milestone 4 - Gameplay", "Milestone 5 - Vertical Slice", "Story", "Characters", "World Building", "Combat", "Guild System", "Items", "Legendary Weapons", "Final Fantasy Worlds", "Art", "Audio", "Development", "Milestones", "General"];
 
-  if (!tasks.length) {
+  if (!tasks.length && !importedTasks.length) {
     return (
       <div className="task-board">
         <TaskComposer title={title} group={group} groups={milestoneGroups} onTitleChange={onTitleChange} onGroupChange={onGroupChange} onAdd={onAdd} />
@@ -1140,13 +1332,14 @@ function TaskBoard({
       </div>
 
       <TaskComposer title={title} group={group} groups={milestoneGroups} onTitleChange={onTitleChange} onGroupChange={onGroupChange} onAdd={onAdd} />
+      {importedTasks.length > 0 && <ImportedGoalTaskSection tasks={importedTasks} />}
 
       <div className="task-groups">
         {orderedGroupEntries(groups).map(([groupName, groupTasksList]) => (
           <section key={groupName}>
             <h3>{groupName}</h3>
             <div className="workspace-list">
-              {groupTasksList.map((task) => <TaskRow key={task.id} task={task} onToggle={onToggle} onDelete={onDelete} busy={busyTaskId === task.id} disabled={Boolean(busyTaskId)} />)}
+              {groupTasksList.map((task) => <TaskRow key={task.id} task={task} onToggle={onToggle} onStartSession={onStartSession} onDelete={onDelete} busy={busyTaskId === task.id} disabled={Boolean(busyTaskId)} />)}
             </div>
           </section>
         ))}
@@ -1154,7 +1347,7 @@ function TaskBoard({
           <section className="completed-tasks">
             <h3>Completed</h3>
             <div className="workspace-list">
-              {complete.map((task) => <TaskRow key={task.id} task={task} onToggle={onToggle} onDelete={onDelete} busy={busyTaskId === task.id} disabled={Boolean(busyTaskId)} />)}
+              {complete.map((task) => <TaskRow key={task.id} task={task} onToggle={onToggle} onStartSession={onStartSession} onDelete={onDelete} busy={busyTaskId === task.id} disabled={Boolean(busyTaskId)} />)}
             </div>
           </section>
         )}
@@ -1179,12 +1372,14 @@ function TaskComposer({ title, group, groups, onTitleChange, onGroupChange, onAd
 function TaskRow({
   task,
   onToggle,
+  onStartSession,
   onDelete,
   busy,
   disabled,
 }: {
   task: ForgeTask;
   onToggle: (task: ForgeTask) => void;
+  onStartSession: (task?: ForgeTask) => void;
   onDelete: (id: string, label: string) => void;
   busy: boolean;
   disabled: boolean;
@@ -1205,8 +1400,46 @@ function TaskRow({
         <b>{task.title}</b>
         <span>{task.milestone_group || "General"}{task.priority ? ` · ${task.priority}` : ""}</span>
       </div>
+      <button type="button" className="workspace-secondary" onClick={() => onStartSession(task)} disabled={disabled}>Session</button>
       <button type="button" className="workspace-delete" onClick={() => onDelete(task.id, `task: ${task.title}`)} disabled={disabled}>Delete</button>
     </article>
+  );
+}
+
+function ImportedGoalTaskSection({ tasks }: { tasks: ImportedGoalTask[] }) {
+  if (!tasks.length) return null;
+  const groups = tasks.reduce<Record<string, ImportedGoalTask[]>>((acc, task) => {
+    acc[task.section] ||= [];
+    acc[task.section].push(task);
+    return acc;
+  }, {});
+  return (
+    <section className="imported-goal-section">
+      <div className="task-command">
+        <div>
+          <p>Shared / Linked Goal Imports</p>
+          <h2>Read-only milestones feeding overall progress.</h2>
+          <span>These rows come from linked goals. Update the source goal to change them.</span>
+        </div>
+        <strong>{tasks.filter((task) => task.complete).length} / {tasks.length}</strong>
+      </div>
+      {Object.entries(groups).map(([group, groupTasks]) => (
+        <div className="workspace-list" key={group}>
+          <h3>{group}</h3>
+          {groupTasks.map((task) => (
+            <article key={task.id} className={`task-row imported ${task.complete ? "done" : ""}`}>
+              <span className="task-check read-only">{task.complete ? "✓" : ""}</span>
+              <div>
+                <b>{task.title}</b>
+                <span>{task.goalTitle} · {task.status}{task.targetDate ? ` · due ${task.targetDate}` : ""}{task.cost ? ` · $${task.cost}` : ""}</span>
+                {task.notes && <small>{task.notes}</small>}
+              </div>
+              <Link className="workspace-secondary" href={`/goals?focus=${task.goalId}`}>Open Goal</Link>
+            </article>
+          ))}
+        </div>
+      ))}
+    </section>
   );
 }
 
@@ -1235,6 +1468,19 @@ function SparkList({ sparks, folderOptions, onEdit }: { sparks: ForgeSpark[]; fo
   )} />;
 }
 
+function QuickSparkComposer({ value, onChange, onSave, projectTitle }: { value: string; onChange: (value: string) => void; onSave: () => void; projectTitle: string }) {
+  return (
+    <div className="quick-forge-composer">
+      <div>
+        <p>New Spark</p>
+        <strong>Capture a raw idea for {projectTitle}.</strong>
+      </div>
+      <input value={value} onChange={(event) => onChange(event.target.value)} placeholder="What sparked?" />
+      <button type="button" onClick={onSave} disabled={!value.trim()}>Save Spark</button>
+    </div>
+  );
+}
+
 function NoteList({ notes, folderOptions, onEdit }: { notes: ForgeNote[]; folderOptions: FolderOptions; onEdit: (note: ForgeNote) => void }) {
   if (!notes.length) return <Empty title="No notes yet." text="Write down the shape of the idea." />;
   return <FolderBoard items={notes} folderOptions={folderOptions} renderItem={(note) => (
@@ -1243,6 +1489,20 @@ function NoteList({ notes, folderOptions, onEdit }: { notes: ForgeNote[]; folder
           <span>{note.note_type ? `${note.note_type} · ` : ""}{note.body || "Open note dossier"}</span>
         </button>
   )} />;
+}
+
+function QuickNoteComposer({ value, onChange, onSave, projectTitle }: { value: { title: string; body: string }; onChange: (value: { title: string; body: string }) => void; onSave: () => void; projectTitle: string }) {
+  return (
+    <div className="quick-forge-composer note-composer">
+      <div>
+        <p>New Note</p>
+        <strong>Start a project note for {projectTitle}.</strong>
+      </div>
+      <input value={value.title} onChange={(event) => onChange({ ...value, title: event.target.value })} placeholder="Note title" />
+      <textarea value={value.body} onChange={(event) => onChange({ ...value, body: event.target.value })} placeholder="Details, outline, or draft text..." rows={3} />
+      <button type="button" onClick={onSave} disabled={!value.title.trim()}>Save Note</button>
+    </div>
+  );
 }
 
 function FolderBoard<T extends { id: string; folder_path?: string[] | null }>({ items, renderItem }: { items: T[]; folderOptions: FolderOptions; renderItem: (item: T) => ReactNode }) {
@@ -1493,6 +1753,108 @@ function ForgeItemDrawer({
   );
 }
 
+function ForgeSessionDrawer({
+  draft,
+  project,
+  tasks,
+  goals,
+  onChange,
+  onComplete,
+  onCancel,
+}: {
+  draft: {
+    open: boolean;
+    sessionType: string;
+    taskId: string;
+    title: string;
+    scratchpad: string;
+    decisions: string;
+    followUpTask: string;
+    convertScratchpadToNote: boolean;
+    markTaskComplete: boolean;
+    countTowardGoal: boolean;
+    linkedGoalId: string;
+  };
+  project: ForgeProject;
+  tasks: ForgeTask[];
+  goals: ProjectGoalOption[];
+  onChange: (draft: {
+    open: boolean;
+    sessionType: string;
+    taskId: string;
+    title: string;
+    scratchpad: string;
+    decisions: string;
+    followUpTask: string;
+    convertScratchpadToNote: boolean;
+    markTaskComplete: boolean;
+    countTowardGoal: boolean;
+    linkedGoalId: string;
+  }) => void;
+  onComplete: () => void;
+  onCancel: () => void;
+}) {
+  const selectedTask = tasks.find((task) => task.id === draft.taskId);
+  return (
+    <div className="forge-drawer-backdrop" onMouseDown={onCancel}>
+      <aside className="forge-edit-drawer forge-session-drawer" onMouseDown={(event) => event.stopPropagation()}>
+        <p>Forge Work Session</p>
+        <h2>{project.title}</h2>
+        <label>
+          <span>Session Type</span>
+          <select value={draft.sessionType} onChange={(event) => onChange({ ...draft, sessionType: event.target.value })}>
+            {["Continue Current Mission", "Pick Quick Win", "Work on Selected Task", "Add Spark", "Write Note", "Upload Asset", "Review Project"].map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
+        </label>
+        <label>
+          <span>Selected Task</span>
+          <select value={draft.taskId} onChange={(event) => {
+            const task = tasks.find((item) => item.id === event.target.value);
+            onChange({ ...draft, taskId: event.target.value, title: task?.title || draft.title });
+          }}>
+            <option value="">No task selected</option>
+            {tasks.filter((task) => !isTaskComplete(task)).sort(sortTasks).map((task) => <option key={task.id} value={task.id}>{task.title}</option>)}
+          </select>
+        </label>
+        <input value={draft.title} onChange={(event) => onChange({ ...draft, title: event.target.value })} placeholder="Session title" />
+        {selectedTask && (
+          <div className="session-context">
+            <strong>{selectedTask.title}</strong>
+            <span>{selectedTask.milestone_group || "General"} · {selectedTask.priority || "normal priority"}</span>
+            {selectedTask.description && <small>{selectedTask.description}</small>}
+          </div>
+        )}
+        <textarea value={draft.scratchpad} onChange={(event) => onChange({ ...draft, scratchpad: event.target.value })} placeholder="Scratchpad: what did you do, notice, or build?" rows={8} />
+        <textarea value={draft.decisions} onChange={(event) => onChange({ ...draft, decisions: event.target.value })} placeholder="Decisions made during this session..." rows={4} />
+        <input value={draft.followUpTask} onChange={(event) => onChange({ ...draft, followUpTask: event.target.value })} placeholder="Optional follow-up task" />
+        <label>
+          <span>Goal Credit</span>
+          <select value={draft.linkedGoalId} onChange={(event) => onChange({ ...draft, linkedGoalId: event.target.value, countTowardGoal: Boolean(event.target.value) })}>
+            <option value="">Do not link to a goal</option>
+            {goals.map((goal) => <option key={goal.id} value={goal.id}>{goal.title}</option>)}
+          </select>
+        </label>
+        <label className="drawer-check">
+          <input type="checkbox" checked={draft.convertScratchpadToNote} onChange={(event) => onChange({ ...draft, convertScratchpadToNote: event.target.checked })} />
+          Save scratchpad as a session note
+        </label>
+        <label className="drawer-check">
+          <input type="checkbox" checked={draft.markTaskComplete} onChange={(event) => onChange({ ...draft, markTaskComplete: event.target.checked })} disabled={!draft.taskId} />
+          Mark selected task complete
+        </label>
+        <label className="drawer-check">
+          <input type="checkbox" checked={draft.countTowardGoal} onChange={(event) => onChange({ ...draft, countTowardGoal: event.target.checked })} disabled={!draft.linkedGoalId} />
+          Count this session toward the linked goal
+        </label>
+        <div className="drawer-actions">
+          <button type="button" onClick={onComplete}>Complete Session</button>
+          <button type="button" onClick={onCancel}>Cancel</button>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
 function FileList({ files, projects, onMove, onDelete, onPreview }: { files: ForgeFile[]; projects: ForgeProject[]; onMove: (id: string, projectId: string) => void; onDelete: (id: string, label: string) => void; onPreview: (file: ForgeFile) => void }) {
   if (!files.length) return <Empty title="No files attached yet." text="Upload screenshots, PDFs, references, sketches, or docs." />;
   return <div className="workspace-list">{files.map((file) => <article key={file.id}><b>{file.file_name}</b><span>{file.caption || file.file_type || "Forge file"}</span><button type="button" className="workspace-secondary" onClick={() => onPreview(file)}>Preview</button><MoveSelect value={file.project_id || ""} projects={projects} onChange={(value) => onMove(file.id, value)} /><DeleteButton onClick={() => onDelete(file.id, `file: ${file.file_name}`)} /></article>)}</div>;
@@ -1517,8 +1879,13 @@ function ImageGrid({ files, projects, onMove, onDelete, onPreview, onSetCover }:
   );
 }
 
-function Activity({ sparks, notes, files, tasks, project, inbox }: { sparks: ForgeSpark[]; notes: ForgeNote[]; files: ForgeFile[]; tasks: ForgeTask[]; project: ForgeProject | null; inbox: boolean }) {
+function Activity({ sparks, notes, files, tasks, sessions, project, inbox }: { sparks: ForgeSpark[]; notes: ForgeNote[]; files: ForgeFile[]; tasks: ForgeTask[]; sessions: ForgeSession[]; project: ForgeProject | null; inbox: boolean }) {
   const rows = [
+    ...sessions.map((session) => ({
+      label: "Forge session completed",
+      title: session.title,
+      at: session.completed_at || session.created_at,
+    })),
     ...sparks.map((spark) => ({
       label: "Spark added",
       title: spark.spark_text,
@@ -1570,6 +1937,43 @@ function DeleteButton({ onClick }: { onClick: () => void }) {
 
 function Empty({ title, text }: { title: string; text: string }) {
   return <div className="workspace-empty"><strong>{title}</strong><span>{text}</span></div>;
+}
+
+function getProjectGoals(project: ForgeProject): ProjectGoalOption[] {
+  const goals = [
+    ...(project.task_goal ? [{ id: project.task_goal.id, title: project.task_goal.title }] : []),
+    ...(project.linked_goal ? [{ id: project.linked_goal.id, title: project.linked_goal.title }] : []),
+    ...(project.linked_goals || []).map((goal) => ({ id: goal.id, title: goal.title })),
+  ];
+  const seen = new Set<string>();
+  return goals.filter((goal) => {
+    if (!goal.id || seen.has(goal.id)) return false;
+    seen.add(goal.id);
+    return true;
+  });
+}
+
+function buildLinkedGoalTasks(project: ForgeProject): ImportedGoalTask[] {
+  const goals = [
+    ...(project.linked_goal ? [{ ...project.linked_goal, relationship_type: "linked goal", notes: "Primary linked goal." }] : []),
+    ...(project.linked_goals || []),
+  ];
+  return goals.flatMap((goal) => (goal.milestones || []).map((milestone) => ({
+    id: `${goal.id}-${milestone.id}`,
+    goalId: goal.id,
+    goalTitle: goal.title,
+    section: `${goal.relationship_type || "Linked Goal"} / ${goal.title}`,
+    title: milestone.title,
+    status: milestone.status,
+    complete: isMilestoneComplete(milestone.status),
+    targetDate: milestone.target_date,
+    cost: milestone.cost,
+    notes: milestone.notes || goal.notes || null,
+  })));
+}
+
+function isMilestoneComplete(status?: string | null) {
+  return ["done", "complete", "completed", "already acquired", "acquired"].includes((status || "").toLowerCase());
 }
 
 function isImage(file: ForgeFile) {
@@ -2247,6 +2651,61 @@ function WorkspaceStyles() {
       color: #eadfc7;
       padding: 10px 11px;
     }
+    .quick-forge-composer {
+      align-items: end;
+      border: 1px solid rgba(212,173,101,.18);
+      border-radius: 12px;
+      background:
+        radial-gradient(circle at 88% 0%, rgba(196,111,45,.14), transparent 28%),
+        rgba(0,0,0,.26);
+      display: grid;
+      gap: 10px;
+      grid-template-columns: minmax(220px, .8fr) minmax(240px, 1fr) auto;
+      margin-bottom: 14px;
+      padding: 14px;
+    }
+    .quick-forge-composer.note-composer {
+      grid-template-columns: minmax(220px, .7fr) minmax(180px, .7fr) minmax(260px, 1fr) auto;
+    }
+    .quick-forge-composer p {
+      color: #f0a44d;
+      font-size: .72rem;
+      font-weight: 900;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+    .quick-forge-composer strong {
+      color: #fff1c8;
+      display: block;
+      margin-top: 4px;
+    }
+    .quick-forge-composer input,
+    .quick-forge-composer textarea {
+      border: 1px solid rgba(212,173,101,.22);
+      border-radius: 8px;
+      background: rgba(0,0,0,.34);
+      color: #eadfc7;
+      padding: 10px 11px;
+    }
+    .quick-forge-composer button {
+      border: 1px solid rgba(143,220,124,.36);
+      border-radius: 8px;
+      background: rgba(143,220,124,.1);
+      color: #caffbf;
+      cursor: pointer;
+      font-weight: 900;
+      padding: 10px 12px;
+      transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+    }
+    .quick-forge-composer button:hover:not(:disabled) {
+      border-color: rgba(143,220,124,.72);
+      box-shadow: 0 0 24px rgba(143,220,124,.18);
+      transform: translateY(-2px);
+    }
+    .quick-forge-composer button:disabled {
+      cursor: not-allowed;
+      opacity: .55;
+    }
     .workspace-upload {
       border: 1px solid rgba(212,173,101,.18);
       border-radius: 12px;
@@ -2332,6 +2791,36 @@ function WorkspaceStyles() {
     .forge-edit-drawer textarea {
       line-height: 1.55;
       resize: vertical;
+    }
+    .forge-session-drawer h2 {
+      color: #fff1c8;
+      font-size: 1.4rem;
+    }
+    .forge-session-drawer label {
+      display: grid;
+      gap: 6px;
+    }
+    .forge-session-drawer label > span {
+      color: rgba(234,223,199,.66);
+      font-size: .72rem;
+      font-weight: 900;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    .session-context {
+      border: 1px solid rgba(80,176,255,.2);
+      border-radius: 10px;
+      background: rgba(80,176,255,.06);
+      display: grid;
+      gap: 5px;
+      padding: 11px;
+    }
+    .session-context strong {
+      color: #fff1c8;
+    }
+    .session-context span,
+    .session-context small {
+      color: rgba(234,223,199,.68);
     }
     .drawer-grid,
     .drawer-actions {
@@ -2672,13 +3161,35 @@ function WorkspaceStyles() {
       display: grid;
       gap: 18px;
     }
+    .imported-goal-section {
+      display: grid;
+      gap: 12px;
+    }
+    .imported-goal-section .workspace-list h3 {
+      color: #72c6ff;
+      font-size: .72rem;
+      font-weight: 900;
+      letter-spacing: .15em;
+      text-transform: uppercase;
+    }
     .task-groups section {
       display: grid;
       gap: 9px;
     }
     .task-row {
       align-items: center;
-      grid-template-columns: auto minmax(0, 1fr) auto;
+      grid-template-columns: auto minmax(0, 1fr) auto auto;
+    }
+    .task-row.imported {
+      border-color: rgba(80,176,255,.22);
+      background:
+        radial-gradient(circle at 0% 50%, rgba(80,176,255,.1), transparent 34%),
+        rgba(0,0,0,.24);
+    }
+    .task-row.imported small {
+      color: rgba(234,223,199,.58);
+      display: block;
+      margin-top: 4px;
     }
     .task-row.done {
       opacity: .7;
@@ -2932,6 +3443,7 @@ function WorkspaceStyles() {
         grid-template-columns: 1fr;
       }
       .workspace-upload,
+      .quick-forge-composer,
       .drawer-grid,
       .drawer-actions {
         grid-template-columns: 1fr;
@@ -2940,6 +3452,9 @@ function WorkspaceStyles() {
         grid-template-columns: auto minmax(0, 1fr);
       }
       .task-row .workspace-delete {
+        grid-column: 2;
+      }
+      .task-row .workspace-secondary {
         grid-column: 2;
       }
       .activity-list article {

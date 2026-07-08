@@ -53,6 +53,20 @@ WORLD_WALKER_LEDGER_SEEDS = [
 ]
 
 
+def is_project_complete_status(status: object) -> bool:
+    normalized = str(status or "").strip().lower()
+    return normalized in {"archived", "complete", "completed", "done"}
+
+
+def is_project_complete(project: dict) -> bool:
+    return is_project_complete_status(project.get("status")) or bool(project.get("archived_at"))
+
+
+def is_project_active(project: dict) -> bool:
+    normalized = str(project.get("status") or "").strip().lower()
+    return normalized != "incubating" and not is_project_complete(project)
+
+
 def build_forge_dashboard(user_id: str = "john") -> dict:
     ensure_workstation_project_link(user_id)
     ensure_shared_goal_links(user_id)
@@ -78,10 +92,9 @@ def build_forge_dashboard(user_id: str = "john") -> dict:
     now = datetime.now(LOCAL_TZ)
     building_cutoff = now - timedelta(days=14)
     recent_cutoff = now - timedelta(days=7)
-    inactive_statuses = {"Incubating", "Archived", "Completed"}
     building_projects = [
         project for project in projects
-        if project.get("status") not in {"Archived", "Completed"}
+        if is_project_active(project)
         and get_project_activity_at(project) >= building_cutoff
     ]
     recently_updated = []
@@ -89,7 +102,7 @@ def build_forge_dashboard(user_id: str = "john") -> dict:
         category_projects = sorted(
             [
                 project for project in by_category[category]
-                if project.get("status") not in inactive_statuses
+                if is_project_active(project)
                 and get_project_activity_at(project) >= recent_cutoff
             ],
             key=lambda item: item.get("updated_at") or item.get("created_at") or "",
@@ -117,11 +130,11 @@ def build_forge_dashboard(user_id: str = "john") -> dict:
         "recently_updated": recently_updated[:6],
         "incubating": incubating,
         "stats": {
-            "active_projects": len([project for project in projects if project.get("status") not in {"Archived", "Completed"}]),
+            "active_projects": len([project for project in projects if is_project_active(project)]),
             "building": len(building_projects),
-            "incubating": len([project for project in projects if project.get("status") == "Incubating"]),
-            "completed": len([project for project in projects if project.get("status") == "Completed"]),
-            "archived": len([project for project in projects if project.get("status") == "Archived"]),
+            "incubating": len([project for project in projects if str(project.get("status") or "").strip().lower() == "incubating"]),
+            "completed": len([project for project in projects if is_project_complete(project)]),
+            "archived": len([project for project in projects if is_project_complete(project)]),
             "recently_updated": len(recently_updated[:6]),
         },
     }
@@ -310,6 +323,10 @@ def create_forge_project(payload: ForgeProjectCreate) -> dict:
 
 def update_forge_project(project_id: str, payload: ForgeProjectUpdate) -> dict | None:
     update_data = prepare_project_payload(payload.model_dump(exclude_unset=True))
+    if is_project_complete_status(update_data.get("status")):
+        update_data["status"] = "Archived"
+        update_data["archived_at"] = update_data.get("archived_at") or datetime.now(LOCAL_TZ).isoformat()
+        update_data["progress_percent"] = update_data.get("progress_percent") or 100
     response = (
         supabase.table("forge_projects")
         .update(update_data)
@@ -342,10 +359,16 @@ def enrich_forge_project(project: dict) -> dict:
     enriched = dict(project)
     goal_id = enriched.get("goal_id")
     if not goal_id:
+        if is_project_complete(enriched):
+            enriched["status"] = "Archived"
+            enriched["progress_percent"] = 100
         return enriched
 
     goal = get_goal(goal_id)
     if not goal:
+        if is_project_complete(enriched):
+            enriched["status"] = "Archived"
+            enriched["progress_percent"] = 100
         return enriched
 
     project_snapshot = goal.get("project") or {}
@@ -359,7 +382,11 @@ def enrich_forge_project(project: dict) -> dict:
         "milestones": goal.get("milestones") or [],
         "logs": goal.get("logs") or [],
     }
-    enriched["progress_percent"] = project_snapshot.get("percent") or enriched.get("progress_percent") or 0
+    if is_project_complete(enriched):
+        enriched["status"] = "Archived"
+        enriched["progress_percent"] = 100
+    else:
+        enriched["progress_percent"] = project_snapshot.get("percent") or enriched.get("progress_percent") or 0
     enriched["next_milestone"] = next_milestone.get("title") or enriched.get("next_milestone")
     return enriched
 
@@ -381,7 +408,6 @@ def ensure_workstation_project_link(user_id: str = "john") -> None:
             "goal_id": goal["id"],
             "title": WORKSTATION_TITLE,
             "category": "Hardware",
-            "status": "Active",
             "summary": WORKSTATION_SUMMARY,
             "tags": WORKSTATION_TAGS,
             "next_milestone": next_milestone.get("title") or "Storage",
@@ -398,7 +424,14 @@ def ensure_workstation_project_link(user_id: str = "john") -> None:
             .execute()
         )
         if existing.data:
-            supabase.table("forge_projects").update(project_data).eq("id", existing.data[0]["id"]).execute()
+            existing_project = existing.data[0]
+            update_data = dict(project_data)
+            if is_project_complete(existing_project):
+                update_data["status"] = "Archived"
+                update_data["progress_percent"] = 100
+            else:
+                update_data["status"] = existing_project.get("status") or "Active"
+            supabase.table("forge_projects").update(update_data).eq("id", existing_project["id"]).execute()
             return
 
         title_match = (
@@ -410,10 +443,17 @@ def ensure_workstation_project_link(user_id: str = "john") -> None:
             .execute()
         )
         if title_match.data:
-            supabase.table("forge_projects").update(project_data).eq("id", title_match.data[0]["id"]).execute()
+            existing_project = title_match.data[0]
+            update_data = dict(project_data)
+            if is_project_complete(existing_project):
+                update_data["status"] = "Archived"
+                update_data["progress_percent"] = 100
+            else:
+                update_data["status"] = existing_project.get("status") or "Active"
+            supabase.table("forge_projects").update(update_data).eq("id", existing_project["id"]).execute()
             return
 
-        supabase.table("forge_projects").insert(project_data).execute()
+        supabase.table("forge_projects").insert({**project_data, "status": "Active"}).execute()
     except Exception:
         return
 

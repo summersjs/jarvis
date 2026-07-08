@@ -22,6 +22,7 @@ class ForgeProjectUpdate(BaseModel):
     title: Optional[str] = None
     category: Optional[str] = None
     status: Optional[str] = None
+    archived_at: Optional[str] = None
     summary: Optional[str] = None
     tags: Optional[list[str]] = None
     next_milestone: Optional[str] = None

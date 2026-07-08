@@ -1,5 +1,8 @@
+from datetime import datetime, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException
 
+from backend.core.config import LOCAL_TZ
 from backend.core.security import verify_api_key
 from backend.db.supabase_client import supabase
 from backend.schemas.forge import (
@@ -19,8 +22,12 @@ from backend.schemas.forge import (
     ForgeTaskUpdate,
 )
 from backend.services.forge_service import (
+    FORGE_CATEGORIES,
     build_forge_dashboard,
     create_forge_file,
+    get_project_activity_at,
+    is_project_active,
+    is_project_complete,
     create_forge_ledger_entry,
     create_forge_note,
     create_forge_project,
@@ -59,44 +66,60 @@ def forge_dashboard(user_id: str = "john"):
 
 
 @router.get("/desktop")
-def forge_desktop_dashboard(user_id: str = "john"):
+def forge_desktop_dashboard(user_id: str = "john", include_goals: bool = True):
     try:
         projects_response = (
             supabase.table("forge_projects")
-            .select("id,title,category,status,next_milestone,progress_percent,updated_at,created_at")
+            .select("id,title,category,status,next_milestone,progress_percent,cover_image_url,archived_at,updated_at,created_at")
             .eq("user_id", user_id)
             .order("updated_at", desc=True)
             .execute()
         )
-        goals_response = (
-            supabase.table("goals")
-            .select("id,title,category,mission_type,current_value,target_value,unit,status,is_active,created_at")
-            .eq("user_id", user_id)
-            .order("created_at", desc=True)
-            .limit(8)
-            .execute()
-        )
         projects = projects_response.data or []
-        goals = goals_response.data or []
-        active_projects = [
-            project for project in projects
-            if project.get("status") not in {"Archived", "Completed"}
+        goals = []
+        if include_goals:
+            goals_response = (
+                supabase.table("goals")
+                .select("id,title,category,mission_type,current_value,target_value,unit,status,is_active,created_at")
+                .eq("user_id", user_id)
+                .order("created_at", desc=True)
+                .limit(8)
+                .execute()
+            )
+            goals = goals_response.data or []
+        active_projects = [project for project in projects if is_project_active(project)]
+        building_cutoff = datetime.now(LOCAL_TZ) - timedelta(days=14)
+        building_projects = [
+            project for project in active_projects
+            if get_project_activity_at(project) >= building_cutoff
         ]
         recently_updated = sorted(
             active_projects,
             key=lambda project: project.get("updated_at") or project.get("created_at") or "",
             reverse=True,
         )[:6]
+        incubating = [
+            project for project in projects
+            if str(project.get("status") or "").strip().lower() == "incubating"
+        ][:3]
+        category_counts = {
+            category: len([project for project in projects if project.get("category") == category])
+            for category in FORGE_CATEGORIES
+        }
         return {
             "status": "ok",
-            "projects": recently_updated,
+            "projects": projects,
             "recently_updated": recently_updated,
+            "incubating": incubating,
             "goals": goals,
+            "category_counts": category_counts,
             "stats": {
                 "active_projects": len(active_projects),
-                "building": len([project for project in projects if project.get("status") == "Building"]),
-                "incubating": len([project for project in projects if project.get("status") == "Incubating"]),
-                "completed": len([project for project in projects if project.get("status") == "Completed"]),
+                "building": len(building_projects),
+                "incubating": len(incubating),
+                "completed": len([project for project in projects if is_project_complete(project)]),
+                "archived": len([project for project in projects if is_project_complete(project)]),
+                "recently_updated": len(recently_updated),
             },
         }
     except Exception as exc:

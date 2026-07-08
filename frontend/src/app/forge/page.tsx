@@ -50,6 +50,7 @@ type ForgeProject = {
   progress_percent?: number | null;
   project_type?: string | null;
   cover_image_url?: string | null;
+  archived_at?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
   linked_goal?: LinkedGoal | null;
@@ -288,27 +289,47 @@ export default function ForgePage() {
 
   useEffect(() => {
     loadForge();
+    // Forge intentionally does a one-time fast summary load, then hydrates details in the background.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function syncSelectedProject(projects: ForgeProject[]) {
+    const requestedProjectId = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("project") : null;
+    setSelectedProject((current) => {
+      if (requestedProjectId) return projects.find((project) => project.id === requestedProjectId) || current;
+      return current ? projects.find((project) => project.id === current.id) || current : current;
+    });
+  }
 
   async function loadForge() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(`${API_BASE}/forge?user_id=${USER_ID}`, { headers: { "x-api-key": API_KEY } });
+      const res = await fetch(`${API_BASE}/forge/desktop?user_id=${USER_ID}&include_goals=false`, { headers: { "x-api-key": API_KEY } });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Forge tables are not online yet.");
       setDashboard({ ...emptyDashboard, ...data });
-      const requestedProjectId = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("project") : null;
-      setSelectedProject((current) => {
-        const projects = data.projects || [];
-        if (requestedProjectId) return projects.find((project: ForgeProject) => project.id === requestedProjectId) || current;
-        return current ? projects.find((project: ForgeProject) => project.id === current.id) || current : current;
-      });
+      syncSelectedProject(data.projects || []);
       setSetupNotice("");
+      setLoading(false);
+      void loadForgeDetails();
     } catch (err) {
       setDashboard(emptyDashboard);
       setSetupNotice("Forge data tables are not online yet. Run backend/data/20260701_forge.sql in Supabase to enable persistence.");
       setError(err instanceof Error ? err.message : "Forge data is unavailable.");
+      setLoading(false);
+    }
+  }
+
+  async function loadForgeDetails() {
+    try {
+      const res = await fetch(`${API_BASE}/forge?user_id=${USER_ID}`, { headers: { "x-api-key": API_KEY } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Forge details are still loading.");
+      setDashboard({ ...emptyDashboard, ...data });
+      syncSelectedProject(data.projects || []);
+    } catch {
+      // The summary view is already usable; details can retry after the next mutation or refresh.
     } finally {
       setLoading(false);
     }
@@ -388,6 +409,31 @@ export default function ForgePage() {
     }
   }
 
+  async function completeProject(project: ForgeProject) {
+    setError("");
+    setMessage("");
+    setSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/forge/projects/${project.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        body: JSON.stringify({
+          status: "Archived",
+          progress_percent: 100,
+          archived_at: new Date().toISOString(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Project completion failed.");
+      setMessage(`${project.title} marked complete and archived.`);
+      await loadForge();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Project completion failed.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <main className="forge-shell">
       <div className="forge-bg" aria-hidden="true" />
@@ -438,6 +484,7 @@ export default function ForgePage() {
           notes={dashboard.notes}
           files={dashboard.files}
           onClose={() => setSelectedProject(null)}
+          onCompleteProject={completeProject}
           onCompleteMilestone={completeLinkedMilestone}
           onOpenModal={openModal}
         />
@@ -968,6 +1015,7 @@ function ProjectDesk({
   notes,
   files,
   onClose,
+  onCompleteProject,
   onCompleteMilestone,
   onOpenModal,
 }: {
@@ -976,6 +1024,7 @@ function ProjectDesk({
   notes: ForgeNote[];
   files: ForgeFile[];
   onClose: () => void;
+  onCompleteProject: (project: ForgeProject) => void;
   onCompleteMilestone: (milestoneId: string) => void;
   onOpenModal: (modal: ModalType, project?: ForgeProject | null) => void;
 }) {
@@ -992,6 +1041,7 @@ function ProjectDesk({
   const latestSpark = projectSparks[0];
   const latestNote = projectNotes[0];
   const latestFile = projectFiles[0];
+  const isArchived = Boolean(project.archived_at) || project.status === "Archived" || project.status === "Completed";
   const tabs = [
     { label: "Overview", count: null },
     { label: "Tasks", count: 0 },
@@ -1018,7 +1068,15 @@ function ProjectDesk({
         </figure>
       )}
       <ProgressLine value={progress} large />
-      <Link href={`/forge/projects/${project.id}`} className="forge-open-workspace">Open Project Desk</Link>
+      <div className="forge-desk-actions">
+        <Link href={`/forge/projects/${project.id}`} className="forge-open-workspace">Open Project Desk</Link>
+        {!isArchived && (
+          <button type="button" className="forge-complete-project" onClick={() => onCompleteProject(project)}>
+            <CheckCircle2 size={16} />
+            <span>Mark Complete</span>
+          </button>
+        )}
+      </div>
       {linkedGoal && (
         <>
           <div className="forge-linked-goal-panel">
@@ -1637,6 +1695,7 @@ function ForgeStyles() {
       .forge-stat.orange div { color: #ff8a34; }
       .forge-stat.blue div { color: var(--forge-blue); }
       .forge-stat.muted div { color: #a99d86; }
+      .forge-stat.archived div { color: #b8ad98; }
       .forge-stat.completed div {
         color: #ffd87a;
         filter: drop-shadow(0 0 7px rgba(255, 216, 122, .24));
@@ -2376,14 +2435,25 @@ function ForgeStyles() {
         gap: 8px;
       }
 
+      .forge-desk-actions {
+        align-items: center;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
       .forge-desk-tabs span,
       .forge-desk-tabs button,
-      .forge-open-workspace {
+      .forge-open-workspace,
+      .forge-complete-project {
+        align-items: center;
         border: 1px solid rgba(212, 173, 101, 0.18);
         border-radius: 999px;
         background: rgba(0, 0, 0, 0.22);
         color: #f4d38f;
         cursor: pointer;
+        display: inline-flex;
+        gap: 7px;
         padding: 5px 9px;
         text-decoration: none;
         transition: transform 180ms, border-color 180ms, box-shadow 180ms, background 180ms;
@@ -2391,11 +2461,22 @@ function ForgeStyles() {
 
       .forge-desk-tabs button:hover,
       .forge-desk-tabs button.active,
-      .forge-open-workspace:hover {
+      .forge-open-workspace:hover,
+      .forge-complete-project:hover {
         background: rgba(196, 111, 45, 0.12);
         border-color: rgba(196, 111, 45, 0.52);
         box-shadow: 0 0 20px rgba(196, 111, 45, 0.16);
         transform: translateY(-1px);
+      }
+
+      .forge-complete-project {
+        border-color: rgba(143, 220, 124, 0.32);
+        color: #caffbf;
+      }
+
+      .forge-complete-project:hover {
+        background: rgba(143, 220, 124, 0.1);
+        border-color: rgba(143, 220, 124, 0.58);
       }
 
       .forge-open-workspace {

@@ -7,7 +7,6 @@ import {
   Box,
   Cpu,
   Database,
-  Disc3,
   Flame,
   Gauge,
   Globe2,
@@ -104,11 +103,10 @@ const fallbackProjects: ForgeProject[] = [
 
 const quickLaunch = [
   { id: "vscode", label: "VS Code", Icon: Box, href: "vscode://file/C:/Users/johnf/OneDrive/Development/jarvis" },
-  { id: "browser", label: "Browser", Icon: Globe2, href: "/" },
+  { id: "chrome", label: "Chrome", Icon: Globe2, href: "https://www.google.com", appId: "chrome" },
   { id: "unreal", label: "Unreal Engine", Icon: AppWindow },
   { id: "terminal", label: "Terminal", Icon: TerminalSquare },
-  { id: "spotify", label: "Spotify", Icon: Music2 },
-  { id: "discord", label: "Discord", Icon: Disc3 },
+  { id: "youtube-music", label: "YouTube Music", Icon: Music2, href: "https://music.youtube.com", appId: "youtube-music" },
   { id: "add", label: "Add App", Icon: Plus },
 ];
 
@@ -356,13 +354,16 @@ function ProjectPanel({
 }
 
 function QuickLaunchDock() {
-  async function launch(appId: string) {
-    await window.jarvisDesktop?.launchApp?.(appId);
+  async function launch(appId: string, href?: string) {
+    const launched = await window.jarvisDesktop?.launchApp?.(appId);
+    if (!launched && href) {
+      window.open(href, "_blank", "noopener,noreferrer");
+    }
   }
 
   return (
     <nav className={styles.dock} aria-label="Quick launch">
-      {quickLaunch.map(({ id, label, Icon, href }) => {
+      {quickLaunch.map(({ id, label, Icon, href, appId }) => {
         const content = (
           <>
             <Icon size={34} />
@@ -370,16 +371,16 @@ function QuickLaunchDock() {
           </>
         );
 
-        if (href) {
+        if (href && !appId) {
           return (
-            <a key={id} href={href} title={label}>
+            <a key={id} href={href} target="_blank" rel="noreferrer" title={label}>
               {content}
             </a>
           );
         }
 
         return (
-          <button key={id} type="button" title={label} onClick={() => launch(id)}>
+          <button key={id} type="button" title={label} onClick={() => launch(appId || id, href)}>
             {content}
           </button>
         );

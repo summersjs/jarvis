@@ -538,5 +538,91 @@
       "win": "I got the Chloe computer put together with all the parts I had on hand. I cleared off some desk space for it. "
     },
     "weekly_score": 86
+  },
+  {
+    "completed_at": "2026-07-08T03:09:45.636+00:00",
+    "created_at": "2026-07-08T03:09:45.638457+00:00",
+    "daily_score": 95,
+    "date": "2026-07-07",
+    "finance": {
+      "category": "Food",
+      "money_spent_today": 1.79,
+      "notes": null,
+      "spending_status": "UNDER CONTROL",
+      "unexpected_expense": false
+    },
+    "id": "9a13c1da-d656-454e-973f-bef88c2c4c33",
+    "is_finalized": true,
+    "lessons": {
+      "adjust_tomorrow": "Restart everything and make sure everything gets updated. ",
+      "did_not_work": "Jarvis is tweaking a bit",
+      "worked": "Jarvis. I am downloading everything and trying to get it working better. "
+    },
+    "lifetime_rank": "Legend",
+    "lifetime_score": 100,
+    "mission_score": 95,
+    "notes": null,
+    "nutrition": {
+      "ate_out_today": false,
+      "estimated_food_spend": 1.79,
+      "meals_completed": 2,
+      "meals_planned_today": 2,
+      "notes": null
+    },
+    "objectives": [
+      {
+        "blocker": "",
+        "completed": true,
+        "id": "4950c2ed-bbfd-41b8-9858-18f22442bbe2",
+        "notes": "Milestone completed: Forge Tasks, Research, and Activity Workflow",
+        "title": "Jarvis Life Command Center"
+      },
+      {
+        "blocker": "",
+        "completed": true,
+        "id": "4c49d748-15e0-462e-8811-ba12f2345e81",
+        "notes": "Forge stats updated",
+        "title": "Ship 3 Jarvis Improvements Weekly"
+      }
+    ],
+    "overall_status": "ok",
+    "summary": "Evening debrief, John. Today was recovery. Daily score 95. Weekly score 89. Lifetime rank Legend. Today was a recovery day. You completed 2 of 2 goal impacts today. Weekly goals moved: 1 completed. No workout log was found today. Stayed under control on spending. Chronicles logged today. Archive total is 6 documented days, current streak 2. Next protocol is bench on Thursday. Tomorrow looks like a rest day. Main lesson: Do the first important thing earlier and keep tomorrow simple. Top priority tomorrow is Prepare for bench.",
+    "tomorrow": {
+      "calendar": [
+        "Recovery day",
+        "Keep the calendar clear",
+        "Protect energy"
+      ],
+      "meal_prep": "You have no events scheduled for tomorrow.",
+      "priorities": [
+        "Prepare for bench"
+      ],
+      "reminder": "Next protocol: bench",
+      "shopping_items": [],
+      "top_priorities": [
+        "Prepare for bench"
+      ],
+      "workout": {
+        "label": "bench",
+        "lift": "bench",
+        "weekday": "Thursday"
+      }
+    },
+    "training": {
+      "energy_level": null,
+      "lift_completed": null,
+      "pain_notes": null,
+      "top_set_reps": null,
+      "top_set_weight": null,
+      "training_notes": null,
+      "workout_completed": false
+    },
+    "updated_at": "2026-07-08T03:09:45.684754+00:00",
+    "user_id": "john",
+    "victory": {
+      "category": "Personal",
+      "win": "I got the Jarvis machine up and running today!"
+    },
+    "weekly_score": 89
   }
 ]

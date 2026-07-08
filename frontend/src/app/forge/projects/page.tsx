@@ -15,6 +15,7 @@ type ForgeProject = {
   summary?: string | null;
   progress_percent?: number | null;
   next_milestone?: string | null;
+  archived_at?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 };
@@ -33,6 +34,7 @@ function ForgeProjectListInner() {
   const category = params.get("category") || "";
   const [projects, setProjects] = useState<ForgeProject[]>([]);
   const [error, setError] = useState("");
+  const [nowMs] = useState(() => Date.now());
 
   useEffect(() => {
     async function load() {
@@ -49,25 +51,23 @@ function ForgeProjectListInner() {
   }, []);
 
   const filtered = useMemo(() => {
-    const activeStatuses = new Set(["Active", "Building", "Experiment"]);
-    const inactiveStatuses = new Set(["Incubating", "Archived", "Completed"]);
-    const buildingCutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
-    const recentCutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const buildingCutoff = nowMs - 14 * 24 * 60 * 60 * 1000;
+    const recentCutoff = nowMs - 7 * 24 * 60 * 60 * 1000;
     if (category) {
       return projects.filter((project) => project.category.toLowerCase() === category.toLowerCase());
     }
-    if (filter === "active") return projects.filter((project) => activeStatuses.has(project.status));
+    if (filter === "active") return projects.filter(isActiveProject);
     if (filter === "building") {
-      return projects.filter((project) => !["Archived", "Completed"].includes(project.status) && getProjectActivityTime(project) >= buildingCutoff);
+      return projects.filter((project) => isActiveProject(project) && getProjectActivityTime(project) >= buildingCutoff);
     }
-    if (filter === "incubating") return projects.filter((project) => project.status === "Incubating");
-    if (filter === "archived") return projects.filter((project) => project.status === "Archived");
-    if (filter === "completed") return projects.filter((project) => project.status === "Completed");
+    if (filter === "incubating") return projects.filter((project) => normalizeStatus(project.status) === "incubating");
+    if (filter === "archived") return projects.filter(isCompletedProject);
+    if (filter === "completed") return projects.filter(isCompletedProject);
     if (filter === "recent") {
-      return projects.filter((project) => !inactiveStatuses.has(project.status) && getProjectActivityTime(project) >= recentCutoff);
+      return projects.filter((project) => isActiveProject(project) && getProjectActivityTime(project) >= recentCutoff);
     }
     return projects;
-  }, [projects, filter, category]);
+  }, [projects, filter, category, nowMs]);
 
   const title = category ? `${category} Projects` : formatFilter(filter);
 
@@ -195,4 +195,20 @@ function getProjectActivityTime(project: ForgeProject) {
   const value = project.updated_at || project.created_at || "";
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function isCompletedStatus(status: string) {
+  return ["archived", "complete", "completed", "done"].includes(normalizeStatus(status));
+}
+
+function isCompletedProject(project: ForgeProject) {
+  return Boolean(project.archived_at) || isCompletedStatus(project.status);
+}
+
+function isActiveProject(project: ForgeProject) {
+  return normalizeStatus(project.status) !== "incubating" && !isCompletedProject(project);
+}
+
+function normalizeStatus(status: string) {
+  return status.trim().toLowerCase();
 }

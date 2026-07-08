@@ -262,6 +262,24 @@ export default function ForgeProjectWorkspace() {
     }
   }
 
+  async function markProjectComplete() {
+    if (!project) return;
+    setError("");
+    setMessage("Archiving project as complete...");
+    const res = await fetch(`${API_BASE}/forge/projects/${project.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+      body: JSON.stringify({ status: "Archived", progress_percent: 100 }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setError(data.detail || "Could not mark the project complete.");
+      return;
+    }
+    setMessage(`Project archived as complete: ${data.project?.title || project.title}`);
+    await loadForge();
+  }
+
   async function moveItem(kind: "sparks" | "notes" | "files", id: string, nextProjectId: string) {
     const project = projects.find((item) => item.id === nextProjectId);
     const res = await fetch(`${API_BASE}/forge/${kind}/${id}`, {
@@ -803,6 +821,7 @@ export default function ForgeProjectWorkspace() {
               {project?.linked_goal && <Link href={`/goals?focus=${project.linked_goal.id}`}>Open Goal</Link>}
               {project?.task_goal ? <Link href={`/goals?focus=${project.task_goal.id}`}>Open Task Goal</Link> : <button type="button" onClick={() => setShowTaskGoalForm((value) => !value)}>Add Tasks to Goals</button>}
               <button type="button" onClick={() => openForgeSession()}>Start Forge Session</button>
+              {project && <button type="button" onClick={markProjectComplete}>Mark Complete</button>}
               {project && <button type="button" className="workspace-delete project-delete" onClick={() => deleteItem("projects", project.id, project.title)}>Delete Project</button>}
             </div>
             {showTaskGoalForm && (

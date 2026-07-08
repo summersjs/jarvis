@@ -191,5 +191,6 @@ def _suggest_chronicle_title(data: dict) -> str:
     if data.get("daily_score") and float(data["daily_score"]) >= 90:
         return "Small Wins Stacked"
     entry_date = data.get("entry_date") or date.today().isoformat()
-    friendly = datetime.fromisoformat(f"{entry_date}T12:00:00").strftime("%B %-d, %Y")
+    friendly_date = datetime.fromisoformat(f"{entry_date}T12:00:00")
+    friendly = f"{friendly_date.strftime('%B')} {friendly_date.day}, {friendly_date.year}"
     return f"Chronicle for {friendly}"

@@ -381,7 +381,8 @@ def _format_planned_standard(goal: dict) -> str:
     planned_time = standard.get("planned_time") or goal.get("planned_time")
     if not planned_for:
         return goal.get("title", "planned standard")
-    date_label = datetime.fromisoformat(f"{planned_for[:10]}T12:00:00").strftime("%A, %B %-d")
+    planned_date = datetime.fromisoformat(f"{planned_for[:10]}T12:00:00")
+    date_label = f"{planned_date.strftime('%A, %B')} {planned_date.day}"
     time_label = f" at {planned_time}" if planned_time else ""
     return f"{goal.get('title', 'Planned standard')} on {date_label}{time_label}"
 

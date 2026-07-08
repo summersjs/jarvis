@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 from backend.core.security import verify_api_key
+from backend.db.supabase_client import supabase
 from backend.schemas.forge import (
     ForgeFileCreate,
     ForgeFileUpdate,
@@ -53,6 +54,51 @@ router = APIRouter(
 def forge_dashboard(user_id: str = "john"):
     try:
         return build_forge_dashboard(user_id)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+
+@router.get("/desktop")
+def forge_desktop_dashboard(user_id: str = "john"):
+    try:
+        projects_response = (
+            supabase.table("forge_projects")
+            .select("id,title,category,status,next_milestone,progress_percent,updated_at,created_at")
+            .eq("user_id", user_id)
+            .order("updated_at", desc=True)
+            .execute()
+        )
+        goals_response = (
+            supabase.table("goals")
+            .select("id,title,category,mission_type,current_value,target_value,unit,status,is_active,created_at")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(8)
+            .execute()
+        )
+        projects = projects_response.data or []
+        goals = goals_response.data or []
+        active_projects = [
+            project for project in projects
+            if project.get("status") not in {"Archived", "Completed"}
+        ]
+        recently_updated = sorted(
+            active_projects,
+            key=lambda project: project.get("updated_at") or project.get("created_at") or "",
+            reverse=True,
+        )[:6]
+        return {
+            "status": "ok",
+            "projects": recently_updated,
+            "recently_updated": recently_updated,
+            "goals": goals,
+            "stats": {
+                "active_projects": len(active_projects),
+                "building": len([project for project in projects if project.get("status") == "Building"]),
+                "incubating": len([project for project in projects if project.get("status") == "Incubating"]),
+                "completed": len([project for project in projects if project.get("status") == "Completed"]),
+            },
+        }
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 

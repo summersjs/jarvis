@@ -1058,7 +1058,11 @@ def _planned_standard_summaries(goals: list[dict], today_date: date) -> list[str
         planned_date = date.fromisoformat(planned_for[:10])
         if planned_date < today_date:
             continue
-        day_label = "today" if planned_date == today_date else planned_date.strftime("%A, %B %-d")
+        day_label = (
+            "today"
+            if planned_date == today_date
+            else f"{planned_date.strftime('%A, %B')} {planned_date.day}"
+        )
         planned_time = standard.get("planned_time") or goal.get("planned_time")
         time_label = f" at {planned_time}" if planned_time else ""
         summaries.append(f"{goal.get('title', 'Planned standard')} is planned for {day_label}{time_label}.")

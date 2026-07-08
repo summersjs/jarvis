@@ -13,14 +13,16 @@ def format_time_local(dt_str: str | None) -> str:
     dt = parse_google_datetime(dt_str)
     if not dt:
         return "unknown time"
-    return dt.astimezone(LOCAL_TZ).strftime("%-I:%M %p")
+    local_dt = dt.astimezone(LOCAL_TZ)
+    return local_dt.strftime("%I:%M %p").lstrip("0")
 
 
 def format_date_local(dt_str: str | None) -> str:
     dt = parse_google_datetime(dt_str)
     if not dt:
         return "unknown date"
-    return dt.astimezone(LOCAL_TZ).strftime("%A, %B %-d")
+    local_dt = dt.astimezone(LOCAL_TZ)
+    return f"{local_dt.strftime('%A, %B')} {local_dt.day}"
 
 
 def format_event_time_range(event: dict) -> str:

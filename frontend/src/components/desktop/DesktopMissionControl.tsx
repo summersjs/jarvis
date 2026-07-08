@@ -1,25 +1,27 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import {
-  Activity,
   AppWindow,
   Box,
+  CalendarDays,
+  Cloud,
   Cpu,
-  Database,
   Flame,
-  Gauge,
   Globe2,
   HardDrive,
+  MemoryStick,
   MonitorCog,
   Music2,
   Network,
   Plus,
   Radio,
-  Sparkles,
   TerminalSquare,
   Timer,
+  Wifi,
   Zap,
+  type LucideIcon,
 } from "lucide-react";
 import styles from "./DesktopMissionControl.module.css";
 
@@ -62,12 +64,14 @@ type ForgeDashboard = {
   };
 };
 
-type SystemMetric = {
+type TelemetryMetric = {
+  id: string;
   label: string;
   value: string;
   detail: string;
   level: number;
-  Icon: typeof Cpu;
+  Icon: LucideIcon;
+  position: string;
 };
 
 type NativeStats = {
@@ -85,6 +89,12 @@ type NativeStats = {
   uptime?: string;
 };
 
+type CalendarEvent = {
+  title: string;
+  date?: string;
+  detail?: string;
+};
+
 declare global {
   interface Window {
     jarvisDesktop?: {
@@ -98,15 +108,16 @@ const fallbackProjects: ForgeProject[] = [
   { id: "jarvis", title: "Jarvis Workstation", status: "In Progress", category: "Hardware", progress_percent: 67, summary: "Desktop command center migration.", next_milestone: "Windows mission control shell" },
   { id: "world-walker", title: "World Walker", status: "In Progress", category: "Games", progress_percent: 45, summary: "Core loop and world systems.", next_milestone: "Prototype route map" },
   { id: "billionaire-club", title: "Billionaire Club", status: "Planning", category: "Business", progress_percent: 20, summary: "Offer, audience, and content engine.", next_milestone: "Positioning draft" },
-  { id: "lucien", title: "Lucien", status: "Concept", category: "Writing", progress_percent: 10, summary: "Character and story fragments.", next_milestone: "Scene list" },
+  { id: "lucien", title: "Lucien", status: "Concept", category: "Writing", progress_percent: 10, summary: "Character and story fragments." },
 ];
 
 const quickLaunch = [
   { id: "vscode", label: "VS Code", Icon: Box, href: "vscode://file/C:/Users/johnf/OneDrive/Development/jarvis" },
-  { id: "chrome", label: "Chrome", Icon: Globe2, href: "https://www.google.com", appId: "chrome" },
+  { id: "chrome", label: "Browser", Icon: Globe2, href: "https://www.google.com", appId: "chrome" },
   { id: "unreal", label: "Unreal Engine", Icon: AppWindow },
   { id: "terminal", label: "Terminal", Icon: TerminalSquare },
-  { id: "youtube-music", label: "YouTube Music", Icon: Music2, href: "https://music.youtube.com", appId: "youtube-music" },
+  { id: "youtube-music", label: "Music", Icon: Music2, href: "https://music.youtube.com", appId: "youtube-music" },
+  { id: "discord", label: "Discord", Icon: Radio, appId: "discord" },
   { id: "add", label: "Add App", Icon: Plus },
 ];
 
@@ -177,87 +188,141 @@ export default function DesktopMissionControl() {
 
   const projects = useMemo(() => {
     const liveProjects = dashboard.recently_updated?.length ? dashboard.recently_updated : dashboard.projects;
-    return liveProjects?.length ? liveProjects.slice(0, 6) : fallbackProjects;
+    return liveProjects?.length ? liveProjects.slice(0, 5) : fallbackProjects;
   }, [dashboard.projects, dashboard.recently_updated]);
 
   const activeProject = projects[0] || fallbackProjects[0];
-  const goals = dashboard.goals?.length ? dashboard.goals.slice(0, 5) : [];
-  const metrics = buildSystemMetrics(systemStats);
+  const goals = dashboard.goals?.length ? dashboard.goals.slice(0, 4) : [];
+  const metrics = buildTelemetryMetrics(systemStats);
+  const events = useMemo(() => parseCalendarEvents(calendarLine), [calendarLine]);
 
   return (
     <main className={styles.shell}>
-      <div className={styles.templateGlow} aria-hidden="true" />
-      <div className={styles.grid} aria-hidden="true" />
-      <div className={styles.scanlines} aria-hidden="true" />
-      <DriftingParticles />
+      <HudBackground />
+      <EnergyCollisionLayer />
 
-      <SystemPanel now={now} metrics={metrics} dataState={systemStats ? "Native telemetry online" : "Telemetry bridge pending"} />
+      <div className={styles.brandBlock}>
+        <strong>JARVIS</strong>
+        <span>System Dashboard</span>
+      </div>
 
-      <section className={styles.stage} aria-label="Jarvis desktop mission control">
-        <HudCore tone="blue" title="SYSTEM CORE" primary={formatTime(now)} secondary={formatDate(now)} />
-        <SparkBridge />
-        <HudCore tone="orange" title="ACTIVE PROJECT" primary={activeProject.title} secondary={`${Math.round(activeProject.progress_percent || 0)}% ${activeProject.status || "In Progress"}`} />
+      <div className={styles.topStatus}>
+        <Wifi size={18} />
+        <span>{systemStats ? "LIVE" : "STANDBY"}</span>
+        <strong>{formatTime(now)}</strong>
+      </div>
+
+      <section className={styles.systemZone} aria-label="System core telemetry">
+        <SystemCore now={now} />
+        <TelemetryOrbit metrics={metrics} />
       </section>
 
-      <ProjectPanel
-        activeProject={activeProject}
+      <section className={styles.projectZone} aria-label="Active Forge project">
+        <ProjectCore project={activeProject} />
+      </section>
+
+      <RightRail
         projects={projects}
         goals={goals}
-        calendarLine={calendarLine}
+        events={events}
+        activeProject={activeProject}
         dataState={dataState}
       />
 
       <QuickLaunchDock />
-      <div className={styles.systemOnline}>
-        <Radio size={18} />
-        <span>SYSTEM ONLINE</span>
-      </div>
+      <SystemOnline dataState={dataState} />
     </main>
   );
 }
 
-function HudCore({ tone, title, primary, secondary }: { tone: "blue" | "orange"; title: string; primary: string; secondary: string }) {
-  const nodeLabels = ["Build", "Develop", "Research", "Collaborate"];
-
+function HudBackground() {
   return (
-    <div className={`${styles.coreWrap} ${styles[tone]}`}>
+    <>
+      <div className={styles.templateGlow} aria-hidden="true" />
+      <div className={styles.circuitFrame} aria-hidden="true" />
+      <div className={styles.grid} aria-hidden="true" />
+      <div className={styles.scanlines} aria-hidden="true" />
+      <DriftingParticles />
+    </>
+  );
+}
+
+function SystemCore({ now }: { now: Date }) {
+  return (
+    <div className={`${styles.coreWrap} ${styles.blue}`}>
+      <CoreRings />
+      <div className={styles.coreContent}>
+        <span>System Core</span>
+        <strong>{formatTime(now)}</strong>
+        <em>{formatDate(now)}</em>
+      </div>
+    </div>
+  );
+}
+
+function ProjectCore({ project }: { project: ForgeProject }) {
+  const percent = Math.round(project.progress_percent || 0);
+  return (
+    <div className={`${styles.coreWrap} ${styles.orange}`}>
+      <CoreRings />
+      <div className={styles.coreContent}>
+        <span>Active Project</span>
+        <h1>{project.title || "No Active Project"}</h1>
+        <strong>{percent}%</strong>
+        <em>{project.status || "In Progress"}</em>
+      </div>
+    </div>
+  );
+}
+
+function CoreRings() {
+  return (
+    <>
       <div className={styles.coreGlow} />
       <div className={`${styles.ring} ${styles.outerRing}`} />
       <div className={`${styles.ring} ${styles.innerRing}`} />
       <div className={`${styles.ring} ${styles.detailRing}`} />
       <div className={styles.tickRing} />
-      <div className={styles.coreContent}>
-        <span>{title}</span>
-        <strong>{primary}</strong>
-        <em>{secondary}</em>
-      </div>
-      {tone === "orange" && (
-        <div className={styles.orbitNodes} aria-hidden="true">
-          {nodeLabels.map((label, index) => (
-            <span key={label} className={styles[`node${index}`]}>
-              {label}
-            </span>
-          ))}
-        </div>
-      )}
+      <div className={styles.radarSweep} />
+    </>
+  );
+}
+
+function TelemetryOrbit({ metrics }: { metrics: TelemetryMetric[] }) {
+  return (
+    <div className={styles.telemetryOrbit} aria-label="System telemetry">
+      {metrics.map(({ id, label, value, detail, level, Icon, position }) => (
+        <article
+          key={id}
+          className={`${styles.telemetryNode} ${styles[position]}`}
+          style={{ "--level": `${Math.max(4, Math.min(level, 100))}%` } as React.CSSProperties}
+        >
+          <div className={styles.nodeRing}>
+            <Icon size={18} />
+            <strong>{value}</strong>
+            <span>{label}</span>
+          </div>
+          <em>{detail}</em>
+        </article>
+      ))}
     </div>
   );
 }
 
-function SparkBridge() {
+function EnergyCollisionLayer() {
   return (
-    <div className={styles.bridge} aria-hidden="true">
-      <div className={styles.energyLine} />
-      <svg className={styles.lightning} viewBox="0 0 640 180" preserveAspectRatio="none">
-        <path className={styles.boltMain} d="M0 92 L100 84 L142 104 L218 72 L284 92 L326 82 L380 102 L450 78 L522 94 L640 86" />
-        <path className={styles.boltBranch} d="M190 78 L226 38 L252 84" />
-        <path className={styles.boltBranch} d="M302 92 L336 132 L372 100" />
-        <path className={styles.boltBranch} d="M402 96 L448 46 L492 84" />
-        <path className={styles.boltBranch} d="M255 88 L286 146 L312 98" />
+    <div className={styles.energyLayer} aria-hidden="true">
+      <div className={styles.blueBeam} />
+      <div className={styles.orangeBeam} />
+      <svg className={styles.lightning} viewBox="0 0 760 220" preserveAspectRatio="none">
+        <path className={styles.boltMain} d="M0 112 L96 94 L156 118 L238 82 L318 110 L380 96 L454 126 L540 92 L620 116 L760 104" />
+        <path className={styles.boltBranch} d="M220 88 L260 38 L290 104" />
+        <path className={styles.boltBranch} d="M344 108 L386 166 L430 112" />
+        <path className={styles.boltBranch} d="M486 118 L538 52 L588 98" />
       </svg>
       <div className={styles.collisionCore} />
       <div className={styles.sparkField}>
-        {Array.from({ length: 30 }).map((_, index) => (
+        {Array.from({ length: 34 }).map((_, index) => (
           <span key={index} />
         ))}
       </div>
@@ -265,91 +330,82 @@ function SparkBridge() {
   );
 }
 
-function SystemPanel({ now, metrics, dataState }: { now: Date; metrics: SystemMetric[]; dataState: string }) {
+function RightRail({
+  projects,
+  goals,
+  events,
+  activeProject,
+  dataState,
+}: {
+  projects: ForgeProject[];
+  goals: ForgeGoal[];
+  events: CalendarEvent[];
+  activeProject: ForgeProject;
+  dataState: string;
+}) {
   return (
-    <aside className={`${styles.panel} ${styles.systemPanel}`}>
+    <aside className={styles.rightRail}>
       <header>
-        <span>LEFT CORE</span>
-        <strong>{formatTime(now)}</strong>
-        <em>{formatDate(now)}</em>
+        <span>Projects</span>
+        <em>{dataState}</em>
       </header>
-      <div className={styles.weather}>
-        <CloudGlyph />
-        <div>
-          <strong>82°F</strong>
-          <span>Partly Cloudy</span>
-        </div>
-      </div>
-      <div className={styles.metricStack}>
-        {metrics.map(({ label, value, detail, level, Icon }) => (
-          <article key={label} className={styles.metric}>
-            <Icon size={18} />
-            <div>
-              <span>{label}</span>
-              <strong>{value}</strong>
-              <em>{detail}</em>
-            </div>
-            <i style={{ "--level": `${Math.max(4, Math.min(level, 100))}%` } as React.CSSProperties} />
-          </article>
+
+      <section className={styles.projectList} aria-label="Forge projects">
+        {projects.map((project, index) => (
+          <ProjectRow key={project.id} project={project} active={project.id === activeProject.id || index === 0} />
         ))}
-      </div>
-      <footer>{dataState}</footer>
+      </section>
+
+      <section className={styles.compactSection}>
+        <h2>Upcoming Events</h2>
+        {events.length ? (
+          <div className={styles.eventList}>
+            {events.slice(0, 4).map((event, index) => (
+              <article key={`${event.title}-${index}`} className={styles.eventRow}>
+                <CalendarDays size={15} />
+                <div>
+                  <strong>{event.title}</strong>
+                  <span>{event.detail || event.date || "Scheduled"}</span>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className={styles.emptyState}>No upcoming events detected.</p>
+        )}
+      </section>
+
+      <section className={styles.compactSection}>
+        <h2>Goal Rotation</h2>
+        {(goals.length ? goals : [{ id: "fallback", title: "Forge real projects into finished missions", project: { percent: activeProject.progress_percent || 0 } }]).map((goal) => (
+          <span key={goal.id} className={styles.goalRow}>
+            {goal.title}
+            <em>{Math.round(goal.project?.percent || 0)}%</em>
+          </span>
+        ))}
+      </section>
     </aside>
   );
 }
 
-function ProjectPanel({
-  activeProject,
-  projects,
-  goals,
-  calendarLine,
-  dataState,
-}: {
-  activeProject: ForgeProject;
-  projects: ForgeProject[];
-  goals: ForgeGoal[];
-  calendarLine: string;
-  dataState: string;
-}) {
+function ProjectRow({ project, active }: { project: ForgeProject; active: boolean }) {
+  const percent = Math.round(project.progress_percent || 0);
   return (
-    <aside className={`${styles.panel} ${styles.projectPanel}`}>
-      <header>
-        <span>RIGHT CORE</span>
-        <strong>PROJECTS</strong>
-        <em>{dataState}</em>
-      </header>
-      <section className={styles.activeProject}>
-        <span>ACTIVE PROJECT</span>
-        <h1>{activeProject.title}</h1>
-        <strong>{Math.round(activeProject.progress_percent || 0)}%</strong>
-        <em>{activeProject.next_milestone || activeProject.summary || "Next mission packet pending"}</em>
-      </section>
-      <section className={styles.projectList} aria-label="Forge projects">
-        {projects.map((project, index) => (
-          <article key={project.id} className={`${styles.projectCard} ${index === 0 ? styles.activeCard : ""}`}>
-            <div className={styles.projectThumb}>
-              {project.cover_image_url ? <img src={project.cover_image_url} alt="" /> : <Flame size={22} />}
-            </div>
-            <div>
-              <strong>{project.title}</strong>
-              <span>{project.status || project.category || "In Progress"}</span>
-              <i><b style={{ width: `${Math.max(8, Math.min(project.progress_percent || 0, 100))}%` }} /></i>
-            </div>
-            <em>{Math.round(project.progress_percent || 0)}%</em>
-          </article>
-        ))}
-      </section>
-      <section className={styles.events}>
-        <strong>Upcoming Events</strong>
-        <p>{calendarLine}</p>
-      </section>
-      <section className={styles.goalRotation}>
-        <strong>Goal Rotation</strong>
-        {(goals.length ? goals : [{ id: "fallback", title: "Forge real projects into finished missions", project: { percent: activeProject.progress_percent || 0 } }]).map((goal) => (
-          <span key={goal.id}>{goal.title}<em>{Math.round(goal.project?.percent || 0)}%</em></span>
-        ))}
-      </section>
-    </aside>
+    <article className={`${styles.projectCard} ${active ? styles.activeCard : ""}`}>
+      <div className={styles.projectGlyph}>
+        {project.cover_image_url ? (
+          <Image src={project.cover_image_url} alt="" width={44} height={44} unoptimized />
+        ) : (
+          <Flame size={18} />
+        )}
+      </div>
+      <div className={styles.projectBody}>
+        <strong>{project.title}</strong>
+        <span>{project.status || project.category || "In Progress"}</span>
+        <i><b style={{ width: `${Math.max(6, Math.min(percent, 100))}%` }} /></i>
+      </div>
+      <em>{percent}%</em>
+    </article>
   );
 }
 
@@ -366,7 +422,7 @@ function QuickLaunchDock() {
       {quickLaunch.map(({ id, label, Icon, href, appId }) => {
         const content = (
           <>
-            <Icon size={34} />
+            <Icon size={32} />
             <span>{label}</span>
           </>
         );
@@ -389,43 +445,66 @@ function QuickLaunchDock() {
   );
 }
 
+function SystemOnline({ dataState }: { dataState: string }) {
+  return (
+    <div className={styles.systemOnline}>
+      <Radio size={18} />
+      <div>
+        <strong>System Online</strong>
+        <span>{dataState}</span>
+      </div>
+    </div>
+  );
+}
+
 function DriftingParticles() {
   return (
     <div className={styles.particles} aria-hidden="true">
-      {Array.from({ length: 42 }).map((_, index) => (
+      {Array.from({ length: 48 }).map((_, index) => (
         <span key={index} />
       ))}
     </div>
   );
 }
 
-function CloudGlyph() {
-  return (
-    <svg viewBox="0 0 64 42" aria-hidden="true">
-      <path d="M20 35h28c7 0 12-4 12-10s-5-10-11-10h-2C44 8 38 4 31 4c-9 0-16 6-17 15C8 20 4 24 4 29c0 4 4 6 16 6Z" />
-    </svg>
-  );
+function buildTelemetryMetrics(stats: NativeStats | null): TelemetryMetric[] {
+  return [
+    { id: "cpu", label: "CPU", value: percent(stats?.cpuUsage, 18), detail: tempDetail(stats?.cpuTemp, 58), level: stats?.cpuUsage ?? 18, Icon: Cpu, position: "nodeCpu" },
+    { id: "gpu", label: "GPU", value: percent(stats?.gpuUsage, 22), detail: `Hotspot ${stats?.gpuHotspot ?? 68}C`, level: stats?.gpuUsage ?? 22, Icon: MonitorCog, position: "nodeGpu" },
+    { id: "ram", label: "RAM", value: percent(stats?.ramUsage, 32), detail: "Memory", level: stats?.ramUsage ?? 32, Icon: MemoryStick, position: "nodeRam" },
+    { id: "storage", label: "Storage", value: percent(stats?.storageUsage, 58), detail: tempDetail(stats?.nvmeTemp, 44), level: stats?.storageUsage ?? 58, Icon: HardDrive, position: "nodeStorage" },
+    { id: "network", label: "Net", value: stats?.networkDown || "1.2 GB", detail: `Up ${stats?.networkUp || "128 MB"}`, level: 36, Icon: Network, position: "nodeNetwork" },
+    { id: "weather", label: "Weather", value: "82F", detail: "Partly cloudy", level: 82, Icon: Cloud, position: "nodeWeather" },
+    { id: "uptime", label: "Uptime", value: stats?.uptime || "06:42", detail: "Session", level: 74, Icon: Timer, position: "nodeUptime" },
+    { id: "bridge", label: "Bridge", value: stats ? "Live" : "Wait", detail: stats ? "Native feed" : "Telemetry pending", level: stats ? 100 : 12, Icon: Zap, position: "nodeBridge" },
+  ];
 }
 
-function buildSystemMetrics(stats: NativeStats | null): SystemMetric[] {
-  return [
-    { label: "CPU", value: percent(stats?.cpuUsage, 18), detail: tempDetail("CPU temp", stats?.cpuTemp, 58), level: stats?.cpuUsage ?? 18, Icon: Cpu },
-    { label: "GPU", value: percent(stats?.gpuUsage, 22), detail: `Hotspot ${stats?.gpuHotspot ?? 68}°C`, level: stats?.gpuUsage ?? 22, Icon: MonitorCog },
-    { label: "RAM", value: percent(stats?.ramUsage, 32), detail: "Memory pressure nominal", level: stats?.ramUsage ?? 32, Icon: Activity },
-    { label: "Storage", value: percent(stats?.storageUsage, 58), detail: tempDetail("NVMe", stats?.nvmeTemp, 44), level: stats?.storageUsage ?? 58, Icon: HardDrive },
-    { label: "Fans", value: `${stats?.fanRpm ?? 1240} RPM`, detail: "Cooling curve stable", level: 42, Icon: Gauge },
-    { label: "Network", value: stats?.networkDown || "1.2 GB", detail: `Up ${stats?.networkUp || "128 MB"}`, level: 36, Icon: Network },
-    { label: "Uptime", value: stats?.uptime || "06:42:18", detail: "Desktop session", level: 74, Icon: Timer },
-    { label: "Bridge", value: stats ? "LIVE" : "PENDING", detail: stats ? "Native system feed" : "Awaiting Electron telemetry", level: stats ? 100 : 12, Icon: Database },
-  ];
+function parseCalendarEvents(line: string): CalendarEvent[] {
+  if (!line || /no events scheduled/i.test(line)) return [];
+  const [, eventText = line] = line.split(/events? (?:today|tomorrow)\.\s*/i);
+  return eventText
+    .split(". ")
+    .map((part) => part.replace(/\.$/, "").trim())
+    .filter(Boolean)
+    .slice(0, 4)
+    .map((part) => {
+      const match = part.match(/^(.*?) from (all day on \d{4}-\d{2}-\d{2}|\d{1,2}:\d{2} [AP]M to \d{1,2}:\d{2} [AP]M)(?: at (.*))?$/i);
+      if (!match) return { title: part, detail: "Today" };
+      return {
+        title: match[1].replace(/'s birthday$/i, " Birthday").trim(),
+        detail: match[2].replace(" to ", " - "),
+        date: match[3]?.trim(),
+      };
+    });
 }
 
 function percent(value: number | undefined, fallback: number) {
   return `${Math.round(value ?? fallback)}%`;
 }
 
-function tempDetail(label: string, value: number | undefined, fallback: number) {
-  return `${label} ${Math.round(value ?? fallback)}°C`;
+function tempDetail(value: number | undefined, fallback: number) {
+  return `${Math.round(value ?? fallback)}C`;
 }
 
 function formatTime(date: Date) {

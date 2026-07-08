@@ -1,5 +1,6 @@
 import re
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
 from backend.core.config import LOCAL_TZ
@@ -634,7 +635,7 @@ def _build_coaching_note(
     today: str,
     journal: dict | None = None,
 ) -> str:
-    completed_note = _get_completed_workout_note(user_id, today)
+    completed_note = _get_completed_workout_note(user_id, today) if workout_logic.get("day_type") == "completed" else None
     if completed_note:
         return completed_note
 
@@ -718,17 +719,38 @@ def build_daily_dashboard(user_id: str = "john") -> dict:
     now = datetime.now(LOCAL_TZ)
     today = now.date().isoformat()
     scheduled_today = get_scheduled_lift_for_date(now.date())
-    workout_logic = get_next_workout_logic(user_id)
-    meals = _get_today_meals(user_id, today)
-    shopping = _get_latest_unchecked_shopping_items(user_id)
-    calendar = _get_calendar_summary(now.date())
-    finance_summary = build_finance_ops_summary(user_id, today[:7])
-    goals = list_goals(user_id, active_only=False)
-    journal_snapshot = _get_journal_snapshot(user_id, today)
     mission_phase = _get_mission_phase(now)
-    today_workout = get_todays_workout_summary(user_id, now.date())
-    workout_profile = _get_lift_profile(user_id, scheduled_today)
-    latest_top_set = get_latest_top_set(user_id, scheduled_today) if scheduled_today else None
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {
+            "workout_logic": executor.submit(get_next_workout_logic, user_id),
+            "meals": executor.submit(_get_today_meals, user_id, today),
+            "shopping": executor.submit(_get_latest_unchecked_shopping_items, user_id),
+            "calendar": executor.submit(_get_calendar_summary, now.date()),
+            "finance_summary": executor.submit(build_finance_ops_summary, user_id, today[:7]),
+            "goals": executor.submit(list_goals, user_id, active_only=False),
+            "journal_snapshot": executor.submit(_get_journal_snapshot, user_id, today),
+            "today_workout": executor.submit(get_todays_workout_summary, user_id, now.date()),
+            "workout_profile": executor.submit(_get_lift_profile, user_id, scheduled_today),
+            "birthday_note": executor.submit(_get_birthday_note, now.date()),
+            "previous_mission_score": executor.submit(get_previous_mission_score, user_id),
+        }
+        if scheduled_today:
+            futures["latest_top_set"] = executor.submit(get_latest_top_set, user_id, scheduled_today)
+
+        workout_logic = futures["workout_logic"].result()
+        meals = futures["meals"].result()
+        shopping = futures["shopping"].result()
+        calendar = futures["calendar"].result()
+        finance_summary = futures["finance_summary"].result()
+        goals = futures["goals"].result()
+        journal_snapshot = futures["journal_snapshot"].result()
+        today_workout = futures["today_workout"].result()
+        workout_profile = futures["workout_profile"].result()
+        birthday_note = futures["birthday_note"].result()
+        previous_mission_score = futures["previous_mission_score"].result()
+        latest_top_set = futures["latest_top_set"].result() if "latest_top_set" in futures else None
+
     workout_context = {
         "today_day_type": workout_logic.get("day_type") or ("rest" if not scheduled_today else scheduled_today),
         "workout_completed": bool(today_workout) or workout_logic.get("day_type") == "completed",
@@ -752,14 +774,13 @@ def build_daily_dashboard(user_id: str = "john") -> dict:
         today,
         journal_snapshot,
     )
-    previous_mission_score = get_previous_mission_score(user_id)
     mission_delta = mission["score"] - previous_mission_score if previous_mission_score is not None else None
 
     dashboard_base = {
         "status": "ok",
         "user_id": user_id,
         "date": today,
-        "birthday_note": _get_birthday_note(now.date()),
+        "birthday_note": birthday_note,
         "today": {
             "day_type": workout_logic.get("day_type"),
             "scheduled_lift": scheduled_today,

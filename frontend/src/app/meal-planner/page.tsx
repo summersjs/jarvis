@@ -108,6 +108,11 @@ type MealMeta = {
   save_to_food_vault?: boolean;
 };
 
+type MealSelectOption = {
+  value: string;
+  label: string;
+};
+
 const MEAL_TYPE_OPTIONS = [
   { value: "breakfast", label: "Breakfast" },
   { value: "lunch", label: "Lunch" },
@@ -535,6 +540,73 @@ export default function MealPlannerPage() {
 
   return (
     <main className="min-h-screen bg-black text-green-400 px-6 py-10">
+      <style>{`
+        .food-ops-select {
+          position: relative;
+          z-index: 1;
+        }
+
+        .food-ops-select:focus-within {
+          z-index: 12;
+        }
+
+        .food-ops-select-trigger {
+          display: flex;
+          min-height: 2.95rem;
+          align-items: center;
+          justify-content: space-between;
+          gap: 0.75rem;
+          text-align: left;
+        }
+
+        .food-ops-select-trigger span {
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .food-ops-select-trigger svg {
+          flex: 0 0 auto;
+          color: rgb(103, 232, 249);
+        }
+
+        .food-ops-select-menu {
+          position: absolute;
+          top: calc(100% + 0.4rem);
+          right: 0;
+          left: 0;
+          z-index: 30;
+          max-height: 16rem;
+          overflow-y: auto;
+          border: 1px solid rgba(103, 232, 249, 0.34);
+          border-radius: 0.75rem;
+          background: linear-gradient(180deg, rgba(3, 18, 12, 0.99), rgba(0, 0, 0, 0.99)), #020806;
+          box-shadow: 0 18px 34px rgba(0, 0, 0, 0.72), inset 0 0 18px rgba(34, 211, 238, 0.06);
+          padding: 0.35rem;
+          scrollbar-color: rgba(103, 232, 249, 0.56) rgba(2, 8, 6, 0.92);
+        }
+
+        .food-ops-select-menu button {
+          display: block;
+          width: 100%;
+          border: 0;
+          border-radius: 0.55rem;
+          background: transparent;
+          padding: 0.72rem 0.78rem;
+          color: rgb(220, 252, 231);
+          text-align: left;
+          transition: background-color 180ms, color 180ms;
+        }
+
+        .food-ops-select-menu button:hover,
+        .food-ops-select-menu button:focus-visible,
+        .food-ops-select-menu button.selected {
+          background: rgba(34, 211, 238, 0.16);
+          color: rgb(236, 254, 255);
+          outline: none;
+        }
+      `}</style>
       <div className="mx-auto max-w-6xl">
         <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -665,61 +737,48 @@ export default function MealPlannerPage() {
               </FormField>
 
               <FormField label="Meal Type">
-                <select
+                <MealSelect
                   value={mealType}
-                  onChange={(e) => setMealType(e.target.value)}
-                  className="food-ops-input"
-                >
-                  {MEAL_TYPE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
+                  options={MEAL_TYPE_OPTIONS}
+                  onChange={setMealType}
+                />
               </FormField>
             </MealFormSection>
 
             <MealFormSection title="Meal Source">
               <FormField label="Source">
-                <select
+                <MealSelect
                   value={mealSource}
-                  onChange={(e) => setMealSource(e.target.value)}
-                  className="food-ops-input"
-                >
-                  {MEAL_SOURCE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
+                  options={MEAL_SOURCE_OPTIONS}
+                  onChange={setMealSource}
+                />
               </FormField>
 
               <FormField label="Recipe">
-                <select
+                <MealSelect
                   value={recipeId}
-                  onChange={(e) => selectRecipe(e.target.value)}
-                  className="food-ops-input"
+                  options={[
+                    { value: "", label: "-- Choose Recipe --" },
+                    ...sortRecipesByTitle(recipes).map((recipe) => ({ value: recipe.id, label: recipe.title })),
+                  ]}
+                  onChange={selectRecipe}
                   disabled={mealSource !== "recipe"}
-                >
-                  <option value="">-- Choose Recipe --</option>
-                  {sortRecipesByTitle(recipes).map((recipe) => (
-                    <option key={recipe.id} value={recipe.id}>
-                      {recipe.title}
-                    </option>
-                  ))}
-                </select>
+                />
               </FormField>
 
               {mealSource === "food_vault" && (
                 <FormField label="Food Vault Item">
-                  <select
+                  <MealSelect
                     value={foodVaultItemId}
-                    onChange={(e) => selectFoodVaultItem(e.target.value)}
-                    className="food-ops-input"
-                  >
-                    <option value="">-- Choose Food --</option>
-                    {sortFoodItemsByName(foodItems).map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {foodDisplayName(item)} ({item.current_quantity ?? 0} left)
-                      </option>
-                    ))}
-                  </select>
+                    options={[
+                      { value: "", label: "-- Choose Food --" },
+                      ...sortFoodItemsByName(foodItems).map((item) => ({
+                        value: item.id,
+                        label: `${foodDisplayName(item)} (${item.current_quantity ?? 0} left)`,
+                      })),
+                    ]}
+                    onChange={selectFoodVaultItem}
+                  />
                 </FormField>
               )}
 
@@ -1056,10 +1115,67 @@ function MealFormSection({
 
 function FormField({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className="block">
+    <div className="block">
       <span className="mb-2 block text-xs font-bold uppercase tracking-[0.16em] text-green-300/72">{label}</span>
       {children}
-    </label>
+    </div>
+  );
+}
+
+function MealSelect({
+  value,
+  options,
+  onChange,
+  disabled = false,
+}: {
+  value: string;
+  options: MealSelectOption[];
+  onChange: (value: string) => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = options.find((option) => option.value === value);
+
+  return (
+    <div
+      className="food-ops-select"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setOpen(false);
+        }
+      }}
+    >
+      <button
+        type="button"
+        className="food-ops-input food-ops-select-trigger"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        disabled={disabled}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span>{selected?.label || "Select one"}</span>
+        <ChevronDown aria-hidden="true" className="h-4 w-4" />
+      </button>
+      {open && (
+        <div className="food-ops-select-menu" role="listbox">
+          {options.map((option) => (
+            <button
+              key={option.value || "__empty"}
+              type="button"
+              role="option"
+              aria-selected={option.value === value}
+              className={option.value === value ? "selected" : ""}
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -14,9 +14,13 @@ import {
   MemoryStick,
   MonitorCog,
   Music2,
+  Pause,
+  Play,
   Network,
   Plus,
   Radio,
+  SkipBack,
+  SkipForward,
   TerminalSquare,
   Timer,
   Wifi,
@@ -95,11 +99,22 @@ type CalendarEvent = {
   detail?: string;
 };
 
+type MediaStatus = {
+  title?: string | null;
+  artist?: string | null;
+  album?: string | null;
+  artworkUrl?: string | null;
+  isPlaying?: boolean;
+  source?: string | null;
+};
+
 declare global {
   interface Window {
     jarvisDesktop?: {
       getSystemStats?: () => Promise<NativeStats>;
       launchApp?: (appId: string) => Promise<void>;
+      getMediaStatus?: () => Promise<MediaStatus | null>;
+      controlMedia?: (action: "previous" | "playPause" | "next") => Promise<void>;
     };
   }
 }
@@ -125,6 +140,7 @@ export default function DesktopMissionControl() {
   const [now, setNow] = useState(() => new Date());
   const [dashboard, setDashboard] = useState<ForgeDashboard>({});
   const [systemStats, setSystemStats] = useState<NativeStats | null>(null);
+  const [mediaStatus, setMediaStatus] = useState<MediaStatus | null>(null);
   const [calendarLine, setCalendarLine] = useState("Calendar link online");
   const [dataState, setDataState] = useState("Synchronizing Forge");
 
@@ -164,6 +180,22 @@ export default function DesktopMissionControl() {
 
     loadDesktopData();
     const timer = window.setInterval(loadDesktopData, 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadMediaStatus() {
+      const bridgeStatus = await window.jarvisDesktop?.getMediaStatus?.();
+      if (!cancelled) setMediaStatus(bridgeStatus || readBrowserMediaSession());
+    }
+
+    loadMediaStatus();
+    const timer = window.setInterval(loadMediaStatus, 2_500);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
@@ -230,6 +262,7 @@ export default function DesktopMissionControl() {
       />
 
       <QuickLaunchDock />
+      <NowPlayingBar media={mediaStatus} />
       <SystemOnline dataState={dataState} />
     </main>
   );
@@ -445,6 +478,53 @@ function QuickLaunchDock() {
   );
 }
 
+function NowPlayingBar({ media }: { media: MediaStatus | null }) {
+  const isPlaying = media?.isPlaying ?? false;
+  const title = media?.title || "YouTube Music";
+  const artist = media?.artist || (media ? "Now playing" : "No track detected");
+  const source = media?.source || "YouTube Music";
+
+  async function control(action: "previous" | "playPause" | "next") {
+    if (window.jarvisDesktop?.controlMedia) {
+      await window.jarvisDesktop.controlMedia(action);
+      return;
+    }
+
+    if (action === "playPause") {
+      await window.jarvisDesktop?.launchApp?.("youtube-music");
+      window.open("https://music.youtube.com", "_blank", "noopener,noreferrer");
+    }
+  }
+
+  return (
+    <aside className={styles.nowPlaying} aria-label="Now playing">
+      <div className={styles.albumArt}>
+        {media?.artworkUrl ? (
+          <Image src={media.artworkUrl} alt="" width={58} height={58} unoptimized />
+        ) : (
+          <Music2 size={26} />
+        )}
+      </div>
+      <div className={styles.trackInfo}>
+        <span>{source}</span>
+        <strong>{title}</strong>
+        <em>{artist}</em>
+      </div>
+      <div className={styles.mediaControls}>
+        <button type="button" aria-label="Previous track" onClick={() => control("previous")}>
+          <SkipBack size={17} />
+        </button>
+        <button type="button" className={styles.playPause} aria-label={isPlaying ? "Pause" : "Play"} onClick={() => control("playPause")}>
+          {isPlaying ? <Pause size={18} /> : <Play size={18} />}
+        </button>
+        <button type="button" aria-label="Next track" onClick={() => control("next")}>
+          <SkipForward size={17} />
+        </button>
+      </div>
+    </aside>
+  );
+}
+
 function SystemOnline({ dataState }: { dataState: string }) {
   return (
     <div className={styles.systemOnline}>
@@ -455,6 +535,29 @@ function SystemOnline({ dataState }: { dataState: string }) {
       </div>
     </div>
   );
+}
+
+function readBrowserMediaSession(): MediaStatus | null {
+  const mediaSession = navigator.mediaSession as MediaSession & {
+    metadata?: {
+      title?: string;
+      artist?: string;
+      album?: string;
+      artwork?: Array<{ src?: string }>;
+    } | null;
+    playbackState?: MediaSessionPlaybackState;
+  };
+
+  if (!mediaSession?.metadata) return null;
+
+  return {
+    title: mediaSession.metadata.title,
+    artist: mediaSession.metadata.artist,
+    album: mediaSession.metadata.album,
+    artworkUrl: mediaSession.metadata.artwork?.at(-1)?.src || mediaSession.metadata.artwork?.[0]?.src,
+    isPlaying: mediaSession.playbackState === "playing",
+    source: "YouTube Music",
+  };
 }
 
 function DriftingParticles() {

@@ -7,10 +7,36 @@ body {
   background: black;
   color: #86efac;
   font-family: Arial, Helvetica, sans-serif;
+  color-scheme: dark;
 }
 
 * {
   box-sizing: border-box;
+}
+
+select {
+  color-scheme: dark;
+}
+
+select option,
+select optgroup {
+  background-color: #020806;
+  color: rgb(220, 252, 231);
+}
+
+select option:checked,
+select option:hover,
+select option:focus {
+  background-color: #12301f;
+  color: rgb(240, 253, 244);
+}
+
+.food-ops-input option,
+.food-ops-input optgroup,
+.health-ops-input option,
+.health-ops-input optgroup {
+  background-color: #020806;
+  color: rgb(220, 252, 231);
 }
 
 .command-nav-link {
@@ -923,6 +949,92 @@ body {
 .food-ops-input:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+.food-ops-select {
+  position: relative;
+  z-index: 1;
+}
+
+.food-ops-select:focus-within {
+  z-index: 12;
+}
+
+.food-ops-select-trigger {
+  display: flex;
+  min-height: 2.95rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  text-align: left;
+}
+
+.food-ops-select-trigger span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.food-ops-select-trigger svg {
+  flex: 0 0 auto;
+  color: rgb(103, 232, 249);
+}
+
+.food-ops-select-menu {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  left: 0;
+  z-index: 30;
+  max-height: 16rem;
+  overflow-y: auto;
+  border: 1px solid rgba(103, 232, 249, 0.34);
+  border-radius: 0.75rem;
+  background:
+    linear-gradient(180deg, rgba(3, 18, 12, 0.99), rgba(0, 0, 0, 0.99)),
+    #020806;
+  box-shadow:
+    0 18px 34px rgba(0, 0, 0, 0.72),
+    inset 0 0 18px rgba(34, 211, 238, 0.06);
+  padding: 0.35rem;
+  scrollbar-color: rgba(103, 232, 249, 0.56) rgba(2, 8, 6, 0.92);
+}
+
+.food-ops-select-menu::-webkit-scrollbar {
+  width: 0.65rem;
+}
+
+.food-ops-select-menu::-webkit-scrollbar-track {
+  background: rgba(2, 8, 6, 0.92);
+}
+
+.food-ops-select-menu::-webkit-scrollbar-thumb {
+  border: 2px solid rgba(2, 8, 6, 0.92);
+  border-radius: 999px;
+  background: rgba(103, 232, 249, 0.56);
+}
+
+.food-ops-select-menu button {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 0.55rem;
+  background: transparent;
+  padding: 0.72rem 0.78rem;
+  color: rgb(220, 252, 231);
+  text-align: left;
+  transition:
+    background-color 180ms,
+    color 180ms;
+}
+
+.food-ops-select-menu button:hover,
+.food-ops-select-menu button:focus-visible,
+.food-ops-select-menu button.selected {
+  background: rgba(34, 211, 238, 0.16);
+  color: rgb(236, 254, 255);
+  outline: none;
 }
 
 .health-ops-accent {

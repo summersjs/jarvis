@@ -10,6 +10,7 @@ import {
   Boxes,
   BriefcaseBusiness,
   CheckCircle2,
+  ChevronDown,
   Clock3,
   Compass,
   Cpu,
@@ -126,6 +127,11 @@ type ForgeGoalOption = {
   category?: string | null;
   mission_type?: string | null;
   project?: LinkedGoal["project"];
+};
+
+type ForgeDropdownOption = {
+  value: string;
+  label: string;
 };
 
 type ForgeDashboard = {
@@ -834,21 +840,18 @@ function ForgeModal({
             <ForgeInput label="Project Title" value={form.title} onChange={(value) => onChange("title", value)} required />
             <ForgeSelect label="Category" value={form.category} options={FORGE_CATEGORIES.map((item) => item.name)} onChange={(value) => onChange("category", value)} />
             <ForgeSelect label="Status" value={form.status} options={FORGE_STATUSES} onChange={(value) => onChange("status", value)} />
-            <label className="forge-input">
-              <span>Link to Goal</span>
-              <select
-                value={form.goal_id}
-                onChange={(event) => {
-                  const goal = goals.find((item) => item.id === event.target.value) || null;
-                  onGoalSelect(goal);
-                }}
-              >
-                <option value="">No linked goal</option>
-                {goals.map((goal) => (
-                  <option key={goal.id} value={goal.id}>{goal.title}</option>
-                ))}
-              </select>
-            </label>
+            <ForgeDropdown
+              label="Link to Goal"
+              value={form.goal_id}
+              options={[
+                { value: "", label: "No linked goal" },
+                ...goals.map((goal) => ({ value: goal.id, label: goal.title })),
+              ]}
+              onChange={(value) => {
+                const goal = goals.find((item) => item.id === value) || null;
+                onGoalSelect(goal);
+              }}
+            />
             <ForgeInput label="Progress %" value={form.progress_percent} onChange={(value) => onChange("progress_percent", value)} type="number" />
             <ForgeInput label="Project Type / Template" value={form.project_type} onChange={(value) => onChange("project_type", value)} />
             <ForgeInput label="Tags" value={form.tags} onChange={(value) => onChange("tags", value)} placeholder="comma, separated, tags" />
@@ -940,26 +943,71 @@ function ForgeTextarea({ label, value, onChange, required }: { label: string; va
 }
 
 function ForgeSelect({ label, value, options, onChange }: { label: string; value: string; options: string[]; onChange: (value: string) => void }) {
+  return <ForgeDropdown label={label} value={value} options={options.map((option) => ({ value: option, label: option }))} onChange={onChange} />;
+}
+
+function ForgeDropdown({
+  label,
+  value,
+  options,
+  onChange,
+  disabled = false,
+}: {
+  label: string;
+  value: string;
+  options: ForgeDropdownOption[];
+  onChange: (value: string) => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = options.find((option) => option.value === value);
+
   return (
-    <label className="forge-input">
+    <div
+      className="forge-input forge-select"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setOpen(false);
+        }
+      }}
+    >
       <span>{label}</span>
-      <select value={value} onChange={(event) => onChange(event.target.value)}>
-        {options.map((option) => <option key={option} value={option}>{option}</option>)}
-      </select>
-    </label>
+      <button
+        type="button"
+        className="forge-select-trigger"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        disabled={disabled}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <strong>{selected?.label || "Select one"}</strong>
+        <ChevronDown aria-hidden="true" size={16} />
+      </button>
+      {open && (
+        <div className="forge-select-menu" role="listbox" aria-label={label}>
+          {options.map((option) => (
+            <button
+              key={option.value || "__empty"}
+              type="button"
+              role="option"
+              aria-selected={option.value === value}
+              className={option.value === value ? "selected" : ""}
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
 function ProjectSelect({ projects, value, onChange }: { projects: ForgeProject[]; value: string; onChange: (value: string) => void }) {
-  return (
-    <label className="forge-input">
-      <span>Linked Project</span>
-      <select value={value} onChange={(event) => onChange(event.target.value)}>
-        <option value="">Unassigned Forge Inbox</option>
-        {projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
-      </select>
-    </label>
-  );
+  return <ForgeDropdown label="Linked Project" value={value} options={[{ value: "", label: "Unassigned Forge Inbox" }, ...projects.map((project) => ({ value: project.id, label: project.title }))]} onChange={onChange} />;
 }
 
 type FolderOptions = { primary: string[]; children: Record<string, string[]> };
@@ -968,39 +1016,37 @@ function ForgeFolderSelect({ form, folderOptions, onChange }: { form: FormState;
   const children = form.folder_primary ? folderOptions.children[form.folder_primary] || [] : [];
   return (
     <div className="forge-folder-select">
-      <label className="forge-input">
-        <span>Folder</span>
-        <select
-          value={form.folder_primary}
-          onChange={(event) => {
-            onChange("folder_primary", event.target.value);
-            onChange("folder_child", "");
-            onChange("new_folder_primary", "");
-          }}
-        >
-          <option value="">Unfiled</option>
-          {folderOptions.primary.map((item) => <option key={item} value={item}>{item}</option>)}
-          <option value="__new">Create new folder...</option>
-        </select>
-      </label>
+      <ForgeDropdown
+        label="Folder"
+        value={form.folder_primary}
+        options={[
+          { value: "", label: "Unfiled" },
+          ...folderOptions.primary.map((item) => ({ value: item, label: item })),
+          { value: "__new", label: "Create new folder..." },
+        ]}
+        onChange={(value) => {
+          onChange("folder_primary", value);
+          onChange("folder_child", "");
+          onChange("new_folder_primary", "");
+        }}
+      />
       {form.folder_primary === "__new" ? (
         <ForgeInput label="New Folder" value={form.new_folder_primary} onChange={(value) => onChange("new_folder_primary", value)} placeholder="Characters" />
       ) : (
-        <label className="forge-input">
-          <span>Subfolder</span>
-          <select
-            value={form.folder_child}
-            onChange={(event) => {
-              onChange("folder_child", event.target.value);
-              onChange("new_folder_child", "");
-            }}
-            disabled={!form.folder_primary}
-          >
-            <option value="">None</option>
-            {children.map((item) => <option key={item} value={item}>{item}</option>)}
-            {form.folder_primary && <option value="__new">Create new subfolder...</option>}
-          </select>
-        </label>
+        <ForgeDropdown
+          label="Subfolder"
+          value={form.folder_child}
+          options={[
+            { value: "", label: "None" },
+            ...children.map((item) => ({ value: item, label: item })),
+            ...(form.folder_primary ? [{ value: "__new", label: "Create new subfolder..." }] : []),
+          ]}
+          disabled={!form.folder_primary}
+          onChange={(value) => {
+            onChange("folder_child", value);
+            onChange("new_folder_child", "");
+          }}
+        />
       )}
       {form.folder_child === "__new" && form.folder_primary !== "__new" && (
         <ForgeInput label="New Subfolder" value={form.new_folder_child} onChange={(value) => onChange("new_folder_child", value)} placeholder="Lucien" />
@@ -2718,7 +2764,25 @@ function ForgeStyles() {
         max-height: calc(100vh - 48px);
         overflow-y: auto;
         padding: 18px;
+        scrollbar-color: rgba(212, 173, 101, 0.62) rgba(7, 3, 1, 0.88);
         width: min(780px, 96vw);
+      }
+
+      .forge-modal::-webkit-scrollbar,
+      .forge-select-menu::-webkit-scrollbar {
+        width: 10px;
+      }
+
+      .forge-modal::-webkit-scrollbar-track,
+      .forge-select-menu::-webkit-scrollbar-track {
+        background: rgba(7, 3, 1, 0.88);
+      }
+
+      .forge-modal::-webkit-scrollbar-thumb,
+      .forge-select-menu::-webkit-scrollbar-thumb {
+        border: 2px solid rgba(7, 3, 1, 0.88);
+        border-radius: 999px;
+        background: rgba(212, 173, 101, 0.62);
       }
 
       .forge-modal header,
@@ -2809,8 +2873,121 @@ function ForgeStyles() {
         border-radius: 8px;
         background: rgba(0, 0, 0, 0.34);
         color: #eadfc7;
+        color-scheme: dark;
         outline: none;
         padding: 10px 11px;
+      }
+
+      .forge-select {
+        position: relative;
+        z-index: 1;
+      }
+
+      .forge-select:focus-within {
+        z-index: 8;
+      }
+
+      .forge-modal .forge-select-trigger {
+        align-items: center;
+        display: flex;
+        justify-content: space-between;
+        min-height: 40px;
+        width: 100%;
+        border: 1px solid rgba(212, 173, 101, 0.24);
+        border-radius: 8px;
+        background:
+          linear-gradient(180deg, rgba(18, 10, 2, 0.96), rgba(2, 2, 2, 0.96)),
+          rgba(0, 0, 0, 0.72);
+        color: #eadfc7;
+        padding: 10px 11px;
+        text-align: left;
+        transform: none;
+      }
+
+      .forge-modal .forge-select-trigger:hover,
+      .forge-modal .forge-select-trigger:focus-visible {
+        transform: none;
+        border-color: rgba(244, 211, 143, 0.55);
+        background:
+          linear-gradient(180deg, rgba(38, 20, 4, 0.98), rgba(5, 3, 2, 0.98)),
+          rgba(0, 0, 0, 0.82);
+        box-shadow: 0 0 18px rgba(212, 173, 101, 0.16);
+        outline: none;
+      }
+
+      .forge-modal .forge-select-trigger:disabled {
+        cursor: not-allowed;
+        opacity: 0.48;
+      }
+
+      .forge-select-trigger strong {
+        min-width: 0;
+        overflow: hidden;
+        font-size: 0.9rem;
+        font-weight: 700;
+        letter-spacing: 0.01em;
+        text-overflow: ellipsis;
+        text-transform: none;
+        white-space: nowrap;
+      }
+
+      .forge-select-trigger svg {
+        flex: 0 0 auto;
+      }
+
+      .forge-select-menu {
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 0;
+        right: 0;
+        z-index: 40;
+        max-height: 240px;
+        overflow-y: auto;
+        border: 1px solid rgba(244, 211, 143, 0.28);
+        border-radius: 10px;
+        background:
+          linear-gradient(180deg, rgba(18, 10, 2, 0.98), rgba(4, 2, 1, 0.98)),
+          #070301;
+        box-shadow:
+          0 18px 32px rgba(0, 0, 0, 0.64),
+          inset 0 0 18px rgba(212, 173, 101, 0.06);
+        padding: 5px;
+        scrollbar-color: rgba(212, 173, 101, 0.62) rgba(7, 3, 1, 0.88);
+      }
+
+      .forge-modal .forge-select-menu button {
+        display: block;
+        width: 100%;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: #eadfc7;
+        padding: 9px 10px;
+        text-align: left;
+        transform: none;
+      }
+
+      .forge-modal .forge-select-menu button:hover,
+      .forge-modal .forge-select-menu button:focus-visible,
+      .forge-modal .forge-select-menu button.selected {
+        transform: none;
+        background: rgba(212, 173, 101, 0.16);
+        color: #fff4df;
+        box-shadow: none;
+        outline: none;
+      }
+
+      .forge-input select option,
+      .forge-input select optgroup {
+        background: #070301;
+        color: #eadfc7;
+      }
+
+      .forge-input select option:checked,
+      .forge-input select option:hover,
+      .forge-input select option:focus {
+        background: #4a2508;
+        color: #fff4df;
       }
 
       .forge-input textarea {

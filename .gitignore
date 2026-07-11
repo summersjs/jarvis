@@ -10,6 +10,11 @@ venv/
 .venv/
 .pnpm-store/
 .env/
+services/kokoro-tts/.venv/
+services/kokoro-tts/__pycache__/
+services/kokoro-tts/output/
+services/kokoro-tts/cache/
+services/kokoro-tts/models/
 
 # Node / Next.js
 node_modules/

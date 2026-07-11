@@ -419,7 +419,10 @@ export default function CommandCenterPage() {
   }
 
   useEffect(() => {
-    loadDashboard();
+    const timer = window.setTimeout(() => {
+      void loadDashboard();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   async function toggleStatus() {
@@ -505,9 +508,15 @@ export default function CommandCenterPage() {
               <h1 className="text-[2.6rem] font-black leading-none text-green-100 md:text-[3.3rem]">
                 COMMAND CENTER
               </h1>
-              <p className="text-lg font-semibold text-green-200/80">
-                {dashboard ? formatDate(dashboard.date) : "Loading today..."}
-              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                <p className="text-lg font-semibold text-green-200/80">
+                  {dashboard ? formatDate(dashboard.date) : "Loading today..."}
+                </p>
+                <Link href="/chloe" className="command-nav-link gap-2 px-3 py-2 text-xs font-black uppercase tracking-[0.22em]">
+                  <BrainCircuit className="h-4 w-4" />
+                  Chloe
+                </Link>
+              </div>
               {dashboard?.mission_phase && (
                 <div className="flex flex-wrap items-center gap-2 pt-1">
                   <span className="mission-badge">{dashboard.mission_phase.label}</span>

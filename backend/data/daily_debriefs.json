@@ -624,5 +624,82 @@
       "win": "I got the Jarvis machine up and running today!"
     },
     "weekly_score": 89
+  },
+  {
+    "completed_at": "2026-07-10T00:58:27.983+00:00",
+    "created_at": "2026-07-10T00:58:28.021629+00:00",
+    "daily_score": 96,
+    "date": "2026-07-09",
+    "finance": {
+      "category": "Food",
+      "money_spent_today": 0.8,
+      "notes": null,
+      "spending_status": "UNDER CONTROL",
+      "unexpected_expense": false
+    },
+    "id": "e9e9c2ac-4b10-42fa-9194-63ade0339afe",
+    "is_finalized": true,
+    "lessons": {
+      "adjust_tomorrow": "Focus on what matters.",
+      "did_not_work": "",
+      "worked": "Find the most up-to-date tutorials online"
+    },
+    "lifetime_rank": "Legend",
+    "lifetime_score": 100,
+    "mission_score": 96,
+    "notes": null,
+    "nutrition": {
+      "ate_out_today": false,
+      "estimated_food_spend": 0.8,
+      "meals_completed": 1,
+      "meals_planned_today": 1,
+      "notes": null
+    },
+    "objectives": [
+      {
+        "blocker": "",
+        "completed": true,
+        "id": "6c3283ad-d3bd-4172-95ca-31eb0a359b8d",
+        "notes": "Last night we went to Texas Roadhouse.",
+        "title": "1 Date weekly"
+      }
+    ],
+    "overall_status": "ok",
+    "summary": "Evening debrief, John. Today was complete. Daily score 96. Weekly score 90. Lifetime rank Legend. bench was scheduled today. You completed 1 of 1 goal impacts today. Weekly goals moved: 1 completed, 1 above and beyond. Workout logged: bench. That session moved bench pushed the strength plan closer to the next milestone. Stayed under control on spending. Chronicles logged today. Archive total is 8 documented days, current streak 4. Next protocol is squat on Friday. Tomorrow looks like a squat day. Main lesson: Keep squat day simple and stay on plan. Top priority tomorrow is Prepare for squat.",
+    "tomorrow": {
+      "calendar": [
+        "Lisa birthday"
+      ],
+      "meal_prep": "You have 1 events tomorrow. Lisa birthday  from all day on 2026-07-10.",
+      "priorities": [
+        "Prepare for squat"
+      ],
+      "reminder": "Next protocol: squat",
+      "shopping_items": [],
+      "top_priorities": [
+        "Prepare for squat"
+      ],
+      "workout": {
+        "label": "squat",
+        "lift": "squat",
+        "weekday": "Friday"
+      }
+    },
+    "training": {
+      "energy_level": null,
+      "lift_completed": "bench",
+      "pain_notes": null,
+      "top_set_reps": 1,
+      "top_set_weight": 285.0,
+      "training_notes": null,
+      "workout_completed": true
+    },
+    "updated_at": "2026-07-10T00:58:28.294729+00:00",
+    "user_id": "john",
+    "victory": {
+      "category": "App Build",
+      "win": "I worked on the Tierra daycare game. That was pretty fun. I also worked out. "
+    },
+    "weekly_score": 90
   }
 ]

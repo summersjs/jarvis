@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends
 from backend.core.security import verify_api_key
 from backend.db.supabase_client import supabase
 from backend.integrations.google_calendar import CREDS_PATH, TOKEN_PATH, refresh_calendar_auth
+from backend.services.ollama_service import get_ollama_status
+from backend.services.tts_service import get_tts_status
 
 router = APIRouter()
 STARTED_AT = datetime.now(timezone.utc)
@@ -65,14 +67,31 @@ def _calendar_credentials_check():
     if not TOKEN_PATH.exists():
         raise RuntimeError("token.json missing")
     auth = refresh_calendar_auth()
-    return f"Google Calendar auth verified · {auth.get('calendar_summary', 'Primary calendar')}"
+    return f"Google Calendar auth verified - {auth.get('calendar_summary', 'Primary calendar')}"
+
+
+def _ollama_check():
+    status = get_ollama_status()
+    if not status.get("online"):
+        raise RuntimeError("Ollama is offline")
+    if not status.get("modelAvailable"):
+        raise RuntimeError(f"{status.get('model', 'Configured model')} is not installed")
+    return f"{status.get('model')} ready for Chloe"
+
+
+def _tts_check():
+    status = get_tts_status()
+    if not status.get("online"):
+        raise RuntimeError("Kokoro TTS service is offline")
+    voices = ", ".join(status.get("availableVoices") or [])
+    return f"Kokoro TTS online - voices: {voices}"
 
 
 @router.get("/status", dependencies=[Depends(verify_api_key)])
 def get_status():
     uptime_seconds = int((datetime.now(timezone.utc) - STARTED_AT).total_seconds())
     checks = [
-        _run_check("Local API", lambda: f"FastAPI online · uptime {uptime_seconds}s"),
+        _run_check("Local API", lambda: f"FastAPI online - uptime {uptime_seconds}s"),
         _run_check("Environment", _env_check),
         _run_check("Google Calendar Auth", _calendar_credentials_check),
         _run_check("Supabase Database", _table_check("goals")),
@@ -84,13 +103,15 @@ def get_status():
         _run_check("Health Ops", _table_check("health_events")),
         _run_check("Food Vault", _table_check("food_vault_items")),
         _run_check("Shopping Lists", _table_check("shopping_lists")),
+        _run_check("Chloe Local LLM", _ollama_check),
+        _run_check("Chloe Voice TTS", _tts_check),
     ]
     offline_count = sum(1 for check in checks if check["state"] == "offline")
     overall = "Online" if offline_count == 0 else "Degraded"
 
     return {
         "systems": overall,
-        "brain": "LLM pending · planned 07/20/2026",
+        "brain": "Chloe local LLM wired - qwen3:8b",
         "user": "John Summers Sr",
         "clearance": "Active",
         "checked_at": datetime.now(timezone.utc).isoformat(),

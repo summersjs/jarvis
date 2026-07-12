@@ -47,7 +47,8 @@ def get_ollama_status() -> dict:
         }
 
 
-def chat_with_chloe(messages: list[dict]) -> dict:
+def chat_with_chloe(messages: list[dict], model: str | None = None) -> dict:
+    selected_model = (model or OLLAMA_MODEL).strip()
     safe_messages = [
         {"role": "system", "content": CHLOE_SYSTEM_PROMPT},
         *[
@@ -58,7 +59,7 @@ def chat_with_chloe(messages: list[dict]) -> dict:
     ]
 
     try:
-        payload = {"model": OLLAMA_MODEL, "messages": safe_messages, "stream": False}
+        payload = {"model": selected_model, "messages": safe_messages, "stream": False}
         data = _request_json("/api/chat", payload, timeout=OLLAMA_TIMEOUT_SECONDS)
     except urllib.error.URLError as exc:
         raise OllamaServiceError("Ollama is offline. Start Ollama and try again.", "offline") from exc
@@ -69,8 +70,8 @@ def chat_with_chloe(messages: list[dict]) -> dict:
     content = message.get("content") if isinstance(message, dict) else None
     if not content:
         status = get_ollama_status()
-        if status["online"] and not status["modelAvailable"]:
-            raise OllamaServiceError(f"Model {OLLAMA_MODEL} is not installed. Run: ollama pull {OLLAMA_MODEL}", "model_missing")
+        if status["online"] and selected_model not in status.get("models", []):
+            raise OllamaServiceError(f"Model {selected_model} is not installed. Run: ollama pull {selected_model}", "model_missing")
         raise OllamaServiceError("Ollama returned an empty response.", "invalid_response")
 
-    return {"message": {"role": "assistant", "content": content.strip()}, "model": OLLAMA_MODEL}
+    return {"message": {"role": "assistant", "content": content.strip()}, "model": selected_model}

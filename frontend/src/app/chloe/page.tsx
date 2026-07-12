@@ -9,6 +9,7 @@ import {
   Play,
   RotateCcw,
   Send,
+  Sparkles,
   Square,
   Trash2,
   Volume2,
@@ -22,11 +23,14 @@ const API_KEY = process.env.NEXT_PUBLIC_JARVIS_API_KEY || "";
 const HISTORY_KEY = "jarvis.chloe.history";
 const MODE_KEY = "jarvis.chloe.outputMode";
 const VOICE_KEY = "jarvis.chloe.voice";
+const MODEL_KEY = "jarvis.chloe.model";
+const HAUHAU_MODEL = "fredrezones55/Qwen3.5-Uncensored-HauhauCS-Aggressive:4b";
 
 type ChatRole = "user" | "assistant";
 type OutputMode = "text" | "voice" | "both";
 type VoiceId = "af_bella" | "af_nicole";
 type StatusKind = "Offline" | "Connecting" | "Ready" | "Thinking" | "Speaking" | "Error";
+type ReadoutKind = "morning" | "debrief";
 
 type ChatMessage = {
   id: string;
@@ -36,7 +40,7 @@ type ChatMessage = {
 };
 
 type AssistantStatus = {
-  ollama?: { online: boolean; modelAvailable: boolean; model: string };
+  ollama?: { online: boolean; modelAvailable: boolean; model: string; models?: string[] };
   tts?: { online: boolean; defaultVoice: VoiceId; availableVoices: VoiceId[] };
 };
 
@@ -56,9 +60,11 @@ export default function ChloePage() {
   const [input, setInput] = useState("");
   const [mode, setMode] = useState<OutputMode>(() => loadStoredMode());
   const [voice, setVoice] = useState<VoiceId>(() => loadStoredVoice());
+  const [selectedModel, setSelectedModel] = useState(() => loadStoredModel());
   const [status, setStatus] = useState<StatusKind>("Connecting");
   const [assistantStatus, setAssistantStatus] = useState<AssistantStatus>({});
   const [error, setError] = useState("");
+  const [activeReadout, setActiveReadout] = useState<ReadoutKind | null>(null);
   const [activeAudioId, setActiveAudioId] = useState<string | null>(null);
   const [isPaused, setIsPaused] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -79,6 +85,10 @@ export default function ChloePage() {
   }, [voice]);
 
   useEffect(() => {
+    window.localStorage.setItem(MODEL_KEY, selectedModel);
+  }, [selectedModel]);
+
+  useEffect(() => {
     loadStatus();
     const timer = window.setInterval(loadStatus, 30_000);
     return () => window.clearInterval(timer);
@@ -90,7 +100,11 @@ export default function ChloePage() {
   }, []);
 
   const visibleMessages = useMemo(() => messages, [messages]);
-  const model = assistantStatus.ollama?.model || "qwen3:8b";
+  const modelOptions = useMemo(() => {
+    const models = assistantStatus.ollama?.models || [];
+    return Array.from(new Set([selectedModel, assistantStatus.ollama?.model || "qwen3:8b", HAUHAU_MODEL, ...models].filter(Boolean)));
+  }, [assistantStatus.ollama?.model, assistantStatus.ollama?.models, selectedModel]);
+  const model = selectedModel || assistantStatus.ollama?.model || "qwen3:8b";
   const voiceLabel = VOICES.find((item) => item.id === voice)?.label || "Bella";
 
   async function loadStatus() {
@@ -99,9 +113,26 @@ export default function ChloePage() {
       const data = await response.json();
       setAssistantStatus(data);
       setStatus(data.ollama?.online && data.ollama?.modelAvailable ? "Ready" : "Offline");
+      if (!window.localStorage.getItem(MODEL_KEY) && data.ollama?.model) {
+        setSelectedModel(data.ollama.model);
+      }
     } catch {
       setStatus("Offline");
     }
+  }
+
+  async function askChloe(nextHistory: ChatMessage[]) {
+    const response = await fetch(`${API_BASE}/assistant/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+      body: JSON.stringify({
+        model,
+        messages: nextHistory.map(({ role, content: body }) => ({ role, content: body })),
+      }),
+    });
+    if (!response.ok) throw new Error(await friendlyError(response));
+    const data = await response.json();
+    return data.message.content as string;
   }
 
   async function sendMessage() {
@@ -117,19 +148,11 @@ export default function ChloePage() {
     setStatus("Thinking");
 
     try {
-      const response = await fetch(`${API_BASE}/assistant/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-        body: JSON.stringify({
-          messages: nextHistory.map(({ role, content: body }) => ({ role, content: body })),
-        }),
-      });
-      if (!response.ok) throw new Error(await friendlyError(response));
-      const data = await response.json();
+      const reply = await askChloe(nextHistory);
       const assistantMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: "assistant",
-        content: data.message.content,
+        content: reply,
         collapsed: mode === "voice",
       };
       setMessages((current) => [...current, assistantMessage]);
@@ -138,6 +161,43 @@ export default function ChloePage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Chloe tripped over the local wire.");
       setStatus("Error");
+    }
+  }
+
+  async function runReadout(kind: ReadoutKind) {
+    if (status === "Thinking") return;
+    setError("");
+    setActiveReadout(kind);
+    stopAudio();
+    setStatus("Thinking");
+
+    try {
+      const endpoint = kind === "morning" ? "/briefing/morning?user_id=john" : "/debrief/daily?user_id=john";
+      const response = await fetch(`${API_BASE}${endpoint}`, { headers: { "x-api-key": API_KEY } });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Jarvis readout failed.");
+
+      const sourceText = typeof data.spoken_response === "string" ? data.spoken_response : JSON.stringify(data);
+      const prompt = buildReadoutPrompt(kind, sourceText, data);
+      const userMessage: ChatMessage = { id: crypto.randomUUID(), role: "user", content: kind === "morning" ? "Give me my morning brief." : "Give me my daily debrief." };
+      const nextHistory = [...messages, userMessage].slice(-20);
+      setMessages(nextHistory);
+
+      const reply = await askChloe([...nextHistory, { id: "readout-source", role: "user", content: prompt }]);
+      const assistantMessage: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: reply,
+        collapsed: mode === "voice",
+      };
+      setMessages((current) => [...current, assistantMessage]);
+      setStatus("Ready");
+      if (mode !== "text") await speakMessage(assistantMessage);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Chloe could not build that readout.");
+      setStatus("Error");
+    } finally {
+      setActiveReadout(null);
     }
   }
 
@@ -233,11 +293,19 @@ export default function ChloePage() {
         <section className="chloe-meta">
           <InfoPill label="Model" value={model} active={!!assistantStatus.ollama?.modelAvailable} />
           <InfoPill label="Voice" value={voiceLabel} active={!!assistantStatus.tts?.online} />
-          <button className="ghost-action" type="button" disabled title="Coming next">
-            Morning Brief
+          <label className="model-select">
+            <span>Ollama</span>
+            <select value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)}>
+              {modelOptions.map((item) => (
+                <option key={item} value={item}>{item}</option>
+              ))}
+            </select>
+          </label>
+          <button className="ghost-action" type="button" onClick={() => runReadout("morning")} disabled={activeReadout !== null || status === "Thinking"}>
+            <Sparkles size={16} /> {activeReadout === "morning" ? "Briefing" : "Morning Brief"}
           </button>
-          <button className="ghost-action" type="button" disabled title="Coming next">
-            Daily Debrief
+          <button className="ghost-action" type="button" onClick={() => runReadout("debrief")} disabled={activeReadout !== null || status === "Thinking"}>
+            <Sparkles size={16} /> {activeReadout === "debrief" ? "Debriefing" : "Daily Debrief"}
           </button>
         </section>
 
@@ -383,6 +451,26 @@ function loadStoredVoice(): VoiceId {
   return saved && VOICES.some((item) => item.id === saved) ? saved : "af_bella";
 }
 
+function loadStoredModel() {
+  if (typeof window === "undefined") return "qwen3:8b";
+  return window.localStorage.getItem(MODEL_KEY) || "qwen3:8b";
+}
+
+function buildReadoutPrompt(kind: ReadoutKind, spokenText: string, data: unknown) {
+  const label = kind === "morning" ? "morning brief" : "daily debrief";
+  return [
+    `Turn this Jarvis ${label} into Chloe's own spoken words for John.`,
+    "Keep the facts, names, numbers, schedule, workout, money, and priorities accurate.",
+    "Do not sound like the source text. Vary the phrasing so it feels fresh today.",
+    "Make it warm, direct, lightly teasing if natural, and useful. No markdown. No bullet list unless the data truly demands it.",
+    "Keep it concise enough to speak out loud, around 90 to 160 words.",
+    "",
+    `Original spoken text: ${spokenText}`,
+    "",
+    `Raw Jarvis data: ${JSON.stringify(data).slice(0, 7000)}`,
+  ].join("\n");
+}
+
 function ChloeStyles() {
   return (
     <style>{`
@@ -399,6 +487,10 @@ function ChloeStyles() {
       .chloe-status.error, .chloe-status.offline { border-color: rgba(248,113,113,.38); color: #fecaca; }
       .info-pill { display: grid; min-width: 10rem; gap: .18rem; padding: .68rem .8rem; }
       .info-pill strong { font-size: .9rem; }
+      .model-select { display: grid; min-width: min(100%, 25rem); gap: .22rem; border: 1px solid rgba(98,201,255,.22); border-radius: 10px; background: rgba(0,13,24,.58); padding: .54rem .68rem; color: #dff8ff; }
+      .model-select span { color: #42d1ff; font-size: .68rem; font-weight: 900; letter-spacing: .18em; text-transform: uppercase; }
+      .model-select select { width: 100%; border: 0; outline: 0; background: #020806; color: #ecf8ff; font-weight: 800; font-size: .82rem; }
+      .model-select option { background: #020806; color: #ecf8ff; }
       .segmented { display: flex; align-items: center; gap: .7rem; }
       .segmented div { display: inline-flex; border: 1px solid rgba(98,201,255,.18); border-radius: 10px; background: rgba(0,0,0,.28); padding: .22rem; }
       .segmented button, .ghost-action, .icon-button, .send-button, .message-actions button { cursor: pointer; transition: transform 180ms, border-color 180ms, box-shadow 180ms, background 180ms; }

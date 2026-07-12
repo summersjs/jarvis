@@ -17,7 +17,7 @@ def assistant_status():
 @router.post("/assistant/chat")
 def assistant_chat(payload: AssistantChatRequest):
     try:
-        return chat_with_chloe([message.dict() for message in payload.messages])
+        return chat_with_chloe([message.dict() for message in payload.messages], payload.model)
     except OllamaServiceError as exc:
         raise HTTPException(status_code=503, detail={"code": exc.code, "message": str(exc)}) from exc
 

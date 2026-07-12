@@ -177,7 +177,7 @@ export default function ChloePage() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "Jarvis readout failed.");
 
-      const sourceText = typeof data.spoken_response === "string" ? data.spoken_response : JSON.stringify(data);
+      const sourceText = sanitizeReadoutSource(typeof data.spoken_response === "string" ? data.spoken_response : JSON.stringify(data));
       const prompt = buildReadoutPrompt(kind, sourceText, data);
       const userMessage: ChatMessage = { id: crypto.randomUUID(), role: "user", content: kind === "morning" ? "Give me my morning brief." : "Give me my daily debrief." };
       const nextHistory = [...messages, userMessage].slice(-20);
@@ -461,14 +461,26 @@ function buildReadoutPrompt(kind: ReadoutKind, spokenText: string, data: unknown
   return [
     `Turn this Jarvis ${label} into Chloe's own spoken words for John.`,
     "Keep the facts, names, numbers, schedule, workout, money, and priorities accurate.",
+    "Only use facts present in the source. Do not invent PRs, gym commentary, threats, intimacy, or extra plans.",
     "Do not sound like the source text. Vary the phrasing so it feels fresh today.",
-    "Make it warm, direct, lightly teasing if natural, and useful. No markdown. No bullet list unless the data truly demands it.",
+    "Make it warm, direct, lightly teasing if natural, and useful, but do not use pet names.",
+    "Keep it workplace-safe: no explicit sexual content, no romantic roleplay, no threats, and no domination language.",
+    "No markdown. No bullet list unless the data truly demands it.",
     "Keep it concise enough to speak out loud, around 90 to 160 words.",
     "",
     `Original spoken text: ${spokenText}`,
     "",
     `Raw Jarvis data: ${JSON.stringify(data).slice(0, 7000)}`,
   ].join("\n");
+}
+
+function sanitizeReadoutSource(text: string) {
+  return text
+    .replace(/\bsexy daddy\b/gi, "John")
+    .replace(/\bdaddy\b/gi, "John")
+    .replace(/\bsexy\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function ChloeStyles() {

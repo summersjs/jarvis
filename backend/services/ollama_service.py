@@ -59,15 +59,28 @@ def chat_with_chloe(messages: list[dict], model: str | None = None) -> dict:
     ]
 
     try:
-        payload = {"model": selected_model, "messages": safe_messages, "stream": False}
+        payload = {"model": selected_model, "messages": safe_messages, "stream": False, "think": False}
         data = _request_json("/api/chat", payload, timeout=OLLAMA_TIMEOUT_SECONDS)
+        content = extract_message_content(data)
+        if not content:
+            retry_messages = [
+                *safe_messages,
+                {
+                    "role": "user",
+                    "content": "Return only the final answer in message.content. Do not return thinking, analysis, or an empty response.",
+                },
+            ]
+            data = _request_json(
+                "/api/chat",
+                {"model": selected_model, "messages": retry_messages, "stream": False, "think": False},
+                timeout=OLLAMA_TIMEOUT_SECONDS,
+            )
     except urllib.error.URLError as exc:
         raise OllamaServiceError("Ollama is offline. Start Ollama and try again.", "offline") from exc
     except TimeoutError as exc:
         raise OllamaServiceError("Ollama took too long to answer.", "timeout") from exc
 
-    message = data.get("message")
-    content = message.get("content") if isinstance(message, dict) else None
+    content = extract_message_content(data)
     if not content:
         status = get_ollama_status()
         if status["online"] and selected_model not in status.get("models", []):
@@ -75,3 +88,23 @@ def chat_with_chloe(messages: list[dict], model: str | None = None) -> dict:
         raise OllamaServiceError("Ollama returned an empty response.", "invalid_response")
 
     return {"message": {"role": "assistant", "content": content.strip()}, "model": selected_model}
+
+
+def extract_message_content(data: dict) -> str:
+    message = data.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    if not content and isinstance(message, dict):
+        content = extract_final_answer(message.get("thinking") or "")
+    if not content:
+        content = data.get("response")
+    return str(content or "").strip()
+
+
+def extract_final_answer(thinking: str) -> str:
+    if not thinking:
+        return ""
+    markers = ["Final Decision:", "Final Answer:", "Answer:"]
+    for marker in markers:
+        if marker in thinking:
+            return thinking.rsplit(marker, 1)[-1].strip().strip("`")
+    return ""

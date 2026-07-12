@@ -20,6 +20,7 @@ services/kokoro-tts/models/
 node_modules/
 .next/
 out/
+frontend/.npm-cache/
 
 # OS junk
 .DS_Store

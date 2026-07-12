@@ -42,6 +42,7 @@ type ChatMessage = {
 type AssistantStatus = {
   ollama?: { online: boolean; modelAvailable: boolean; model: string; models?: string[] };
   tts?: { online: boolean; defaultVoice: VoiceId; availableVoices: VoiceId[] };
+  tools?: { readToolsEnabled: boolean; writeToolsEnabled: boolean; confirmationToolsEnabled: boolean; tools?: Array<{ name: string }> };
 };
 
 const VOICES: Array<{ id: VoiceId; label: string }> = [
@@ -106,6 +107,9 @@ export default function ChloePage() {
   }, [assistantStatus.ollama?.model, assistantStatus.ollama?.models, selectedModel]);
   const model = selectedModel || assistantStatus.ollama?.model || "qwen3:8b";
   const voiceLabel = VOICES.find((item) => item.id === voice)?.label || "Bella";
+  const toolsLabel = assistantStatus.tools?.readToolsEnabled
+    ? `Read on / Writes ${assistantStatus.tools.writeToolsEnabled ? "on" : "locked"}`
+    : "Offline";
 
   async function loadStatus() {
     try {
@@ -293,6 +297,7 @@ export default function ChloePage() {
         <section className="chloe-meta">
           <InfoPill label="Model" value={model} active={!!assistantStatus.ollama?.modelAvailable} />
           <InfoPill label="Voice" value={voiceLabel} active={!!assistantStatus.tts?.online} />
+          <InfoPill label="Tools" value={toolsLabel} active={!!assistantStatus.tools?.readToolsEnabled} />
           <label className="model-select">
             <span>Ollama</span>
             <select value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)}>

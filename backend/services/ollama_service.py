@@ -3,6 +3,7 @@ import os
 import urllib.error
 import urllib.request
 
+from backend.assistant.tools.registry import AssistantToolContext, execute_selected_tools, select_read_tools
 from backend.prompts.chloe import CHLOE_SYSTEM_PROMPT
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
@@ -49,8 +50,23 @@ def get_ollama_status() -> dict:
 
 def chat_with_chloe(messages: list[dict], model: str | None = None) -> dict:
     selected_model = (model or OLLAMA_MODEL).strip()
+    latest_user_text = next(
+        (item.get("content", "") for item in reversed(messages) if item.get("role") == "user" and item.get("content")),
+        "",
+    )
+    tool_results = execute_selected_tools(select_read_tools(latest_user_text), AssistantToolContext())
     safe_messages = [
         {"role": "system", "content": CHLOE_SYSTEM_PROMPT},
+        *(
+            [
+                {
+                    "role": "system",
+                    "content": build_tool_context_message(tool_results),
+                }
+            ]
+            if tool_results
+            else []
+        ),
         *[
             {"role": item["role"], "content": item["content"]}
             for item in messages
@@ -87,7 +103,18 @@ def chat_with_chloe(messages: list[dict], model: str | None = None) -> dict:
             raise OllamaServiceError(f"Model {selected_model} is not installed. Run: ollama pull {selected_model}", "model_missing")
         raise OllamaServiceError("Ollama returned an empty response.", "invalid_response")
 
-    return {"message": {"role": "assistant", "content": content.strip()}, "model": selected_model}
+    return {"message": {"role": "assistant", "content": content.strip()}, "model": selected_model, "tools": tool_results}
+
+
+def build_tool_context_message(tool_results: list[dict]) -> str:
+    return "\n".join(
+        [
+            "Jarvis supplied these approved read-only tool results as JSON.",
+            "Use them when answering. Do not claim you changed anything.",
+            "If a tool failed, say that Jarvis could not load that piece right now.",
+            json.dumps(tool_results, default=str)[:12000],
+        ]
+    )
 
 
 def extract_message_content(data: dict) -> str:

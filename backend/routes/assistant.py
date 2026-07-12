@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 
+from backend.assistant.tools.registry import tool_status
 from backend.core.security import verify_api_key
 from backend.schemas.assistant import AssistantChatRequest, AssistantSpeechRequest
 from backend.services.ollama_service import OllamaServiceError, chat_with_chloe, get_ollama_status
@@ -11,7 +12,12 @@ router = APIRouter(dependencies=[Depends(verify_api_key)])
 
 @router.get("/assistant/status")
 def assistant_status():
-    return {"ollama": get_ollama_status(), "tts": get_tts_status()}
+    return {"ollama": get_ollama_status(), "tts": get_tts_status(), "tools": tool_status()}
+
+
+@router.get("/assistant/tools/status")
+def assistant_tools_status():
+    return tool_status()
 
 
 @router.post("/assistant/chat")

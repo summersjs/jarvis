@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $distro = "Ubuntu"
 $linuxProject = "/home/john/development/jarvis"
-$windowsProject = "C:\Users\johnf\OneDrive\Development\jarvis"
+$windowsProject = "C:\Development\jarvis"
 $ollamaExe = "C:\Users\johnf\AppData\Local\Programs\Ollama\ollama.exe"
 $kokoroPython = Join-Path $windowsProject "services\kokoro-tts\.venv\Scripts\python.exe"
 $kokoroDirectory = Join-Path $windowsProject "services\kokoro-tts"

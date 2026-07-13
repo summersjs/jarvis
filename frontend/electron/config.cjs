@@ -1,13 +1,15 @@
 "use strict";
 
 const DEFAULT_DESKTOP_URL = "http://localhost:3000/desktop";
-const DEFAULT_CHLOE_ROUTE = "/chloe";
+const DEFAULT_JARVIS_ROUTE = "/jarvis";
+const DEFAULT_MUSIC_URL = "https://music.youtube.com/";
 
 function resolveDesktopConfig({ env = process.env, isPackaged = false } = {}) {
   const target = parseHttpUrl(env.JARVIS_DESKTOP_URL || DEFAULT_DESKTOP_URL, "JARVIS_DESKTOP_URL");
   if (target.pathname === "/") target.pathname = "/desktop";
 
-  const chloeRoute = normalizeRoute(env.JARVIS_CHLOE_ROUTE || DEFAULT_CHLOE_ROUTE);
+  const jarvisRoute = normalizeRoute(env.JARVIS_ASSISTANT_ROUTE || DEFAULT_JARVIS_ROUTE);
+  const musicUrl = parseHttpUrl(env.JARVIS_MUSIC_URL || DEFAULT_MUSIC_URL, "JARVIS_MUSIC_URL");
   const preferencePath = env.JARVIS_STARTUP_PREFERENCE_PATH || null;
 
   return {
@@ -15,8 +17,9 @@ function resolveDesktopConfig({ env = process.env, isPackaged = false } = {}) {
     targetUrl: target.toString(),
     publicTargetUrl: publicUrl(target),
     targetOrigin: target.origin,
-    chloeUrl: new URL(chloeRoute, target.origin).toString(),
-    chloeRoute,
+    jarvisUrl: new URL(jarvisRoute, target.origin).toString(),
+    jarvisRoute,
+    musicUrl: musicUrl.toString(),
     preferencePath,
   };
 }
@@ -40,7 +43,7 @@ function parseHttpUrl(value, name) {
 function normalizeRoute(value) {
   const route = String(value || "").trim();
   if (!route.startsWith("/") || route.startsWith("//") || route.includes(":")) {
-    throw new Error("JARVIS_CHLOE_ROUTE must be a local path beginning with one slash.");
+    throw new Error("JARVIS_ASSISTANT_ROUTE must be a local path beginning with one slash.");
   }
   return route;
 }
@@ -56,5 +59,6 @@ function publicUrl(url) {
 
 module.exports = {
   DEFAULT_DESKTOP_URL,
+  DEFAULT_JARVIS_ROUTE,
   resolveDesktopConfig,
 };

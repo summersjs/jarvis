@@ -7,7 +7,7 @@ const { resolveDesktopConfig } = require("../config.cjs");
 test("desktop defaults to the existing /desktop web route", () => {
   const config = resolveDesktopConfig({ env: { ELECTRON_IS_DEV: "1" }, isPackaged: false });
   assert.equal(config.targetUrl, "http://localhost:3000/desktop");
-  assert.equal(config.chloeUrl, "http://localhost:3000/chloe");
+  assert.equal(config.jarvisUrl, "http://localhost:3000/jarvis");
 });
 
 test("target shown offline strips query strings", () => {
@@ -17,5 +17,5 @@ test("target shown offline strips query strings", () => {
 
 test("unsafe desktop protocols and routes are rejected", () => {
   assert.throws(() => resolveDesktopConfig({ env: { JARVIS_DESKTOP_URL: "file:///tmp/index.html" } }), /http or https/);
-  assert.throws(() => resolveDesktopConfig({ env: { JARVIS_CHLOE_ROUTE: "https://evil.example" } }), /local path/);
+  assert.throws(() => resolveDesktopConfig({ env: { JARVIS_ASSISTANT_ROUTE: "https://evil.example" } }), /local path/);
 });

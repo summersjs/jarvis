@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import {
   AppWindow,
+  Bot,
   Box,
   CalendarDays,
   Cloud,
@@ -21,9 +22,14 @@ import {
   Radio,
   SkipBack,
   SkipForward,
+  SlidersHorizontal,
   TerminalSquare,
   Timer,
   Wifi,
+  Volume1,
+  Volume2,
+  VolumeX,
+  X,
   Zap,
   type LucideIcon,
 } from "lucide-react";
@@ -100,6 +106,8 @@ type CalendarEvent = {
 };
 
 type MediaStatus = {
+  available?: boolean;
+  reason?: string;
   title?: string | null;
   artist?: string | null;
   album?: string | null;
@@ -108,13 +116,46 @@ type MediaStatus = {
   source?: string | null;
 };
 
+type WeatherStatus = {
+  available: boolean;
+  reason?: string;
+  provider?: string;
+  location?: string;
+  temperature?: number;
+  apparentTemperature?: number;
+  conditions?: string;
+  precipitationProbability?: number;
+  forecast?: string;
+  unit?: "fahrenheit" | "celsius";
+  providerTimestamp?: string;
+  fetchedAt?: string;
+};
+
+type DesktopPreferences = {
+  jarvisResponseMode?: "text" | "voice" | "both";
+  jarvisAlwaysOnTop?: boolean;
+  ttsMuted?: boolean;
+  weatherLocation: string;
+  weatherLatitude: number | null;
+  weatherLongitude: number | null;
+  weatherUnit: "fahrenheit" | "celsius";
+  musicUrl: string;
+  mediaControlEnabled: boolean;
+};
+
 declare global {
   interface Window {
     jarvisDesktop?: {
       getSystemStats?: () => Promise<NativeStats>;
       launchApp?: (appId: string) => Promise<void>;
       getMediaStatus?: () => Promise<MediaStatus | null>;
-      controlMedia?: (action: "previous" | "playPause" | "next") => Promise<void>;
+      controlMedia?: (action: "previousTrack" | "playPause" | "nextTrack" | "volumeDown" | "volumeUp" | "mute") => Promise<void>;
+      openJarvisAssistant?: () => Promise<boolean>;
+      hideJarvisAssistant?: () => Promise<boolean>;
+      openFullJarvis?: () => Promise<boolean>;
+      getDesktopPreferences?: () => Promise<Partial<DesktopPreferences>>;
+      setDesktopPreference?: (key: string, value: unknown) => Promise<Partial<DesktopPreferences>>;
+      resetJarvisPosition?: () => Promise<boolean>;
     };
   }
 }
@@ -127,7 +168,8 @@ const fallbackProjects: ForgeProject[] = [
 ];
 
 const quickLaunch = [
-  { id: "vscode", label: "VS Code", Icon: Box, href: "vscode://file/C:/Users/johnf/OneDrive/Development/jarvis" },
+  { id: "jarvis", label: "Jarvis", Icon: Bot, href: "/jarvis", appId: "jarvis" },
+  { id: "vscode", label: "VS Code", Icon: Box, href: "vscode://file/C:/Development/jarvis" },
   { id: "chrome", label: "Browser", Icon: Globe2, href: "https://www.google.com", appId: "chrome" },
   { id: "unreal", label: "Unreal Engine", Icon: AppWindow },
   { id: "terminal", label: "Terminal", Icon: TerminalSquare },
@@ -141,6 +183,9 @@ export default function DesktopMissionControl() {
   const [dashboard, setDashboard] = useState<ForgeDashboard>({});
   const [systemStats, setSystemStats] = useState<NativeStats | null>(null);
   const [mediaStatus, setMediaStatus] = useState<MediaStatus | null>(null);
+  const [weather, setWeather] = useState<WeatherStatus | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [preferences, setPreferences] = useState<DesktopPreferences>(() => loadBrowserPreferences());
   const [calendarLine, setCalendarLine] = useState("Calendar link online");
   const [dataState, setDataState] = useState("Synchronizing Forge");
 
@@ -148,6 +193,26 @@ export default function DesktopMissionControl() {
     const timer = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    void window.jarvisDesktop?.getDesktopPreferences?.().then((saved) => setPreferences((current) => ({ ...current, ...saved })));
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams({ unit: preferences.weatherUnit });
+      if (preferences.weatherLatitude !== null && preferences.weatherLongitude !== null) {
+        params.set("latitude", String(preferences.weatherLatitude));
+        params.set("longitude", String(preferences.weatherLongitude));
+      } else if (preferences.weatherLocation) params.set("location", preferences.weatherLocation);
+      fetch(`${API_BASE}/weather/current?${params}`, { headers: { "x-api-key": API_KEY } })
+        .then((response) => response.json())
+        .then((data) => { if (!cancelled) setWeather(data); })
+        .catch(() => { if (!cancelled) setWeather({ available: false, reason: "Live weather is unavailable." }); });
+    }, 450);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [preferences.weatherLatitude, preferences.weatherLocation, preferences.weatherLongitude, preferences.weatherUnit]);
 
   useEffect(() => {
     let cancelled = false;
@@ -188,14 +253,21 @@ export default function DesktopMissionControl() {
 
   useEffect(() => {
     let cancelled = false;
+    let loading = false;
 
     async function loadMediaStatus() {
-      const bridgeStatus = await window.jarvisDesktop?.getMediaStatus?.();
-      if (!cancelled) setMediaStatus(bridgeStatus || readBrowserMediaSession());
+      if (loading) return;
+      loading = true;
+      try {
+        const bridgeStatus = await window.jarvisDesktop?.getMediaStatus?.();
+        if (!cancelled) setMediaStatus(bridgeStatus || readBrowserMediaSession());
+      } finally {
+        loading = false;
+      }
     }
 
     loadMediaStatus();
-    const timer = window.setInterval(loadMediaStatus, 2_500);
+    const timer = window.setInterval(loadMediaStatus, 5_000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
@@ -204,10 +276,17 @@ export default function DesktopMissionControl() {
 
   useEffect(() => {
     let cancelled = false;
+    let loading = false;
 
     async function loadStats() {
-      const stats = await window.jarvisDesktop?.getSystemStats?.();
-      if (!cancelled && stats) setSystemStats(stats);
+      if (loading) return;
+      loading = true;
+      try {
+        const stats = await window.jarvisDesktop?.getSystemStats?.();
+        if (!cancelled && stats) setSystemStats(stats);
+      } finally {
+        loading = false;
+      }
     }
 
     loadStats();
@@ -225,7 +304,7 @@ export default function DesktopMissionControl() {
 
   const activeProject = projects[0] || fallbackProjects[0];
   const goals = dashboard.goals?.length ? dashboard.goals.slice(0, 4) : [];
-  const metrics = buildTelemetryMetrics(systemStats);
+  const metrics = buildTelemetryMetrics(systemStats, weather);
   const events = useMemo(() => parseCalendarEvents(calendarLine), [calendarLine]);
 
   return (
@@ -242,6 +321,7 @@ export default function DesktopMissionControl() {
         <Wifi size={18} />
         <span>{systemStats ? "LIVE" : "STANDBY"}</span>
         <strong>{formatTime(now)}</strong>
+        <button type="button" aria-label="Desktop settings" onClick={() => setSettingsOpen(true)}><SlidersHorizontal size={17} /></button>
       </div>
 
       <section className={styles.systemZone} aria-label="System core telemetry">
@@ -263,6 +343,7 @@ export default function DesktopMissionControl() {
 
       <QuickLaunchDock />
       <NowPlayingBar media={mediaStatus} />
+      {settingsOpen && <DesktopSettings preferences={preferences} onChange={setPreferences} onClose={() => setSettingsOpen(false)} />}
       <SystemOnline dataState={dataState} />
     </main>
   );
@@ -444,6 +525,11 @@ function ProjectRow({ project, active }: { project: ForgeProject; active: boolea
 
 function QuickLaunchDock() {
   async function launch(appId: string, href?: string) {
+    if (appId === "jarvis") {
+      if (window.jarvisDesktop?.openJarvisAssistant) await window.jarvisDesktop.openJarvisAssistant();
+      else window.location.assign("/jarvis");
+      return;
+    }
     const launched = await window.jarvisDesktop?.launchApp?.(appId);
     if (!launched && href) {
       window.open(href, "_blank", "noopener,noreferrer");
@@ -480,11 +566,11 @@ function QuickLaunchDock() {
 
 function NowPlayingBar({ media }: { media: MediaStatus | null }) {
   const isPlaying = media?.isPlaying ?? false;
-  const title = media?.title || "YouTube Music";
-  const artist = media?.artist || (media ? "Now playing" : "No track detected");
-  const source = media?.source || "YouTube Music";
+  const title = media?.available ? (media.title || "Untitled media") : "Media unavailable";
+  const artist = media?.available ? (media.artist || "Artist unavailable") : (media?.reason || "No compatible Windows media session");
+  const source = media?.available ? friendlyMediaSource(media.source) : "Windows Media";
 
-  async function control(action: "previous" | "playPause" | "next") {
+  async function control(action: "previousTrack" | "playPause" | "nextTrack" | "volumeDown" | "volumeUp" | "mute") {
     if (window.jarvisDesktop?.controlMedia) {
       await window.jarvisDesktop.controlMedia(action);
       return;
@@ -511,15 +597,18 @@ function NowPlayingBar({ media }: { media: MediaStatus | null }) {
         <em>{artist}</em>
       </div>
       <div className={styles.mediaControls}>
-        <button type="button" aria-label="Previous track" onClick={() => control("previous")}>
+        <button type="button" aria-label="Previous track" onClick={() => control("previousTrack")}>
           <SkipBack size={17} />
         </button>
         <button type="button" className={styles.playPause} aria-label={isPlaying ? "Pause" : "Play"} onClick={() => control("playPause")}>
           {isPlaying ? <Pause size={18} /> : <Play size={18} />}
         </button>
-        <button type="button" aria-label="Next track" onClick={() => control("next")}>
+        <button type="button" aria-label="Next track" onClick={() => control("nextTrack")}>
           <SkipForward size={17} />
         </button>
+        <button type="button" aria-label="Volume down" onClick={() => control("volumeDown")}><Volume1 size={16} /></button>
+        <button type="button" aria-label="Volume up" onClick={() => control("volumeUp")}><Volume2 size={16} /></button>
+        <button type="button" aria-label="Mute" onClick={() => control("mute")}><VolumeX size={16} /></button>
       </div>
     </aside>
   );
@@ -560,6 +649,12 @@ function readBrowserMediaSession(): MediaStatus | null {
   };
 }
 
+function friendlyMediaSource(source?: string | null) {
+  if (!source) return "Windows Media";
+  if (/youtube|cinhimbnkkghhklpknlkffjgod/i.test(source)) return "YouTube Music";
+  return source;
+}
+
 function DriftingParticles() {
   return (
     <div className={styles.particles} aria-hidden="true">
@@ -570,15 +665,16 @@ function DriftingParticles() {
   );
 }
 
-function buildTelemetryMetrics(stats: NativeStats | null): TelemetryMetric[] {
+function buildTelemetryMetrics(stats: NativeStats | null, weather: WeatherStatus | null): TelemetryMetric[] {
+  const weatherUnit = weather?.unit === "celsius" ? "C" : "F";
   return [
-    { id: "cpu", label: "CPU", value: percent(stats?.cpuUsage, 18), detail: tempDetail(stats?.cpuTemp, 58), level: stats?.cpuUsage ?? 18, Icon: Cpu, position: "nodeCpu" },
-    { id: "gpu", label: "GPU", value: percent(stats?.gpuUsage, 22), detail: `Hotspot ${stats?.gpuHotspot ?? 68}C`, level: stats?.gpuUsage ?? 22, Icon: MonitorCog, position: "nodeGpu" },
-    { id: "ram", label: "RAM", value: percent(stats?.ramUsage, 32), detail: "Memory", level: stats?.ramUsage ?? 32, Icon: MemoryStick, position: "nodeRam" },
-    { id: "storage", label: "Storage", value: percent(stats?.storageUsage, 58), detail: tempDetail(stats?.nvmeTemp, 44), level: stats?.storageUsage ?? 58, Icon: HardDrive, position: "nodeStorage" },
-    { id: "network", label: "Net", value: stats?.networkDown || "1.2 GB", detail: `Up ${stats?.networkUp || "128 MB"}`, level: 36, Icon: Network, position: "nodeNetwork" },
-    { id: "weather", label: "Weather", value: "82F", detail: "Partly cloudy", level: 82, Icon: Cloud, position: "nodeWeather" },
-    { id: "uptime", label: "Uptime", value: stats?.uptime || "06:42", detail: "Session", level: 74, Icon: Timer, position: "nodeUptime" },
+    { id: "cpu", label: "CPU", value: percent(stats?.cpuUsage), detail: stats?.cpuTemp === undefined ? "Temperature unavailable" : tempDetail(stats.cpuTemp), level: stats?.cpuUsage ?? 4, Icon: Cpu, position: "nodeCpu" },
+    { id: "gpu", label: "GPU", value: percent(stats?.gpuUsage), detail: stats?.gpuHotspot !== undefined ? `Hotspot ${stats.gpuHotspot}C` : stats?.gpuTemp !== undefined ? `${stats.gpuTemp}C` : "Temperature unavailable", level: stats?.gpuUsage ?? 4, Icon: MonitorCog, position: "nodeGpu" },
+    { id: "ram", label: "RAM", value: percent(stats?.ramUsage), detail: "Memory", level: stats?.ramUsage ?? 4, Icon: MemoryStick, position: "nodeRam" },
+    { id: "storage", label: "Storage", value: percent(stats?.storageUsage), detail: stats?.nvmeTemp === undefined ? "Temperature unavailable" : tempDetail(stats.nvmeTemp), level: stats?.storageUsage ?? 4, Icon: HardDrive, position: "nodeStorage" },
+    { id: "network", label: "Net", value: stats?.networkDown || "—", detail: stats?.networkUp ? `Up ${stats.networkUp}` : "Network unavailable", level: stats?.networkDown ? 36 : 4, Icon: Network, position: "nodeNetwork" },
+    { id: "weather", label: "Weather", value: weather?.available ? `${Math.round(weather.temperature || 0)}°${weatherUnit}` : "—", detail: weather?.available ? `${weather.conditions} · Feels ${Math.round(weather.apparentTemperature || 0)}° · Rain ${weather.precipitationProbability}% · ${formatUpdated(weather.fetchedAt)}` : (weather?.reason || "Weather unavailable"), level: weather?.available ? 70 : 4, Icon: Cloud, position: "nodeWeather" },
+    { id: "uptime", label: "Uptime", value: stats?.uptime || "—", detail: stats?.uptime ? "Session" : "Unavailable", level: stats?.uptime ? 74 : 4, Icon: Timer, position: "nodeUptime" },
     { id: "bridge", label: "Bridge", value: stats ? "Live" : "Wait", detail: stats ? "Native feed" : "Telemetry pending", level: stats ? 100 : 12, Icon: Zap, position: "nodeBridge" },
   ];
 }
@@ -602,12 +698,52 @@ function parseCalendarEvents(line: string): CalendarEvent[] {
     });
 }
 
-function percent(value: number | undefined, fallback: number) {
-  return `${Math.round(value ?? fallback)}%`;
+function percent(value: number | undefined) {
+  return value === undefined ? "—" : `${Math.round(value)}%`;
 }
 
-function tempDetail(value: number | undefined, fallback: number) {
-  return `${Math.round(value ?? fallback)}C`;
+function tempDetail(value: number) {
+  return `${Math.round(value)}C`;
+}
+
+function formatUpdated(value?: string) {
+  if (!value) return "Update unavailable";
+  return `Updated ${new Date(value).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+}
+
+function loadBrowserPreferences(): DesktopPreferences {
+  const defaults: DesktopPreferences = { weatherLocation: process.env.NEXT_PUBLIC_JARVIS_WEATHER_LOCATION || "", weatherLatitude: null, weatherLongitude: null, weatherUnit: "fahrenheit", musicUrl: "https://music.youtube.com/", mediaControlEnabled: true };
+  if (typeof window === "undefined") return defaults;
+  try { return { ...defaults, ...JSON.parse(window.localStorage.getItem("jarvis.desktop.preferences") || "{}") }; } catch { return defaults; }
+}
+
+function DesktopSettings({ preferences, onChange, onClose }: { preferences: DesktopPreferences; onChange: (value: DesktopPreferences) => void; onClose: () => void }) {
+  function update<K extends keyof DesktopPreferences>(key: K, value: DesktopPreferences[K]) {
+    const next = { ...preferences, [key]: value };
+    onChange(next);
+    window.localStorage.setItem("jarvis.desktop.preferences", JSON.stringify(next));
+    void window.jarvisDesktop?.setDesktopPreference?.(key, value);
+  }
+  function updateMany(values: Partial<DesktopPreferences>) {
+    const next = { ...preferences, ...values };
+    onChange(next);
+    window.localStorage.setItem("jarvis.desktop.preferences", JSON.stringify(next));
+    for (const [key, value] of Object.entries(values)) void window.jarvisDesktop?.setDesktopPreference?.(key, value);
+  }
+  function useLocation() {
+    navigator.geolocation?.getCurrentPosition((position) => {
+      updateMany({ weatherLatitude: position.coords.latitude, weatherLongitude: position.coords.longitude });
+    });
+  }
+  return <aside className={styles.settingsPanel}>
+    <header><strong>Desktop Settings</strong><button type="button" onClick={onClose}><X size={17} /></button></header>
+    <label>Weather city/state<input value={preferences.weatherLocation} onChange={(event) => updateMany({ weatherLocation: event.target.value, weatherLatitude: null, weatherLongitude: null })} placeholder="City, State" /></label>
+    <button type="button" onClick={useLocation}>Use current location</button>
+    <label>Units<select value={preferences.weatherUnit} onChange={(event) => update("weatherUnit", event.target.value as DesktopPreferences["weatherUnit"])}><option value="fahrenheit">Fahrenheit</option><option value="celsius">Celsius</option></select></label>
+    <label>Music URL<input value={preferences.musicUrl} onChange={(event) => update("musicUrl", event.target.value)} /></label>
+    <label><input type="checkbox" checked={preferences.mediaControlEnabled} onChange={(event) => update("mediaControlEnabled", event.target.checked)} /> Windows media controls enabled</label>
+    <button type="button" onClick={() => window.jarvisDesktop?.resetJarvisPosition?.()}>Reset Jarvis window position</button>
+  </aside>;
 }
 
 function formatTime(date: Date) {

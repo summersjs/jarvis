@@ -9,10 +9,10 @@ test("closing hides to tray unless Quit is explicit", () => {
   assert.equal(closeAction({ isQuitting: true }), "close");
 });
 
-test("Alt+C restores, focuses, then opens Chloe", () => {
+test("Alt+C targets one Jarvis assistant window", () => {
   assert.equal(shortcutAction({ visible: false, focused: false }), "show");
   assert.equal(shortcutAction({ visible: true, focused: false }), "focus");
-  assert.equal(shortcutAction({ visible: true, focused: true }), "open-chloe");
+  assert.equal(shortcutAction({ visible: true, focused: true }), "focus");
 });
 
 test("navigation stays on Jarvis and sends trusted external links outside", () => {

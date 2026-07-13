@@ -14,17 +14,20 @@ const {
   shell,
   Tray,
 } = require("electron");
-const { closeAction, navigationAction, shortcutAction } = require("./behavior.cjs");
+const { closeAction, navigationAction } = require("./behavior.cjs");
 const { checkReachable, ConnectionMonitor } = require("./connection.cjs");
 const { resolveDesktopConfig } = require("./config.cjs");
 const { createLogger } = require("./logger.cjs");
-const { JsonStateStore, visibleBounds } = require("./window-state.cjs");
+const { runMediaAction } = require("./media.cjs");
+const { collectWindowsTelemetry } = require("./telemetry.cjs");
+const { compactBounds, JsonStateStore, visibleBounds } = require("./window-state.cjs");
 
 let config;
 let logger;
 let stateStore;
 let logPath;
 let mainWindow = null;
+let assistantWindow = null;
 let tray = null;
 let connectionMonitor = null;
 let isQuitting = false;
@@ -55,7 +58,16 @@ async function startApplication() {
   logger("target-url", config.publicTargetUrl);
   applyLaunchAtStartup(stateStore.get("launchAtStartup", false));
   registerIpcHandlers();
-  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+  session.defaultSession.setPermissionCheckHandler((_webContents, permission, requestingOrigin) => permission === "geolocation" && requestingOrigin === config.targetOrigin);
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback, details) => {
+    let approved = false;
+    try {
+      approved = permission === "geolocation" && new URL(details.requestingUrl).origin === config.targetOrigin;
+    } catch {
+      approved = false;
+    }
+    callback(approved);
+  });
   createWindow();
   createTray();
   registerShortcut();
@@ -121,6 +133,9 @@ function createWindow() {
       logger("connection-online", config.publicTargetUrl);
       await mainWindow.loadURL(config.targetUrl);
       mainWindow.show();
+      if (assistantWindow && !assistantWindow.isDestroyed() && assistantWindow.webContents.getURL().endsWith("/offline.html")) {
+        await assistantWindow.loadURL(`${config.jarvisUrl}?mode=compact`);
+      }
     },
     onOffline: async ({ attempt, nextRetryMs }) => {
       logger("connection-offline", `attempt=${attempt} retryMs=${nextRetryMs}`);
@@ -128,6 +143,56 @@ function createWindow() {
     },
   });
   void connectionMonitor.start();
+}
+
+function createAssistantWindow() {
+  if (assistantWindow && !assistantWindow.isDestroyed()) return assistantWindow;
+  const cursorDisplay = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const saved = stateStore.get("jarvisWindowBounds", {});
+  const rememberedDisplay = screen.getAllDisplays().find((display) => String(display.id) === String(saved.displayId));
+  const display = rememberedDisplay || cursorDisplay;
+  const bounds = compactBounds(saved, display);
+  assistantWindow = new BrowserWindow({
+    ...bounds,
+    minWidth: 380,
+    minHeight: 520,
+    show: false,
+    backgroundColor: "#020806",
+    title: "Jarvis Assistant",
+    autoHideMenuBar: true,
+    alwaysOnTop: Boolean(stateStore.get("jarvisAlwaysOnTop", false)),
+    webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+    },
+  });
+  configureNavigation(assistantWindow);
+  assistantWindow.on("close", (event) => {
+    if (!isQuitting) {
+      event.preventDefault();
+      assistantWindow?.hide();
+    }
+  });
+  assistantWindow.on("move", scheduleAssistantStateSave);
+  assistantWindow.on("resize", scheduleAssistantStateSave);
+  assistantWindow.on("closed", () => { assistantWindow = null; });
+  assistantWindow.webContents.on("render-process-gone", (_event, details) => logger("assistant-renderer-crash", `reason=${details.reason} exit=${details.exitCode}`));
+  assistantWindow.webContents.on("did-fail-load", (_event, code, description, url, isMainFrame) => {
+    if (isMainFrame && code !== -3) logger("assistant-load-failed", `code=${code} url=${safeLogUrl(url)} reason=${description}`);
+  });
+  void assistantWindow.loadFile(path.join(__dirname, "loading.html"));
+  void checkReachable(config.targetUrl).then(async (online) => {
+    if (!assistantWindow || assistantWindow.isDestroyed()) return;
+    if (online) await assistantWindow.loadURL(`${config.jarvisUrl}?mode=compact`);
+    else await assistantWindow.loadFile(path.join(__dirname, "offline.html"));
+    assistantWindow.show();
+    assistantWindow.focus();
+  });
+  logger("assistant-window-created", `${bounds.width}x${bounds.height}`);
+  return assistantWindow;
 }
 
 function configureNavigation(window) {
@@ -175,8 +240,8 @@ function rebuildTrayMenu() {
   if (!tray) return;
   const launchAtStartup = stateStore.get("launchAtStartup", false);
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: "Open Jarvis", click: () => navigateTo(config.targetUrl) },
-    { label: "Open Chloe", click: () => navigateTo(config.chloeUrl) },
+    { label: "Open Jarvis Dashboard", click: () => navigateTo(config.targetUrl) },
+    { label: "Open Jarvis Assistant", click: openJarvisAssistant },
     { label: "Toggle fullscreen", click: toggleFullscreen },
     { label: "Restart window", click: restartWindow },
     { type: "separator" },
@@ -193,13 +258,16 @@ function rebuildTrayMenu() {
 
 function registerShortcut() {
   const registered = globalShortcut.register("Alt+C", () => {
-    if (!mainWindow) return;
-    const action = shortcutAction({ visible: mainWindow.isVisible(), focused: mainWindow.isFocused() });
-    if (action === "show") showAndFocus();
-    else if (action === "focus") mainWindow.focus();
-    else navigateTo(config.chloeUrl);
+    openJarvisAssistant();
   });
   logger(registered ? "shortcut-registered" : "shortcut-registration-failed", "Alt+C");
+}
+
+function openJarvisAssistant() {
+  const window = createAssistantWindow();
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
 }
 
 function navigateTo(url) {
@@ -254,6 +322,15 @@ function scheduleWindowStateSave() {
   }, 250);
 }
 
+function scheduleAssistantStateSave() {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    if (!assistantWindow || assistantWindow.isDestroyed() || assistantWindow.isMinimized()) return;
+    const bounds = assistantWindow.getBounds();
+    stateStore.set("jarvisWindowBounds", { ...bounds, displayId: screen.getDisplayMatching(bounds).id });
+  }, 250);
+}
+
 function setLaunchAtStartup(enabled) {
   if (typeof enabled !== "boolean") throw new TypeError("Launch-at-startup must be a boolean.");
   stateStore.set("launchAtStartup", enabled);
@@ -270,21 +347,44 @@ function applyLaunchAtStartup(enabled) {
 }
 
 function registerIpcHandlers() {
-  ipcMain.handle("desktop:get-shell-config", () => ({ targetUrl: config.publicTargetUrl, chloeRoute: config.chloeRoute }));
-  ipcMain.handle("desktop:retry-connection", () => connectionMonitor?.retryNow() || false);
+  ipcMain.handle("desktop:get-shell-config", () => ({ targetUrl: config.publicTargetUrl, jarvisRoute: config.jarvisRoute }));
+  ipcMain.handle("desktop:retry-connection", async () => {
+    const online = await checkReachable(config.targetUrl);
+    if (online && assistantWindow && !assistantWindow.isDestroyed()) await assistantWindow.loadURL(`${config.jarvisUrl}?mode=compact`);
+    void connectionMonitor?.retryNow();
+    return online;
+  });
   ipcMain.handle("desktop:open-logs", () => shell.showItemInFolder(logPath));
   ipcMain.handle("desktop:get-launch-at-startup", () => Boolean(stateStore.get("launchAtStartup", false)));
   ipcMain.handle("desktop:set-launch-at-startup", (_event, enabled) => setLaunchAtStartup(enabled));
   ipcMain.handle("desktop:get-system-stats", () => collectSystemStats());
+  ipcMain.handle("desktop:open-jarvis-assistant", () => { openJarvisAssistant(); return true; });
+  ipcMain.handle("desktop:hide-jarvis-assistant", () => { assistantWindow?.hide(); return true; });
+  ipcMain.handle("desktop:open-full-jarvis", () => { navigateTo(config.jarvisUrl); assistantWindow?.hide(); return true; });
+  ipcMain.handle("desktop:get-preferences", () => getDesktopPreferences());
+  ipcMain.handle("desktop:set-preference", (_event, payload) => setDesktopPreference(payload));
+  ipcMain.handle("desktop:reset-jarvis-position", () => {
+    stateStore.set("jarvisWindowBounds", {});
+    assistantWindow?.destroy();
+    assistantWindow = null;
+    openJarvisAssistant();
+    return true;
+  });
+  ipcMain.handle("desktop:media-command", (_event, action) => {
+    if (!stateStore.get("mediaControlEnabled", true) && action !== "openYouTubeMusic") {
+      return { available: false, reason: "Windows media controls are disabled in Jarvis settings." };
+    }
+    return runMediaAction(action, { musicUrl: stateStore.get("musicUrl", config.musicUrl) });
+  });
   ipcMain.handle("desktop:launch-app", async (_event, appId) => {
     if (typeof appId !== "string") throw new TypeError("Application id must be a string.");
     const targets = {
       chrome: "https://www.google.com",
-      "youtube-music": "https://music.youtube.com",
       vscode: "vscode://",
       discord: "discord://",
       terminal: "wt:",
     };
+    if (appId === "youtube-music") return runMediaAction("openYouTubeMusic", { musicUrl: stateStore.get("musicUrl", config.musicUrl) });
     const target = targets[appId];
     if (!target) return false;
     await shell.openExternal(target);
@@ -292,7 +392,42 @@ function registerIpcHandlers() {
   });
 }
 
+function getDesktopPreferences() {
+  return {
+    jarvisResponseMode: stateStore.get("jarvisResponseMode", "text"),
+    jarvisAlwaysOnTop: Boolean(stateStore.get("jarvisAlwaysOnTop", false)),
+    weatherLocation: stateStore.get("weatherLocation", ""),
+    weatherLatitude: stateStore.get("weatherLatitude", null),
+    weatherLongitude: stateStore.get("weatherLongitude", null),
+    weatherUnit: stateStore.get("weatherUnit", "fahrenheit"),
+    musicUrl: stateStore.get("musicUrl", config.musicUrl),
+    mediaControlEnabled: stateStore.get("mediaControlEnabled", true),
+    ttsMuted: Boolean(stateStore.get("ttsMuted", false)),
+    launchAtStartup: Boolean(stateStore.get("launchAtStartup", false)),
+  };
+}
+
+function setDesktopPreference(payload) {
+  if (!payload || typeof payload !== "object") throw new TypeError("Preference payload is required.");
+  const validators = {
+    jarvisResponseMode: (value) => ["text", "voice", "both"].includes(value),
+    jarvisAlwaysOnTop: (value) => typeof value === "boolean",
+    weatherLocation: (value) => typeof value === "string" && value.length <= 160,
+    weatherLatitude: (value) => value === null || (typeof value === "number" && value >= -90 && value <= 90),
+    weatherLongitude: (value) => value === null || (typeof value === "number" && value >= -180 && value <= 180),
+    weatherUnit: (value) => ["fahrenheit", "celsius"].includes(value),
+    musicUrl: (value) => typeof value === "string" && /^https:\/\/music\.youtube\.com(?:\/.*)?$/.test(value),
+    mediaControlEnabled: (value) => typeof value === "boolean",
+    ttsMuted: (value) => typeof value === "boolean",
+  };
+  if (!Object.hasOwn(validators, payload.key) || !validators[payload.key](payload.value)) throw new TypeError("Unsupported desktop preference.");
+  stateStore.set(payload.key, payload.value);
+  if (payload.key === "jarvisAlwaysOnTop") assistantWindow?.setAlwaysOnTop(payload.value);
+  return getDesktopPreferences();
+}
+
 async function collectSystemStats() {
+  const windowsTelemetryPromise = collectWindowsTelemetry();
   const start = cpuSnapshot();
   await new Promise((resolve) => setTimeout(resolve, 300));
   const end = cpuSnapshot();
@@ -305,6 +440,7 @@ async function collectSystemStats() {
     cpuUsage,
     ramUsage,
     uptime: `${String(Math.floor(uptimeMinutes / 60)).padStart(2, "0")}:${String(uptimeMinutes % 60).padStart(2, "0")}`,
+    ...await windowsTelemetryPromise,
   };
 }
 

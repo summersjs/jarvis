@@ -35,13 +35,10 @@ from backend.services.shopping_service import (
 from backend.services.workout_service import get_next_workout_logic, get_todays_workout_summary
 
 
-READ_TOOLS_ENABLED = os.getenv("JARVIS_TOOLS_ENABLED", os.getenv("CHLOE_TOOLS_ENABLED", "true")).lower() == "true"
-WRITE_TOOLS_ENABLED = os.getenv("JARVIS_WRITE_TOOLS_ENABLED", os.getenv("CHLOE_WRITE_TOOLS_ENABLED", "true")).lower() == "true"
-CONFIRMATION_TOOLS_ENABLED = os.getenv(
-    "JARVIS_CONFIRMATION_TOOLS_ENABLED",
-    os.getenv("CHLOE_CONFIRMATION_TOOLS_ENABLED", "false"),
-).lower() == "true"
-MAX_TOOL_CALLS = int(os.getenv("JARVIS_MAX_TOOL_CALLS", os.getenv("CHLOE_MAX_TOOL_CALLS", "5")))
+READ_TOOLS_ENABLED = os.getenv("JARVIS_TOOLS_ENABLED", "true").lower() == "true"
+WRITE_TOOLS_ENABLED = os.getenv("JARVIS_WRITE_TOOLS_ENABLED", "true").lower() == "true"
+CONFIRMATION_TOOLS_ENABLED = os.getenv("JARVIS_CONFIRMATION_TOOLS_ENABLED", "false").lower() == "true"
+MAX_TOOL_CALLS = int(os.getenv("JARVIS_MAX_TOOL_CALLS", "5"))
 
 
 @dataclass(frozen=True)

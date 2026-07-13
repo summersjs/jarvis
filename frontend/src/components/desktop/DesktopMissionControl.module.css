@@ -38,6 +38,55 @@
   position: absolute;
 }
 
+.topStatus button,
+.settingsPanel button {
+  border: 1px solid rgba(77, 214, 255, 0.3);
+  border-radius: 6px;
+  background: rgba(2, 18, 30, 0.84);
+  color: #dff8ff;
+  padding: 0.4rem 0.55rem;
+  cursor: pointer;
+}
+
+.settingsPanel {
+  position: fixed;
+  z-index: 30;
+  top: 4.5rem;
+  right: 1.5rem;
+  width: min(360px, calc(100vw - 3rem));
+  display: grid;
+  gap: 0.8rem;
+  border: 1px solid rgba(77, 214, 255, 0.46);
+  border-radius: 10px;
+  background: rgba(1, 10, 18, 0.97);
+  padding: 1rem;
+  color: #dff8ff;
+  box-shadow: 0 0 32px rgba(0, 174, 255, 0.22);
+}
+
+.settingsPanel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.settingsPanel label {
+  display: grid;
+  gap: 0.35rem;
+  color: rgba(223, 248, 255, 0.76);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.settingsPanel input,
+.settingsPanel select {
+  border: 1px solid rgba(77, 214, 255, 0.24);
+  border-radius: 6px;
+  background: #020a10;
+  color: #fff;
+  padding: 0.6rem;
+}
+
 .templateGlow {
   inset: 0;
   background: url("/images/new_desktop_concept.png") center / cover no-repeat;

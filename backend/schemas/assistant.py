@@ -14,6 +14,8 @@ class AssistantMessage(BaseModel):
 class AssistantChatRequest(BaseModel):
     messages: list[AssistantMessage] = Field(min_length=1, max_length=24)
     model: str | None = Field(default=None, min_length=1, max_length=160)
+    request_id: str | None = Field(default=None, min_length=8, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
+    source_message_id: str | None = Field(default=None, min_length=8, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 class AssistantSpeechRequest(BaseModel):

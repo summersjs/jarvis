@@ -9,7 +9,7 @@ function closeAction({ isQuitting }) {
 function shortcutAction({ visible, focused }) {
   if (!visible) return "show";
   if (!focused) return "focus";
-  return "open-chloe";
+  return "focus";
 }
 
 function navigationAction(candidate, approvedOrigin) {

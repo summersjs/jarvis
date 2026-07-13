@@ -7,6 +7,7 @@ import {
   Clipboard,
   Mic,
   MicOff,
+  Maximize2,
   Pause,
   Play,
   RotateCcw,
@@ -15,6 +16,7 @@ import {
   Square,
   Trash2,
   Volume2,
+  VolumeX,
   Wifi,
   WifiOff,
   X,
@@ -26,6 +28,8 @@ const HISTORY_KEY = "jarvis.assistant.history";
 const MODE_KEY = "jarvis.assistant.outputMode";
 const VOICE_KEY = "jarvis.assistant.voice";
 const MODEL_KEY = "jarvis.assistant.model";
+const IDENTITY_VERSION_KEY = "jarvis.assistant.identityVersion";
+const IDENTITY_VERSION = "jarvis-2026-07-13-v2";
 const LEGACY_STORAGE_KEYS = {
   history: "jarvis.chloe.history",
   mode: "jarvis.chloe.outputMode",
@@ -45,6 +49,7 @@ type ChatMessage = {
   role: ChatRole;
   content: string;
   collapsed?: boolean;
+  toolActions?: string[];
 };
 
 type AssistantStatus = {
@@ -106,6 +111,10 @@ export default function JarvisPage() {
   const [status, setStatus] = useState<StatusKind>("Connecting");
   const [assistantStatus, setAssistantStatus] = useState<AssistantStatus>({});
   const [error, setError] = useState("");
+  const [lastFailedMessage, setLastFailedMessage] = useState("");
+  const [compact, setCompact] = useState(false);
+  const [ttsMuted, setTtsMuted] = useState(false);
+  const [alwaysOnTop, setAlwaysOnTop] = useState(false);
   const [activeReadout, setActiveReadout] = useState<ReadoutKind | null>(null);
   const [activeAudioId, setActiveAudioId] = useState<string | null>(null);
   const [isPaused, setIsPaused] = useState(false);
@@ -119,6 +128,18 @@ export default function JarvisPage() {
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const voiceTranscriptRef = useRef("");
   const speechStopTimerRef = useRef<number | null>(null);
+  const isSubmittingRef = useRef(false);
+
+  useEffect(() => {
+    setCompact(new URLSearchParams(window.location.search).get("mode") === "compact");
+    for (const key of Object.values(LEGACY_STORAGE_KEYS)) window.localStorage.removeItem(key);
+    window.localStorage.setItem(IDENTITY_VERSION_KEY, IDENTITY_VERSION);
+    void window.jarvisDesktop?.getDesktopPreferences?.().then((preferences) => {
+      if (preferences.jarvisResponseMode) setMode(preferences.jarvisResponseMode);
+      setTtsMuted(Boolean(preferences.ttsMuted));
+      setAlwaysOnTop(Boolean(preferences.jarvisAlwaysOnTop));
+    });
+  }, []);
 
   useEffect(() => {
     window.localStorage.setItem(HISTORY_KEY, JSON.stringify(messages.slice(-40)));
@@ -127,6 +148,7 @@ export default function JarvisPage() {
 
   useEffect(() => {
     window.localStorage.setItem(MODE_KEY, mode);
+    void window.jarvisDesktop?.setDesktopPreference?.("jarvisResponseMode", mode);
   }, [mode]);
 
   useEffect(() => {
@@ -180,23 +202,26 @@ export default function JarvisPage() {
     }
   }
 
-  async function askJarvis(nextHistory: ChatMessage[]) {
+  async function askJarvis(nextHistory: ChatMessage[], requestId: string, sourceMessageId: string) {
     const response = await fetch(`${API_BASE}/assistant/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
       body: JSON.stringify({
         model,
+        request_id: requestId,
+        source_message_id: sourceMessageId,
         messages: nextHistory.map(({ role, content: body }) => ({ role, content: body })),
       }),
     });
     if (!response.ok) throw new Error(await friendlyError(response));
     const data = await response.json();
-    return data.message.content as string;
+    return { content: data.message.content as string, tools: (data.tools || []).map((tool: { tool?: string }) => tool.tool).filter(Boolean) as string[] };
   }
 
   async function sendMessage(contentOverride?: string) {
     const content = (contentOverride ?? input).trim();
-    if (!content || status === "Thinking") return;
+    if (!content || isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
     setInput("");
     setError("");
     stopAudio();
@@ -207,19 +232,24 @@ export default function JarvisPage() {
     setStatus("Thinking");
 
     try {
-      const reply = await askJarvis(nextHistory);
+      const requestId = crypto.randomUUID();
+      const reply = await askJarvis(nextHistory, requestId, userMessage.id);
       const assistantMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: "assistant",
-        content: reply,
+        content: reply.content,
+        toolActions: reply.tools,
         collapsed: mode === "voice",
       };
       setMessages((current) => [...current, assistantMessage]);
       setStatus("Ready");
       if (mode !== "text") await speakMessage(assistantMessage);
     } catch (err) {
+      setLastFailedMessage(content);
       setError(err instanceof Error ? err.message : "Jarvis tripped over the local wire.");
       setStatus("Error");
+    } finally {
+      isSubmittingRef.current = false;
     }
   }
 
@@ -242,11 +272,12 @@ export default function JarvisPage() {
       const nextHistory = [...messages, userMessage].slice(-20);
       setMessages(nextHistory);
 
-      const reply = await askJarvis([...nextHistory, { id: "readout-source", role: "user", content: prompt }]);
+      const reply = await askJarvis([...nextHistory, { id: "readout-source", role: "user", content: prompt }], crypto.randomUUID(), userMessage.id);
       const assistantMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: "assistant",
-        content: reply,
+        content: reply.content,
+        toolActions: reply.tools,
         collapsed: mode === "voice",
       };
       setMessages((current) => [...current, assistantMessage]);
@@ -261,6 +292,7 @@ export default function JarvisPage() {
   }
 
   async function speakMessage(message: ChatMessage) {
+    if (ttsMuted) return;
     const text = prepareTextForSpeech(message.content);
     if (!text) return;
     setStatus("Speaking");
@@ -431,7 +463,7 @@ export default function JarvisPage() {
   }
 
   return (
-    <main className="jarvis-shell">
+    <main className={`jarvis-shell ${compact ? "compact" : ""}`}>
       <div className="jarvis-grid" />
       <div className="jarvis-ambient-scan" />
       <section className="jarvis-console">
@@ -449,6 +481,7 @@ export default function JarvisPage() {
             {status === "Offline" ? <WifiOff size={16} /> : <Wifi size={16} />}
             <span>{status}</span>
           </div>
+          {compact && <button className="icon-button" type="button" onClick={() => window.jarvisDesktop?.openFullJarvis?.()} title="Open full Jarvis"><Maximize2 size={17} /></button>}
         </header>
 
         <section className="jarvis-meta">
@@ -511,13 +544,14 @@ export default function JarvisPage() {
                     </button>
                   </div>
                 )}
+                {!!message.toolActions?.length && <div className="tool-actions">Tool action: {message.toolActions.join(", ")}</div>}
               </div>
             </article>
           ))}
           <div ref={bottomRef} />
         </section>
 
-        {error && <div className="jarvis-error">{error}</div>}
+        {error && <div className="jarvis-error">{error} {lastFailedMessage && <button type="button" onClick={() => sendMessage(lastFailedMessage)}>Retry</button>}</div>}
 
         <footer className="composer">
           {(isListening || voiceHint || voiceTranscript) && (
@@ -541,8 +575,10 @@ export default function JarvisPage() {
             placeholder="Talk to Jarvis..."
           />
           <div className="composer-actions">
-            <Link href="/" className="ghost-action">Command Center</Link>
+            {!compact && <Link href="/" className="ghost-action">Command Center</Link>}
             <button className="ghost-action" type="button" onClick={clearChat}><Trash2 size={16} /> New</button>
+            <button className="ghost-action" type="button" onClick={() => { const next = !ttsMuted; setTtsMuted(next); stopAudio(); void window.jarvisDesktop?.setDesktopPreference?.("ttsMuted", next); }}>{ttsMuted ? <VolumeX size={16} /> : <Volume2 size={16} />} {ttsMuted ? "Muted" : "Voice"}</button>
+            {compact && <button className="ghost-action" type="button" onClick={() => { const next = !alwaysOnTop; setAlwaysOnTop(next); void window.jarvisDesktop?.setDesktopPreference?.("jarvisAlwaysOnTop", next); }}>{alwaysOnTop ? "Unpin" : "Pin"}</button>}
             <button
               className={`ghost-action ${isListening ? "listening" : ""}`}
               type="button"
@@ -614,10 +650,20 @@ function loadStoredMessages(): ChatMessage[] {
   if (typeof window === "undefined") return [];
   try {
     const saved = window.localStorage.getItem(HISTORY_KEY) || window.localStorage.getItem(LEGACY_STORAGE_KEYS.history);
-    return saved ? JSON.parse(saved) : [];
+    if (!saved) return [];
+    const parsed = JSON.parse(saved) as ChatMessage[];
+    return parsed.map((message) => message.role === "assistant" ? { ...message, content: sanitizeStoredAssistantIdentity(message.content) } : message);
   } catch {
     return [];
   }
+}
+
+function sanitizeStoredAssistantIdentity(content: string) {
+  return content
+    .replace(/\bmy name is chloe\b/gi, "my name is Jarvis")
+    .replace(/\bi(?:'m| am) chloe\b/gi, "I'm Jarvis")
+    .replace(/\bthis is chloe\b/gi, "this is Jarvis")
+    .replace(/\bchloe here\b/gi, "Jarvis here");
 }
 
 function loadStoredMode(): OutputMode {
@@ -709,6 +755,7 @@ function JarvisStyles() {
       .message-bubble p { white-space: pre-wrap; line-height: 1.55; margin: .42rem 0 0; }
       .message-actions { display: flex; gap: .5rem; margin-top: .72rem; }
       .message-actions button { display: inline-flex; align-items: center; gap: .35rem; border: 1px solid rgba(98,201,255,.18); border-radius: 999px; background: rgba(0,0,0,.26); color: #dff8ff; padding: .38rem .55rem; }
+      .tool-actions { margin-top: .6rem; color: #fbbf24; font-size: .72rem; font-weight: 800; text-transform: uppercase; }
       .jarvis-error { border: 1px solid rgba(248,113,113,.34); border-radius: 10px; background: rgba(127,29,29,.2); color: #fecaca; padding: .7rem .8rem; }
       .composer { display: grid; gap: .75rem; border-top: 1px solid rgba(74,222,128,.2); padding-top: .85rem; }
       .voice-listener { border: 1px solid rgba(98,201,255,.24); border-radius: 10px; background: rgba(0,13,24,.62); color: rgba(236,248,255,.78); padding: .68rem .78rem; display: grid; gap: .38rem; }
@@ -720,6 +767,12 @@ function JarvisStyles() {
       .composer-actions { justify-content: flex-end; }
       .send-button { display: inline-flex; align-items: center; gap: .5rem; border: 1px solid rgba(74,222,128,.52); border-radius: .3rem; background: rgba(34,197,94,.2); color: #dcfce7; padding: .72rem 1rem; font-weight: 900; }
       .send-button:disabled { opacity: .5; cursor: not-allowed; }
+      .jarvis-shell.compact { padding: 0; }
+      .jarvis-shell.compact .jarvis-console { height: 100vh; border-radius: 0; border: 0; padding: .8rem; gap: .65rem; }
+      .jarvis-shell.compact .jarvis-meta, .jarvis-shell.compact .model-select, .jarvis-shell.compact .header-subline, .jarvis-shell.compact .jarvis-controls .voice-control, .jarvis-shell.compact .ghost-action.listening { display: none; }
+      .jarvis-shell.compact .jarvis-header h1 { font-size: 1.7rem; }
+      .jarvis-shell.compact .jarvis-header p { font-size: .58rem; }
+      .jarvis-shell.compact .composer textarea { min-height: 4.5rem; }
       details summary { cursor: pointer; color: #86efac; font-weight: 800; margin-top: .45rem; }
       @keyframes jarvis-console-scan { 0%, 72% { transform: translateX(-140%) skewX(-18deg); opacity: 0; } 76% { opacity: .5; } 100% { transform: translateX(470%) skewX(-18deg); opacity: 0; } }
       @media (max-width: 780px) { .jarvis-console { height: auto; min-height: calc(100vh - 2rem); } .message-bubble { max-width: 100%; } }

@@ -1,2 +1,5 @@
-// Backward-compatible browser route. Jarvis is the canonical assistant page.
-export { default } from "../jarvis/page";
+import { redirect } from "next/navigation";
+
+export default function LegacyAssistantRoute() {
+  redirect("/jarvis");
+}

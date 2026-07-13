@@ -1,6 +1,6 @@
 # Kokoro TTS Service
 
-Local Jarvis voice service for Chloe.
+Local voice service for the Jarvis assistant.
 
 ## Windows setup
 

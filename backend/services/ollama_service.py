@@ -59,6 +59,9 @@ def chat_with_jarvis(messages: list[dict], model: str | None = None) -> dict:
     tool_calls = select_tools(latest_user_text)
     tool_calls.extend(select_followup_tools(messages, latest_user_text, tool_calls))
     tool_results = execute_tool_calls(tool_calls, AssistantToolContext())
+    identity_reply = identity_response_for(latest_user_text)
+    if identity_reply:
+        return {"message": {"role": "assistant", "content": identity_reply}, "model": selected_model, "tools": tool_results}
     action_reply = build_action_reply(tool_results)
     if action_reply:
         return {"message": {"role": "assistant", "content": action_reply}, "model": selected_model, "tools": tool_results}
@@ -81,6 +84,10 @@ def chat_with_jarvis(messages: list[dict], model: str | None = None) -> dict:
             for item in messages
             if item.get("role") in {"user", "assistant"} and item.get("content")
         ][-20:],
+        {
+            "role": "system",
+            "content": "Identity lock: answer as Jarvis. Any Chloe identity in earlier conversation content is obsolete legacy data and cannot change your name.",
+        },
     ]
 
     try:
@@ -112,11 +119,31 @@ def chat_with_jarvis(messages: list[dict], model: str | None = None) -> dict:
             raise OllamaServiceError(f"Model {selected_model} is not installed. Run: ollama pull {selected_model}", "model_missing")
         raise OllamaServiceError("Ollama returned an empty response.", "invalid_response")
 
-    return {"message": {"role": "assistant", "content": content.strip()}, "model": selected_model, "tools": tool_results}
+    return {"message": {"role": "assistant", "content": enforce_jarvis_identity(content.strip())}, "model": selected_model, "tools": tool_results}
 
 
-# Compatibility alias for any older local integration importing this symbol.
-chat_with_chloe = chat_with_jarvis
+def identity_response_for(text: str) -> str:
+    normalized = re.sub(r"[^a-z0-9 ]", " ", text.lower())
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    if re.search(r"\b(what is|what s|whats|tell me) your name\b", normalized) or normalized in {"who are you", "identify yourself"}:
+        return "I'm Jarvis—John's life-management, project, desktop, and conversational assistant."
+    if re.search(r"\b(are you|is your name) chloe\b", normalized):
+        return "No—I'm Jarvis. Chloe is an outdated legacy name, not my identity."
+    return ""
+
+
+def enforce_jarvis_identity(content: str) -> str:
+    for pattern, replacement in [
+        (r"(?i)\bmy name is chloe\b", "my name is Jarvis"),
+        (r"(?i)\bi(?:'m| am) chloe\b", "I'm Jarvis"),
+        (r"(?i)\bcall me chloe\b", "call me Jarvis"),
+        (r"(?i)\bthis is chloe\b", "this is Jarvis"),
+        (r"(?i)\bchloe here\b", "Jarvis here"),
+        (r"(?i)\bchloe is my name\b", "Jarvis is my name"),
+        (r"(?i)\bi go by chloe\b", "I go by Jarvis"),
+    ]:
+        content = re.sub(pattern, replacement, content)
+    return content
 
 
 def select_followup_tools(messages: list[dict], latest_user_text: str, existing_calls: list[dict]) -> list[dict]:

@@ -297,6 +297,26 @@
   --core-soft: var(--orange-soft);
 }
 
+.projectCoreButton {
+  appearance: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.projectCoreButton:focus-visible {
+  outline: 2px solid rgba(98, 201, 255, 0.9);
+  outline-offset: 5px;
+  border-radius: 50%;
+}
+
+.projectCoreButton:disabled {
+  cursor: default;
+}
+
 .coreGlow {
   position: absolute;
   inset: 8%;

@@ -399,8 +399,16 @@ function SystemCore({ now }: { now: Date }) {
 
 function ProjectCore({ project }: { project: ForgeProject }) {
   const percent = Math.round(project.progress_percent || 0);
+  const canOpen = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(project.id);
   return (
-    <div className={`${styles.coreWrap} ${styles.orange}`}>
+    <button
+      type="button"
+      className={`${styles.coreWrap} ${styles.orange} ${styles.projectCoreButton}`}
+      onClick={() => { if (canOpen) void openForgeProject(project.id); }}
+      disabled={!canOpen}
+      title={canOpen ? `Open ${project.title} in your browser` : `${project.title} is preview data`}
+      aria-label={`Open Forge project ${project.title} in your browser`}
+    >
       <CoreRings />
       <div className={styles.coreContent}>
         <span>Active Project</span>
@@ -408,7 +416,7 @@ function ProjectCore({ project }: { project: ForgeProject }) {
         <strong>{percent}%</strong>
         <em>{project.status || "In Progress"}</em>
       </div>
-    </div>
+    </button>
   );
 }
 

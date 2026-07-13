@@ -49,7 +49,19 @@
       "electron/**/*",
       "package.json",
       "!electron/test/**/*",
+      "!electron/*.ps1",
       "!node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "electron",
+        "to": "native",
+        "filter": [
+          "windows-media.ps1",
+          "windows-network.ps1",
+          "windows-storage.ps1"
+        ]
+      }
     ],
     "win": {
       "icon": "electron/assets/tray.ico",

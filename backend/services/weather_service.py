@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 CACHE_TTL_SECONDS = int(os.getenv("JARVIS_WEATHER_CACHE_SECONDS", "600"))
-DEFAULT_LOCATION = os.getenv("JARVIS_WEATHER_LOCATION", "").strip()
+DEFAULT_LOCATION = (os.getenv("JARVIS_WEATHER_LOCATION") or "Waynesboro, VA").strip()
 _cache: dict[str, tuple[float, dict]] = {}
 _cache_lock = threading.Lock()
 

@@ -10,6 +10,7 @@ FORECAST = {
     "hourly": {"precipitation_probability": [10]},
     "daily": {"weather_code": [2], "temperature_2m_max": [78.0], "temperature_2m_min": [61.0], "precipitation_probability_max": [20]},
 }
+WAYNESBORO_GEOCODE = {"results": [{"name": "Waynesboro", "admin1": "Virginia", "latitude": 38.07, "longitude": -78.89}]}
 
 
 class WeatherServiceTests(unittest.TestCase):
@@ -25,6 +26,13 @@ class WeatherServiceTests(unittest.TestCase):
         self.assertEqual(result["conditions"], "Partly cloudy")
         self.assertFalse(result["cacheHit"])
         self.assertEqual(fetch.call_count, 2)
+
+    @patch.object(weather_service, "DEFAULT_LOCATION", "Waynesboro, VA")
+    @patch("backend.services.weather_service._fetch_json", side_effect=[WAYNESBORO_GEOCODE, FORECAST])
+    def test_waynesboro_is_used_when_no_location_is_supplied(self, fetch):
+        result = weather_service.get_weather()
+        self.assertEqual(result["location"], "Waynesboro, Virginia")
+        self.assertIn("name=Waynesboro", fetch.call_args_list[0].args[0])
 
     @patch("backend.services.weather_service._fetch_json", side_effect=[GEOCODE, FORECAST])
     def test_unexpired_cache_avoids_provider_requests(self, fetch):

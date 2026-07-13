@@ -19,6 +19,7 @@ const { resolveDesktopConfig } = require("./config.cjs");
 const { GpuCollector } = require("./gpu.cjs");
 const { createLogger } = require("./logger.cjs");
 const { MediaService } = require("./media.cjs");
+const { resolveWindowsHelper } = require("./native-resources.cjs");
 const { NetworkCollector } = require("./network.cjs");
 const { SpeedTestService } = require("./speed-test.cjs");
 const { StorageCollector } = require("./storage.cjs");
@@ -62,11 +63,19 @@ async function startApplication() {
     ? path.resolve(config.preferencePath)
     : path.join(app.getPath("userData"), "desktop-state.json");
   stateStore = new JsonStateStore(preferencePath);
+  const helperPath = (name) => resolveWindowsHelper(name, {
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    sourceDir: __dirname,
+  });
   gpuCollector = new GpuCollector();
-  storageCollector = new StorageCollector();
-  networkCollector = new NetworkCollector();
+  storageCollector = new StorageCollector({ scriptPath: helperPath("windows-storage.ps1") });
+  networkCollector = new NetworkCollector({ scriptPath: helperPath("windows-network.ps1") });
   speedTestService = new SpeedTestService({ store: stateStore, intervalMs: config.speedTestIntervalHours * 60 * 60 * 1000 });
-  mediaService = new MediaService({ musicUrl: stateStore.get("musicUrl", config.musicUrl) });
+  mediaService = new MediaService({
+    scriptPath: helperPath("windows-media.ps1"),
+    musicUrl: stateStore.get("musicUrl", config.musicUrl),
+  });
 
   logger("electron-startup", `mode=${config.isDevelopment ? "development" : "production"}`);
   logger("target-url", config.publicTargetUrl);

@@ -3,6 +3,7 @@ import os
 import re
 import urllib.error
 import urllib.request
+from dataclasses import replace
 
 from backend.assistant.execution import (
     capability_manifest,
@@ -13,9 +14,19 @@ from backend.assistant.execution import (
     record_nonexecuted_action,
     validate_final_response,
 )
+from backend.assistant.meal_confirmation import (
+    PENDING_MEAL_STORE,
+    cancelled_message,
+    confirmation_message,
+    form_of_address,
+    is_meal_claim,
+    resolve_meal_claim,
+    response_kind,
+)
 from backend.assistant.tools.registry import AssistantToolContext, select_tools
 from backend.prompts.jarvis import JARVIS_SYSTEM_PROMPT
 from backend.prompts.user_profile import JOHN_USER_PROFILE
+from backend.schemas.assistant import ActionVerification, AssistantActionExecution
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:8b")
@@ -67,6 +78,61 @@ def chat_with_jarvis(messages: list[dict], model: str | None = None, context: As
         "",
     )
     manifest = capability_manifest()
+    pending_meal = PENDING_MEAL_STORE.get(context.conversation_id)
+    pending_response = response_kind(latest_user_text) if pending_meal else None
+    if pending_meal and pending_response == "no":
+        PENDING_MEAL_STORE.clear(context.conversation_id, pending_meal.confirmation_id)
+        execution = meal_state_execution(context, pending_meal, "cancelled", cancelled_message(pending_meal, context.request_id))
+        record_nonexecuted_action(execution)
+        return build_service_result(
+            execution.user_message, selected_model, [], [execution], manifest, context,
+            [{"event": "meal_confirmation_cancelled", "status": "cancelled"}], "meal_confirmation_cancelled",
+        )
+    if pending_meal and pending_response == "yes":
+        confirmed_context = replace(context, confirmed_action_id=pending_meal.confirmation_id)
+        tool_calls = [{
+            "name": "complete_meal",
+            "input": {
+                "meal_id": pending_meal.meal_id,
+                "meal_type": pending_meal.meal_type,
+                "confirmation_id": pending_meal.confirmation_id,
+            },
+        }]
+        tool_results, executions, execution_trace = execute_governed_tool_calls(tool_calls, confirmed_context)
+        PENDING_MEAL_STORE.clear(context.conversation_id, pending_meal.confirmation_id)
+        action_reply = build_action_reply(tool_results, executions, context.request_id)
+        return build_service_result(
+            action_reply or executions[0].user_message, selected_model, tool_results, executions, manifest,
+            confirmed_context, execution_trace, "confirmed_meal_action",
+        )
+    if is_meal_claim(latest_user_text):
+        try:
+            proposed_meal = resolve_meal_claim(
+                latest_user_text, context.user_id, context.source_message_id, context.conversation_id
+            )
+        except Exception:
+            proposed_meal = None
+        if proposed_meal:
+            PENDING_MEAL_STORE.put(proposed_meal)
+            message = confirmation_message(proposed_meal, context.request_id)
+            execution = meal_state_execution(context, proposed_meal, "awaiting_confirmation", message)
+            record_nonexecuted_action(execution)
+            return build_service_result(
+                message, selected_model, [], [execution], manifest, context,
+                [{"event": "meal_confirmation_requested", "status": "awaiting_confirmation"}], "meal_confirmation",
+            )
+        execution = AssistantActionExecution(
+            action_id=f"act_{context.request_id}", source_message_id=context.source_message_id,
+            conversation_id=context.conversation_id, intent="complete_meal", requested_action="complete_meal",
+            execution_status="unavailable", tool_name="complete_meal", requires_confirmation=True,
+            result=None, verification=ActionVerification(status="unavailable", summary="Today's planned meal could not be resolved."),
+            user_message="I couldn't find a matching meal in today's plan, so I did not log anything. Tell me whether it was breakfast, lunch, dinner, or a snack.",
+        )
+        record_nonexecuted_action(execution)
+        return build_service_result(
+            execution.user_message, selected_model, [], [execution], manifest, context,
+            [{"event": "meal_resolution_failed", "status": "unavailable"}], "meal_resolution_failed",
+        )
     nonexecuted_action = detect_nonexecuted_action(latest_user_text, context)
     tool_calls = [] if nonexecuted_action else select_tools(latest_user_text)
     tool_calls.extend(select_followup_tools(messages, latest_user_text, tool_calls))
@@ -83,7 +149,7 @@ def chat_with_jarvis(messages: list[dict], model: str | None = None, context: As
     identity_reply = identity_response_for(latest_user_text)
     if identity_reply:
         return build_service_result(identity_reply, selected_model, tool_results, executions, manifest, context, execution_trace, "identity")
-    action_reply = build_action_reply(tool_results, executions)
+    action_reply = build_action_reply(tool_results, executions, context.request_id)
     if action_reply:
         return build_service_result(action_reply, selected_model, tool_results, executions, manifest, context, execution_trace, "tool_action")
 
@@ -219,7 +285,7 @@ def infer_followup_symptom(text: str) -> str:
     return "custom_event"
 
 
-def build_action_reply(tool_results: list[dict], executions: list) -> str:
+def build_action_reply(tool_results: list[dict], executions: list, request_id: str = "") -> str:
     write_results = [item for item in tool_results if item.get("access") == "write"]
     if not write_results:
         return ""
@@ -230,7 +296,7 @@ def build_action_reply(tool_results: list[dict], executions: list) -> str:
         execution = next((action for action in executions if action.tool_name == item.get("tool")), None)
         result = item.get("result") or {}
         if execution and execution.execution_status == "succeeded" and execution.verification and execution.verification.status == "verified":
-            confirmations.append(format_write_confirmation(item.get("tool"), result))
+            confirmations.append(format_write_confirmation(item.get("tool"), result, request_id))
         elif execution:
             failures.append(execution.user_message)
         else:
@@ -243,7 +309,7 @@ def build_action_reply(tool_results: list[dict], executions: list) -> str:
     return " ".join(lines)
 
 
-def format_write_confirmation(tool_name: str | None, result: dict) -> str:
+def format_write_confirmation(tool_name: str | None, result: dict, request_id: str = "") -> str:
     if tool_name == "log_goal_progress":
         goal = result.get("goal") or {}
         log = result.get("log") or {}
@@ -304,9 +370,11 @@ def format_write_confirmation(tool_name: str | None, result: dict) -> str:
 
     if tool_name == "complete_meal":
         meal = result.get("meal") or {}
+        address = form_of_address(request_id)
+        prefix = f"You got it, {address}. " if address else "You got it. "
         if result.get("already_done"):
-            return f"{meal.get('name') or meal.get('meal_type') or 'That meal'} was already marked eaten."
-        return f"Done. I marked {meal.get('name') or meal.get('meal_type') or 'that meal'} eaten."
+            return f"{prefix}{meal.get('name') or meal.get('meal_type') or 'That meal'} was already marked eaten."
+        return f"{prefix}Done—I marked {meal.get('name') or meal.get('meal_type') or 'that meal'} eaten and verified it."
 
     if tool_name == "log_caffeine_drink":
         drink = result.get("drink") or {}
@@ -329,6 +397,18 @@ def format_write_confirmation(tool_name: str | None, result: dict) -> str:
 
 def friendly_tool_name(tool_name: str | None) -> str:
     return str(tool_name or "that action").replace("_", " ")
+
+
+def meal_state_execution(context, pending, status: str, message: str) -> AssistantActionExecution:
+    verification_status = "pending" if status == "awaiting_confirmation" else "unavailable"
+    summary = "Waiting for explicit yes or no; no meal write has executed." if status == "awaiting_confirmation" else "Confirmation was declined; no meal write executed."
+    return AssistantActionExecution(
+        action_id=f"act_{pending.confirmation_id}", source_message_id=context.source_message_id,
+        conversation_id=context.conversation_id, intent="complete_meal", requested_action="complete_meal",
+        execution_status=status, tool_name="complete_meal", requires_confirmation=True,
+        result={"meal": {"id": pending.meal_id, "name": pending.meal_name, "meal_type": pending.meal_type}},
+        verification=ActionVerification(status=verification_status, summary=summary), user_message=message,
+    )
 
 
 def build_tool_context_message(tool_results: list[dict]) -> str:

@@ -50,6 +50,7 @@ class AssistantToolContext:
     conversation_id: str = "local-jarvis"
     source: str = "jarvis-chat"
     timezone: str = "America/New_York"
+    confirmed_action_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -146,10 +147,6 @@ def select_write_tools(user_text: str) -> list[dict[str, Any]]:
     goal_fields = parse_goal_create_fields(text)
     if "create a goal" in lower or "new goal" in lower or {"title", "category", "goal_type"} <= set(goal_fields):
         calls.append({"name": "create_goal", "input": goal_fields})
-
-    meal_match = re.search(r"\b(?:log|mark|complete)\s+(?:my\s+)?(breakfast|lunch|dinner|snack)\b", lower)
-    if meal_match:
-        calls.append({"name": "complete_meal", "input": {"meal_type": meal_match.group(1)}})
 
     red_bull_match = re.search(r"\b(?:drank|had|log(?:ged)?)\s+(?:a\s+)?(?:(?:\d+(?:\.\d+)?\s*(?:oz|ounce|ounces)\s+)?(?:red bull|redbull)|(?:red bull|redbull))\b", lower)
     if red_bull_match:
@@ -553,14 +550,24 @@ def create_goal_tool(context: AssistantToolContext, input_data: dict[str, Any]) 
 
 def complete_meal_tool(context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
     meal_type = normalize_meal_type(str(input_data.get("meal_type") or ""))
-    if not meal_type:
-        return {"updated": False, "needs_input": True, "question": "Which meal should I log: breakfast, lunch, dinner, or snack?"}
+    meal_id = str(input_data.get("meal_id") or "")
+    confirmation_id = str(input_data.get("confirmation_id") or "")
+    if not meal_type or not meal_id or not confirmation_id or confirmation_id != context.confirmed_action_id:
+        return {"updated": False, "reason": "A current server-validated meal confirmation is required."}
     today = datetime.now(LOCAL_TZ).date().isoformat()
     meals = list_meal_plan_entries(context.user_id, today, today)
-    candidates = [meal for meal in meals if normalize_meal_type(str(meal.get("meal_type") or "")) == meal_type]
-    if not candidates:
-        return {"updated": False, "reason": f"I could not find a planned {meal_type} for today."}
-    meal = candidates[0]
+    meal = next(
+        (
+            candidate
+            for candidate in meals
+            if str(candidate.get("id") or "") == meal_id
+            and str(candidate.get("meal_date") or "") == today
+            and normalize_meal_type(str(candidate.get("meal_type") or "")) == meal_type
+        ),
+        None,
+    )
+    if not meal:
+        return {"updated": False, "reason": f"I could not verify that planned {meal_type} for today."}
     meta = meal_meta(meal)
     if meta.get("completed"):
         return {"updated": True, "already_done": True, "meal": summarize_meal(meal)}
@@ -923,7 +930,7 @@ TOOL_REGISTRY: dict[str, AssistantToolDefinition] = {
     "upsert_health_checkin": AssistantToolDefinition("upsert_health_checkin", "Update today's health check-in values.", 2, "write", False, upsert_health_checkin_tool),
     "complete_daily_checkin": AssistantToolDefinition("complete_daily_checkin", "Complete or update today's daily health check-in.", 2, "write", False, complete_daily_checkin_tool),
     "create_goal": AssistantToolDefinition("create_goal", "Create a new Jarvis goal from supplied fields.", 2, "write", False, create_goal_tool),
-    "complete_meal": AssistantToolDefinition("complete_meal", "Mark a planned meal eaten.", 2, "write", False, complete_meal_tool),
+    "complete_meal": AssistantToolDefinition("complete_meal", "Mark a server-confirmed planned meal eaten.", 2, "write", True, complete_meal_tool),
     "log_caffeine_drink": AssistantToolDefinition("log_caffeine_drink", "Log a caffeine drink with nutrition context.", 2, "write", False, log_caffeine_drink_tool),
     "complete_forge_project": AssistantToolDefinition("complete_forge_project", "Archive/complete a matching Forge project.", 3, "write", False, complete_forge_project_tool),
     "complete_forge_task": AssistantToolDefinition("complete_forge_task", "Mark a matching Forge task complete.", 2, "write", False, complete_forge_task_tool),

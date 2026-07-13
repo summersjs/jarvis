@@ -132,7 +132,7 @@ def record_nonexecuted_action(execution: AssistantActionExecution, store: Action
         "source_message_id": execution.source_message_id,
         "conversation_id": execution.conversation_id,
         "requested_action": execution.requested_action,
-        "tool_name": None,
+        "tool_name": execution.tool_name,
         "arguments_hash": hash_arguments({}),
         "execution_status": execution.execution_status,
         "start_time": now,
@@ -162,7 +162,12 @@ def execute_governed_tool_calls(
             result = execute_tool_calls([call], context)[0]
             results.append(result)
             continue
-        if definition.requires_confirmation:
+        trusted_confirmation = (
+            definition.requires_confirmation
+            and bool(context.confirmed_action_id)
+            and input_data.get("confirmation_id") == context.confirmed_action_id
+        )
+        if definition.requires_confirmation and not trusted_confirmation:
             execution = AssistantActionExecution(
                 action_id=new_action_id(), source_message_id=context.source_message_id, conversation_id=context.conversation_id,
                 intent=tool_name, requested_action=tool_name, execution_status="awaiting_confirmation", tool_name=tool_name,

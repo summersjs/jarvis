@@ -29,6 +29,7 @@ frontend/dist-electron/
 # Logs
 *.log
 /backend/data/assistant_action_log.json
+/backend/data/assistant_pending_meals.json
 
 # Supabase / secrets
 *.key

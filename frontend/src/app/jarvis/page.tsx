@@ -8,6 +8,7 @@ import {
   Mic,
   MicOff,
   Maximize2,
+  Minimize2,
   Pause,
   Play,
   RotateCcw,
@@ -125,6 +126,7 @@ export default function JarvisPage() {
   const [error, setError] = useState("");
   const [lastFailedMessage, setLastFailedMessage] = useState("");
   const [compact, setCompact] = useState(false);
+  const [desktopShell, setDesktopShell] = useState(false);
   const [ttsMuted, setTtsMuted] = useState(false);
   const [alwaysOnTop, setAlwaysOnTop] = useState(false);
   const [activeReadout, setActiveReadout] = useState<ReadoutKind | null>(null);
@@ -144,6 +146,7 @@ export default function JarvisPage() {
 
   useEffect(() => {
     setCompact(new URLSearchParams(window.location.search).get("mode") === "compact");
+    setDesktopShell(Boolean(window.jarvisDesktop?.collapseJarvis));
     for (const key of Object.values(LEGACY_STORAGE_KEYS)) window.localStorage.removeItem(key);
     if (window.localStorage.getItem(EXECUTION_TRUTH_MIGRATION_KEY) !== IDENTITY_VERSION) {
       window.localStorage.removeItem(HISTORY_KEY);
@@ -506,6 +509,7 @@ export default function JarvisPage() {
             <span>{status}</span>
           </div>
           {compact && <button className="icon-button" type="button" onClick={() => window.jarvisDesktop?.openFullJarvis?.()} title="Open full Jarvis"><Maximize2 size={17} /></button>}
+          {!compact && desktopShell && <button className="icon-button" type="button" onClick={() => window.jarvisDesktop?.collapseJarvis?.()} title="Shrink to compact Jarvis" aria-label="Shrink Jarvis to compact window"><Minimize2 size={17} /></button>}
         </header>
 
         <section className="jarvis-meta">

@@ -15,6 +15,14 @@ test("Alt+C targets one Jarvis assistant window", () => {
   assert.equal(shortcutAction({ visible: true, focused: true }), "focus");
 });
 
+test("full Jarvis exposes a narrow compact-window return path", () => {
+  const preload = require("node:fs").readFileSync(require("node:path").join(__dirname, "..", "preload.cjs"), "utf8");
+  const main = require("node:fs").readFileSync(require("node:path").join(__dirname, "..", "main.cjs"), "utf8");
+  assert.match(preload, /collapseJarvis.*desktop:collapse-jarvis/);
+  assert.match(main, /desktop:collapse-jarvis/);
+  assert.match(main, /navigateTo\(config\.targetUrl\)/);
+});
+
 test("navigation stays on Jarvis and sends trusted external links outside", () => {
   const origin = "http://localhost:3000";
   assert.equal(navigationAction("http://localhost:3000/desktop", origin), "allow");

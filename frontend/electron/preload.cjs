@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld("jarvisDesktop", Object.freeze({
   openJarvisAssistant: () => invoke("desktop:open-jarvis-assistant"),
   hideJarvisAssistant: () => invoke("desktop:hide-jarvis-assistant"),
   openFullJarvis: () => invoke("desktop:open-full-jarvis"),
+  collapseJarvis: () => invoke("desktop:collapse-jarvis"),
   getDesktopPreferences: () => invoke("desktop:get-preferences"),
   setDesktopPreference: (key, value) => invoke("desktop:set-preference", { key, value }),
   resetJarvisPosition: () => invoke("desktop:reset-jarvis-position"),

@@ -403,6 +403,17 @@ function registerIpcHandlers() {
   ipcMain.handle("desktop:open-jarvis-assistant", () => { openJarvisAssistant(); return true; });
   ipcMain.handle("desktop:hide-jarvis-assistant", () => { assistantWindow?.hide(); return true; });
   ipcMain.handle("desktop:open-full-jarvis", () => { navigateTo(config.jarvisUrl); assistantWindow?.hide(); return true; });
+  ipcMain.handle("desktop:collapse-jarvis", async () => {
+    const window = createAssistantWindow();
+    const online = await checkReachable(config.targetUrl);
+    if (online) await window.loadURL(`${config.jarvisUrl}?mode=compact`);
+    else await window.loadFile(path.join(__dirname, "offline.html"));
+    window.show();
+    window.focus();
+    navigateTo(config.targetUrl);
+    logger("assistant-window-collapsed", "compact");
+    return true;
+  });
   ipcMain.handle("desktop:get-preferences", () => getDesktopPreferences());
   ipcMain.handle("desktop:set-preference", (_event, payload) => setDesktopPreference(payload));
   ipcMain.handle("desktop:reset-jarvis-position", () => {

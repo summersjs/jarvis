@@ -159,6 +159,7 @@ declare global {
       openJarvisAssistant?: () => Promise<boolean>;
       hideJarvisAssistant?: () => Promise<boolean>;
       openFullJarvis?: () => Promise<boolean>;
+      collapseJarvis?: () => Promise<boolean>;
       getDesktopPreferences?: () => Promise<Partial<DesktopPreferences>>;
       setDesktopPreference?: (key: string, value: unknown) => Promise<Partial<DesktopPreferences>>;
       resetJarvisPosition?: () => Promise<boolean>;

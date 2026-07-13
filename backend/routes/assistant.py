@@ -126,6 +126,13 @@ def _cached_response(result: dict) -> dict:
         "content": "I detected a duplicate request and did not repeat the action. The original request remains recorded in the action audit trail.",
     }
     result["tools"] = []
+    if result.get("executionTrace"):
+        result["executionTrace"] = {
+            **result["executionTrace"],
+            "finalExecutionStatus": "cancelled",
+            "finalResponseValidation": "cached_duplicate_rewritten",
+            "responseSource": "cache_replay",
+        }
     result["actions"] = [
         {
             **action,

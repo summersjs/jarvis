@@ -108,10 +108,12 @@ class ExecutionTruthTests(unittest.TestCase):
             "message": {"role": "assistant", "content": "Done."},
             "tools": [{"tool": "create_goal", "success": True}],
             "actions": [action("succeeded", verification="verified").model_dump()],
+            "executionTrace": {"finalExecutionStatus": "succeeded", "finalResponseValidation": "passed"},
         })
         self.assertEqual(cached["actions"][0]["execution_status"], "cancelled")
         self.assertEqual(cached["tools"], [])
         self.assertIn("did not repeat", cached["message"]["content"])
+        self.assertEqual(cached["executionTrace"]["finalExecutionStatus"], "cancelled")
 
     def test_persona_cannot_override_execution_truth(self):
         content, status = validate_final_response("With a wink: done, handsome.", [action("unavailable")])

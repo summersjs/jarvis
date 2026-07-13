@@ -31,6 +31,7 @@ const MODEL_KEY = "jarvis.assistant.model";
 const IDENTITY_VERSION_KEY = "jarvis.assistant.identityVersion";
 const IDENTITY_VERSION = "jarvis-2026-07-13-v3-execution-truth";
 const CONVERSATION_KEY = "jarvis.assistant.conversationId";
+const EXECUTION_TRUTH_MIGRATION_KEY = "jarvis.assistant.executionTruthMigration";
 const LEGACY_STORAGE_KEYS = {
   history: "jarvis.chloe.history",
   mode: "jarvis.chloe.outputMode",
@@ -144,6 +145,11 @@ export default function JarvisPage() {
   useEffect(() => {
     setCompact(new URLSearchParams(window.location.search).get("mode") === "compact");
     for (const key of Object.values(LEGACY_STORAGE_KEYS)) window.localStorage.removeItem(key);
+    if (window.localStorage.getItem(EXECUTION_TRUTH_MIGRATION_KEY) !== IDENTITY_VERSION) {
+      window.localStorage.removeItem(HISTORY_KEY);
+      window.localStorage.setItem(EXECUTION_TRUTH_MIGRATION_KEY, IDENTITY_VERSION);
+      setMessages([]);
+    }
     window.localStorage.setItem(IDENTITY_VERSION_KEY, IDENTITY_VERSION);
     void window.jarvisDesktop?.getDesktopPreferences?.().then((preferences) => {
       if (preferences.jarvisResponseMode) setMode(preferences.jarvisResponseMode);

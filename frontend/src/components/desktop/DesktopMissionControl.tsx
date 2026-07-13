@@ -595,6 +595,9 @@ function NowPlayingBar({ media }: { media: MediaStatus | null }) {
   const title = media?.available ? (media.title || "Active session") : "Not playing";
   const artist = media?.available ? (media.artist || "Metadata unavailable") : "Open YouTube Music to begin";
   const source = media?.available ? friendlyMediaSource(media.source) : "YouTube Music";
+  const playbackState = media?.available
+    ? (media.stale ? "Stale" : (media.playbackStatus || (isPlaying ? "Playing" : "Paused")))
+    : "Not playing";
 
   async function control(action: "previous" | "playPause" | "next" | "volumeDown" | "volumeUp" | "mute") {
     if (window.jarvisDesktop?.executeMediaAction) await window.jarvisDesktop.executeMediaAction(action);
@@ -608,27 +611,43 @@ function NowPlayingBar({ media }: { media: MediaStatus | null }) {
 
   return (
     <aside className={styles.nowPlaying} aria-label="Now playing">
-      <div className={styles.albumArt}>
-        {media?.artworkUrl ? (
-          <Image src={media.artworkUrl} alt="" width={58} height={58} unoptimized />
-        ) : (
-          <Music2 size={26} />
-        )}
+      <header className={styles.mediaHeader}>
+        <span>{source}</span>
+        <em className={media?.stale ? styles.staleStatus : ""}>{playbackState}</em>
+      </header>
+
+      <div className={styles.mediaMain}>
+        <div className={styles.albumArt}>
+          {media?.artworkUrl ? (
+            <Image src={media.artworkUrl} alt={`${title} album artwork`} width={76} height={76} unoptimized />
+          ) : (
+            <Music2 size={30} aria-hidden="true" />
+          )}
+        </div>
+        <div className={styles.trackInfo} aria-live="polite">
+          <strong title={title}>{title}</strong>
+          <em title={artist}>{artist}</em>
+          {media?.available && media.album ? <small title={media.album}>{media.album}</small> : null}
+        </div>
       </div>
-      <div className={styles.trackInfo}>
-        <span>{source}{media?.stale ? " · stale" : ""}</span>
-        <strong>{title}</strong>
-        <em>{artist}</em>
-      </div>
+
       <div className={styles.mediaControls}>
-        {!media?.available ? <button className={styles.openMusic} type="button" onClick={openMusic}>Open YouTube Music</button> : <>
-          <button type="button" aria-label="Previous track" onClick={() => control("previous")}><SkipBack size={17} /></button>
-          <button type="button" className={styles.playPause} aria-label={isPlaying ? "Pause" : "Play"} onClick={() => control("playPause")}>{isPlaying ? <Pause size={18} /> : <Play size={18} />}</button>
-          <button type="button" aria-label="Next track" onClick={() => control("next")}><SkipForward size={17} /></button>
-          <button type="button" aria-label="Volume down" onClick={() => control("volumeDown")}><Volume1 size={16} /></button>
-          <button type="button" aria-label="Volume up" onClick={() => control("volumeUp")}><Volume2 size={16} /></button>
-          <button type="button" aria-label="Mute" onClick={() => control("mute")}><VolumeX size={16} /></button>
-        </>}
+        {!media?.available ? (
+          <button className={styles.openMusic} type="button" onClick={openMusic}>Open YouTube Music</button>
+        ) : (
+          <>
+            <div className={styles.primaryControls} role="group" aria-label="Playback controls">
+              <button type="button" aria-label="Previous track" onClick={() => control("previous")}><SkipBack size={19} /></button>
+              <button type="button" className={styles.playPause} aria-label={isPlaying ? "Pause" : "Play"} onClick={() => control("playPause")}>{isPlaying ? <Pause size={21} /> : <Play size={21} />}</button>
+              <button type="button" aria-label="Next track" onClick={() => control("next")}><SkipForward size={19} /></button>
+            </div>
+            <div className={styles.secondaryControls} role="group" aria-label="Volume controls">
+              <button type="button" aria-label="Volume down" onClick={() => control("volumeDown")}><Volume1 size={15} /></button>
+              <button type="button" aria-label="Volume up" onClick={() => control("volumeUp")}><Volume2 size={15} /></button>
+              <button type="button" aria-label="Mute or unmute" onClick={() => control("mute")}><VolumeX size={15} /></button>
+            </div>
+          </>
+        )}
       </div>
     </aside>
   );

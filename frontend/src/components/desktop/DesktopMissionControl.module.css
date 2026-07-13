@@ -876,29 +876,75 @@
   right: clamp(1rem, 2vw, 2.6rem);
   bottom: clamp(1.6rem, 4vh, 3.6rem);
   z-index: 10;
-  display: grid;
-  grid-template-columns: 58px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 0.82rem;
-  width: clamp(300px, 21vw, 390px);
+  display: flex;
+  width: clamp(300px, 17.2vw, 330px);
+  min-height: 260px;
+  box-sizing: border-box;
+  flex-direction: column;
+  gap: 0.75rem;
   border: 1px solid rgba(98, 201, 255, 0.23);
   border-radius: 14px;
   background:
     linear-gradient(135deg, rgba(3, 12, 18, 0.75), rgba(0, 0, 0, 0.75)),
     radial-gradient(circle at 8% 0%, rgba(8, 191, 255, 0.15), transparent 9rem);
-  padding: 0.68rem 0.78rem;
+  padding: 1rem 1.08rem;
   color: #f1fbff;
-  opacity: 0.75;
+  opacity: 0.82;
   backdrop-filter: blur(16px);
   box-shadow:
     0 0 34px rgba(0, 0, 0, 0.48),
     inset 0 0 18px rgba(8, 191, 255, 0.08);
 }
 
+.mediaHeader {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px solid rgba(98, 201, 255, 0.12);
+  padding-bottom: 0.55rem;
+}
+
+.mediaHeader span,
+.mediaHeader em {
+  font-size: 0.65rem;
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.mediaHeader span {
+  overflow: hidden;
+  color: #42d1ff;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mediaHeader em {
+  flex: none;
+  color: #ffad58;
+  text-shadow: 0 0 10px rgba(255, 122, 0, 0.35);
+}
+
+.mediaHeader .staleStatus {
+  color: rgba(236, 248, 255, 0.48);
+  text-shadow: none;
+}
+
+.mediaMain {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 76px minmax(0, 1fr);
+  align-items: center;
+  gap: 0.85rem;
+}
+
 .albumArt {
   display: grid;
-  width: 58px;
-  height: 58px;
+  width: 76px;
+  height: 76px;
   place-items: center;
   overflow: hidden;
   border: 1px solid rgba(255, 122, 0, 0.32);
@@ -925,41 +971,68 @@
 .trackInfo {
   display: grid;
   min-width: 0;
-  gap: 0.14rem;
-}
-
-.trackInfo span {
-  color: #42d1ff;
-  font-size: 0.62rem;
-  font-weight: 900;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
+  align-content: center;
+  gap: 0.2rem;
 }
 
 .trackInfo strong,
-.trackInfo em {
+.trackInfo em,
+.trackInfo small {
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
 }
 
 .trackInfo strong {
   color: white;
-  font-size: 0.9rem;
-  line-height: 1.18;
+  font-size: 1rem;
+  line-height: 1.2;
+  font-weight: 800;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 .trackInfo em {
   color: rgba(236, 248, 255, 0.66);
-  font-size: 0.76rem;
+  font-size: 0.8rem;
   font-style: normal;
+  line-height: 1.25;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.trackInfo small {
+  color: rgba(236, 248, 255, 0.42);
+  font-size: 0.66rem;
+  line-height: 1.2;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
 }
 
 .mediaControls {
   display: flex;
+  min-height: 5.8rem;
+  flex: 1;
+  flex-direction: column;
   align-items: center;
-  gap: 0.34rem;
+  justify-content: flex-end;
+  gap: 0.46rem;
+}
+
+.primaryControls,
+.secondaryControls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.primaryControls {
+  gap: 0.72rem;
+}
+
+.secondaryControls {
+  gap: 0.5rem;
 }
 
 .mediaControls button {
@@ -975,10 +1048,15 @@
   transition: transform 180ms, border-color 180ms, background 180ms, box-shadow 180ms;
 }
 
+.secondaryControls button {
+  width: 1.78rem;
+  height: 1.78rem;
+  color: rgba(223, 248, 255, 0.72);
+}
+
 .mediaControls .openMusic {
-  width: auto;
-  min-width: 7rem;
-  height: auto;
+  width: 100%;
+  height: 2.55rem;
   border-radius: 7px;
   padding: 0.55rem 0.65rem;
   font-size: 0.66rem;
@@ -993,9 +1071,16 @@
   box-shadow: 0 0 18px rgba(255, 122, 0, 0.22);
 }
 
+.mediaControls button:focus-visible {
+  outline: 2px solid #73dcff;
+  outline-offset: 3px;
+  border-color: rgba(255, 185, 111, 0.72);
+  box-shadow: 0 0 18px rgba(8, 191, 255, 0.3);
+}
+
 .mediaControls .playPause {
-  width: 2.45rem;
-  height: 2.45rem;
+  width: 2.8rem;
+  height: 2.8rem;
   border-color: rgba(255, 122, 0, 0.42);
   background: rgba(255, 122, 0, 0.16);
   color: #fff4e9;
@@ -1158,8 +1243,9 @@
 
   .nowPlaying {
     inset: auto;
-    width: calc(100% - 2rem);
-    margin: 1rem;
+    width: min(330px, calc(100% - 2rem));
+    min-height: 260px;
+    margin: 1rem 1rem 1rem auto;
   }
 
   .systemOnline {

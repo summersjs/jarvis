@@ -13,7 +13,7 @@ const {
   shell,
   Tray,
 } = require("electron");
-const { closeAction, navigationAction } = require("./behavior.cjs");
+const { closeAction, forgeProjectUrl, navigationAction } = require("./behavior.cjs");
 const { checkReachable, ConnectionMonitor } = require("./connection.cjs");
 const { resolveDesktopConfig } = require("./config.cjs");
 const { GpuCollector } = require("./gpu.cjs");
@@ -423,6 +423,12 @@ function registerIpcHandlers() {
     if (appId === "youtube-music") return mediaService.execute("open");
     const target = targets[appId];
     if (!target) return false;
+    await shell.openExternal(target);
+    return true;
+  });
+  ipcMain.handle("desktop:open-forge-project", async (_event, projectId) => {
+    const target = forgeProjectUrl(projectId, config.targetOrigin);
+    logger("forge-project-open", `project=${projectId}`);
     await shell.openExternal(target);
     return true;
   });

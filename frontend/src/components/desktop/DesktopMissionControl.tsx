@@ -155,6 +155,7 @@ declare global {
       openYouTubeMusic?: () => Promise<{ available: boolean }>;
       getNativeHealth?: () => Promise<NativeHealth>;
       launchApp?: (appId: string) => Promise<void>;
+      openForgeProject?: (projectId: string) => Promise<boolean>;
       openJarvisAssistant?: () => Promise<boolean>;
       hideJarvisAssistant?: () => Promise<boolean>;
       openFullJarvis?: () => Promise<boolean>;
@@ -527,8 +528,16 @@ function RightRail({
 
 function ProjectRow({ project, active }: { project: ForgeProject; active: boolean }) {
   const percent = Math.round(project.progress_percent || 0);
+  const canOpen = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(project.id);
   return (
-    <article className={`${styles.projectCard} ${active ? styles.activeCard : ""}`}>
+    <button
+      type="button"
+      className={`${styles.projectCard} ${active ? styles.activeCard : ""}`}
+      onClick={() => { if (canOpen) void openForgeProject(project.id); }}
+      disabled={!canOpen}
+      title={canOpen ? `Open ${project.title} in your browser` : `${project.title} is preview data`}
+      aria-label={`Open Forge project ${project.title} in your browser`}
+    >
       <div className={styles.projectGlyph}>
         {project.cover_image_url ? (
           <Image src={project.cover_image_url} alt="" width={44} height={44} unoptimized />
@@ -542,8 +551,16 @@ function ProjectRow({ project, active }: { project: ForgeProject; active: boolea
         <i><b style={{ width: `${Math.max(6, Math.min(percent, 100))}%` }} /></i>
       </div>
       <em>{percent}%</em>
-    </article>
+    </button>
   );
+}
+
+async function openForgeProject(projectId: string) {
+  if (window.jarvisDesktop?.openForgeProject) {
+    await window.jarvisDesktop.openForgeProject(projectId);
+    return;
+  }
+  window.open(`/forge/projects/${encodeURIComponent(projectId)}`, "_blank", "noopener,noreferrer");
 }
 
 function QuickLaunchDock() {

@@ -24,8 +24,21 @@ function navigationAction(candidate, approvedOrigin) {
   return "block";
 }
 
+function forgeProjectUrl(projectId, approvedOrigin) {
+  const id = String(projectId || "").trim();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+    throw new TypeError("Forge project id must be a UUID.");
+  }
+  const origin = new URL(approvedOrigin);
+  if (!["http:", "https:"].includes(origin.protocol) || origin.username || origin.password) {
+    throw new TypeError("Approved Jarvis origin must use http or https without credentials.");
+  }
+  return new URL(`/forge/projects/${encodeURIComponent(id)}`, origin.origin).toString();
+}
+
 module.exports = {
   closeAction,
+  forgeProjectUrl,
   navigationAction,
   shortcutAction,
 };

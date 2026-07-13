@@ -686,6 +686,12 @@
   background: rgba(12, 5, 0, 0.52);
   padding: 0.58rem;
   transition: transform 180ms, border-color 180ms, box-shadow 180ms, background 180ms;
+  width: 100%;
+  appearance: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .projectCard::before {
@@ -707,6 +713,16 @@
 
 .projectCard:hover {
   transform: translateY(-2px);
+}
+
+.projectCard:focus-visible {
+  outline: 2px solid rgba(98, 201, 255, 0.9);
+  outline-offset: 2px;
+  border-color: rgba(255, 162, 72, 0.78);
+}
+
+.projectCard:disabled {
+  cursor: default;
 }
 
 .projectGlyph {

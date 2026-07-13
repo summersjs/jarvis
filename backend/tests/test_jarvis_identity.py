@@ -24,6 +24,8 @@ class JarvisIdentityTests(unittest.TestCase):
 
     def test_prompt_and_output_guard_lock_identity(self):
         self.assertIn("Never claim that Chloe is your name", JARVIS_SYSTEM_PROMPT)
+        self.assertIn("Knowing the steps is not performing the steps", JARVIS_SYSTEM_PROMPT)
+        self.assertLess(JARVIS_SYSTEM_PROMPT.index("EXECUTION TRUTH"), JARVIS_SYSTEM_PROMPT.index("Jim and Pam"))
         self.assertEqual(enforce_jarvis_identity("Hi, my name is Chloe."), "Hi, my name is Jarvis.")
 
     def test_duplicate_request_id_returns_cached_response(self):

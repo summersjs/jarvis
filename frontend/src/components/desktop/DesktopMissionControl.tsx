@@ -26,9 +26,6 @@ import {
   TerminalSquare,
   Timer,
   Wifi,
-  Volume1,
-  Volume2,
-  VolumeX,
   X,
   Zap,
   type LucideIcon,
@@ -599,7 +596,7 @@ function NowPlayingBar({ media }: { media: MediaStatus | null }) {
     ? (media.stale ? "Stale" : (media.playbackStatus || (isPlaying ? "Playing" : "Paused")))
     : "Not playing";
 
-  async function control(action: "previous" | "playPause" | "next" | "volumeDown" | "volumeUp" | "mute") {
+  async function control(action: "previous" | "playPause" | "next") {
     if (window.jarvisDesktop?.executeMediaAction) await window.jarvisDesktop.executeMediaAction(action);
     else if (action === "playPause") window.open("https://music.youtube.com", "_blank", "noopener,noreferrer");
   }
@@ -619,7 +616,7 @@ function NowPlayingBar({ media }: { media: MediaStatus | null }) {
       <div className={styles.mediaMain}>
         <div className={styles.albumArt}>
           {media?.artworkUrl ? (
-            <Image src={media.artworkUrl} alt={`${title} album artwork`} width={76} height={76} unoptimized />
+            <Image src={media.artworkUrl} alt={`${title} album artwork`} width={84} height={84} unoptimized />
           ) : (
             <Music2 size={30} aria-hidden="true" />
           )}
@@ -640,11 +637,6 @@ function NowPlayingBar({ media }: { media: MediaStatus | null }) {
               <button type="button" aria-label="Previous track" onClick={() => control("previous")}><SkipBack size={19} /></button>
               <button type="button" className={styles.playPause} aria-label={isPlaying ? "Pause" : "Play"} onClick={() => control("playPause")}>{isPlaying ? <Pause size={21} /> : <Play size={21} />}</button>
               <button type="button" aria-label="Next track" onClick={() => control("next")}><SkipForward size={19} /></button>
-            </div>
-            <div className={styles.secondaryControls} role="group" aria-label="Volume controls">
-              <button type="button" aria-label="Volume down" onClick={() => control("volumeDown")}><Volume1 size={15} /></button>
-              <button type="button" aria-label="Volume up" onClick={() => control("volumeUp")}><Volume2 size={15} /></button>
-              <button type="button" aria-label="Mute or unmute" onClick={() => control("mute")}><VolumeX size={15} /></button>
             </div>
           </>
         )}

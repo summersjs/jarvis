@@ -9,7 +9,7 @@ const CACHE_MS = 4000;
 function executeMediaHelper(scriptPath, action, musicUrl) {
   return new Promise((resolve, reject) => {
     execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath, "-Action", action, "-MusicUrl", musicUrl], {
-      windowsHide: true, shell: false, timeout: 9000, maxBuffer: 128 * 1024,
+      windowsHide: true, shell: false, timeout: 9000, maxBuffer: 2300 * 1024,
     }, (error, stdout) => error ? reject(error) : resolve(stdout));
   });
 }
@@ -35,12 +35,17 @@ function parseMediaResult(stdout, action) {
     title: String(data.title || "").slice(0, 300) || null,
     artist: String(data.artist || "").slice(0, 300) || null,
     album: String(data.album || "").slice(0, 300) || null,
-    artworkUrl: null,
+    artworkUrl: validateArtworkDataUrl(data.artworkUrl),
     playbackStatus: ["playing", "paused", "stopped", "closed", "changing"].includes(String(data.playbackStatus).toLowerCase()) ? String(data.playbackStatus).toLowerCase() : "unknown",
     isPlaying: String(data.playbackStatus).toLowerCase() === "playing",
     collectedAt: validDate(data.collectedAt),
     stale: false,
   };
+}
+
+function validateArtworkDataUrl(value) {
+  if (typeof value !== "string" || value.length > 2_100_000) return null;
+  return /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(value) ? value : null;
 }
 
 function validDate(value) {
@@ -76,4 +81,4 @@ class MediaService {
   }
 }
 
-module.exports = { CACHE_MS, MEDIA_ACTIONS, MediaService, parseMediaResult, validateMusicUrl };
+module.exports = { CACHE_MS, MEDIA_ACTIONS, MediaService, parseMediaResult, validateArtworkDataUrl, validateMusicUrl };

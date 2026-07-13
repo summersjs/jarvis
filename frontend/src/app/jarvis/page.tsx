@@ -29,7 +29,8 @@ const MODE_KEY = "jarvis.assistant.outputMode";
 const VOICE_KEY = "jarvis.assistant.voice";
 const MODEL_KEY = "jarvis.assistant.model";
 const IDENTITY_VERSION_KEY = "jarvis.assistant.identityVersion";
-const IDENTITY_VERSION = "jarvis-2026-07-13-v2";
+const IDENTITY_VERSION = "jarvis-2026-07-13-v3-execution-truth";
+const CONVERSATION_KEY = "jarvis.assistant.conversationId";
 const LEGACY_STORAGE_KEYS = {
   history: "jarvis.chloe.history",
   mode: "jarvis.chloe.outputMode",
@@ -50,6 +51,16 @@ type ChatMessage = {
   content: string;
   collapsed?: boolean;
   toolActions?: string[];
+  actionReceipts?: ActionReceipt[];
+};
+
+type ActionReceipt = {
+  action_id: string;
+  requested_action: string;
+  execution_status: "proposed" | "awaiting_confirmation" | "executing" | "succeeded" | "failed" | "verification_failed" | "unavailable" | "cancelled";
+  tool_name?: string | null;
+  user_message: string;
+  verification?: { status: "not_required" | "pending" | "verified" | "failed" | "unavailable"; summary?: string | null; verified_at?: string | null } | null;
 };
 
 type AssistantStatus = {
@@ -210,12 +221,17 @@ export default function JarvisPage() {
         model,
         request_id: requestId,
         source_message_id: sourceMessageId,
+        conversation_id: getConversationId(),
         messages: nextHistory.map(({ role, content: body }) => ({ role, content: body })),
       }),
     });
     if (!response.ok) throw new Error(await friendlyError(response));
     const data = await response.json();
-    return { content: data.message.content as string, tools: (data.tools || []).map((tool: { tool?: string }) => tool.tool).filter(Boolean) as string[] };
+    return {
+      content: data.message.content as string,
+      tools: (data.tools || []).map((tool: { tool?: string }) => tool.tool).filter(Boolean) as string[],
+      actions: (data.actions || []) as ActionReceipt[],
+    };
   }
 
   async function sendMessage(contentOverride?: string) {
@@ -239,6 +255,7 @@ export default function JarvisPage() {
         role: "assistant",
         content: reply.content,
         toolActions: reply.tools,
+        actionReceipts: reply.actions,
         collapsed: mode === "voice",
       };
       setMessages((current) => [...current, assistantMessage]);
@@ -278,6 +295,7 @@ export default function JarvisPage() {
         role: "assistant",
         content: reply.content,
         toolActions: reply.tools,
+        actionReceipts: reply.actions,
         collapsed: mode === "voice",
       };
       setMessages((current) => [...current, assistantMessage]);
@@ -544,7 +562,12 @@ export default function JarvisPage() {
                     </button>
                   </div>
                 )}
-                {!!message.toolActions?.length && <div className="tool-actions">Tool action: {message.toolActions.join(", ")}</div>}
+                {!!message.toolActions?.length && <div className="tool-actions">Backend tool: {message.toolActions.join(", ")}</div>}
+                {!!message.actionReceipts?.length && (
+                  <div className="action-receipts" aria-label="Action receipts">
+                    {message.actionReceipts.map((receipt) => <ActionReceiptCard key={receipt.action_id} receipt={receipt} />)}
+                  </div>
+                )}
               </div>
             </article>
           ))}
@@ -626,6 +649,32 @@ function MessageText({ text }: { text: string }) {
   return <p>{text}</p>;
 }
 
+function ActionReceiptCard({ receipt }: { receipt: ActionReceipt }) {
+  const verified = receipt.execution_status === "succeeded" && receipt.verification?.status === "verified";
+  const status = verified ? "Verified" : ({
+    proposed: "Proposed",
+    awaiting_confirmation: "Awaiting confirmation",
+    executing: "Executing",
+    succeeded: "Succeeded",
+    failed: "Failed",
+    verification_failed: "Verification failed",
+    unavailable: "Not executed",
+    cancelled: "Cancelled",
+  } as const)[receipt.execution_status];
+  return (
+    <section className={`action-receipt ${verified ? "verified" : receipt.execution_status}`}>
+      <strong>Action: {friendlyActionName(receipt.requested_action)}</strong>
+      <span>Status: {status}</span>
+      {receipt.verification?.summary && <small>{receipt.verification.summary}</small>}
+      {verified && receipt.verification?.verified_at && <time dateTime={receipt.verification.verified_at}>Verified at: {new Date(receipt.verification.verified_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time>}
+    </section>
+  );
+}
+
+function friendlyActionName(value: string) {
+  return value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 async function friendlyError(response: Response) {
   try {
     const data = await response.json();
@@ -649,6 +698,10 @@ function prepareTextForSpeech(text: string) {
 function loadStoredMessages(): ChatMessage[] {
   if (typeof window === "undefined") return [];
   try {
+    if (window.localStorage.getItem(IDENTITY_VERSION_KEY) !== IDENTITY_VERSION) {
+      window.localStorage.removeItem(HISTORY_KEY);
+      return [];
+    }
     const saved = window.localStorage.getItem(HISTORY_KEY) || window.localStorage.getItem(LEGACY_STORAGE_KEYS.history);
     if (!saved) return [];
     const parsed = JSON.parse(saved) as ChatMessage[];
@@ -656,6 +709,14 @@ function loadStoredMessages(): ChatMessage[] {
   } catch {
     return [];
   }
+}
+
+function getConversationId() {
+  const existing = window.localStorage.getItem(CONVERSATION_KEY);
+  if (existing) return existing;
+  const created = `conv_${crypto.randomUUID().replace(/-/g, "")}`;
+  window.localStorage.setItem(CONVERSATION_KEY, created);
+  return created;
 }
 
 function sanitizeStoredAssistantIdentity(content: string) {
@@ -756,6 +817,15 @@ function JarvisStyles() {
       .message-actions { display: flex; gap: .5rem; margin-top: .72rem; }
       .message-actions button { display: inline-flex; align-items: center; gap: .35rem; border: 1px solid rgba(98,201,255,.18); border-radius: 999px; background: rgba(0,0,0,.26); color: #dff8ff; padding: .38rem .55rem; }
       .tool-actions { margin-top: .6rem; color: #fbbf24; font-size: .72rem; font-weight: 800; text-transform: uppercase; }
+      .action-receipts { display: grid; gap: .45rem; margin-top: .7rem; }
+      .action-receipt { display: grid; gap: .2rem; border-left: 3px solid #fbbf24; border-radius: .25rem; background: rgba(0,0,0,.3); padding: .55rem .65rem; }
+      .action-receipt.verified { border-left-color: #4ade80; background: rgba(20,83,45,.18); }
+      .action-receipt.failed, .action-receipt.verification_failed { border-left-color: #f87171; background: rgba(127,29,29,.16); }
+      .action-receipt.unavailable, .action-receipt.cancelled { border-left-color: #94a3b8; }
+      .action-receipt strong { color: #ecfdf5; font-size: .74rem; text-transform: none; }
+      .action-receipt span { color: #fbbf24; font-size: .7rem; font-weight: 900; text-transform: uppercase; }
+      .action-receipt.verified span { color: #86efac; }
+      .action-receipt small, .action-receipt time { color: rgba(236,248,255,.62); font-size: .68rem; }
       .jarvis-error { border: 1px solid rgba(248,113,113,.34); border-radius: 10px; background: rgba(127,29,29,.2); color: #fecaca; padding: .7rem .8rem; }
       .composer { display: grid; gap: .75rem; border-top: 1px solid rgba(74,222,128,.2); padding-top: .85rem; }
       .voice-listener { border: 1px solid rgba(98,201,255,.24); border-radius: 10px; background: rgba(0,13,24,.62); color: rgba(236,248,255,.78); padding: .68rem .78rem; display: grid; gap: .38rem; }

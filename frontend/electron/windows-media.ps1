@@ -7,6 +7,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$script:ArtworkDiagnostic = "not_requested"
+$script:ArtworkContentType = $null
 function Write-Result([hashtable]$Value) { $Value | ConvertTo-Json -Compress -Depth 4 }
 function Await-WinRt($Operation, [Type]$ResultType) {
   $method = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq "AsTask" -and $_.IsGenericMethod -and $_.GetParameters().Count -eq 1 } | Select-Object -First 1
@@ -26,6 +28,53 @@ public static class JarvisMediaKeys {
 "@
   }
   [JarvisMediaKeys]::Press($Key)
+}
+function Get-ImageContentType([byte[]]$Bytes, [string]$ReportedType) {
+  if ($ReportedType -in @("image/jpeg", "image/png", "image/webp")) { return $ReportedType }
+  if ($Bytes.Length -ge 3 -and $Bytes[0] -eq 0xFF -and $Bytes[1] -eq 0xD8 -and $Bytes[2] -eq 0xFF) { return "image/jpeg" }
+  if ($Bytes.Length -ge 8 -and $Bytes[0] -eq 0x89 -and $Bytes[1] -eq 0x50 -and $Bytes[2] -eq 0x4E -and $Bytes[3] -eq 0x47) { return "image/png" }
+  if ($Bytes.Length -ge 12 -and [Text.Encoding]::ASCII.GetString($Bytes, 0, 4) -eq "RIFF" -and [Text.Encoding]::ASCII.GetString($Bytes, 8, 4) -eq "WEBP") { return "image/webp" }
+  return $null
+}
+function Read-ThumbnailDataUri($Thumbnail) {
+  if (-not $Thumbnail) { $script:ArtworkDiagnostic = "missing_thumbnail"; return $null }
+  $stream = $null
+  $dotnetStream = $null
+  $memory = $null
+  $stage = "open"
+  try {
+    [Windows.Storage.Streams.IRandomAccessStreamWithContentType, Windows.Storage.Streams, ContentType = WindowsRuntime] | Out-Null
+    [Windows.Storage.Streams.IRandomAccessStream, Windows.Storage.Streams, ContentType = WindowsRuntime] | Out-Null
+    $stream = Await-WinRt ($Thumbnail.OpenReadAsync()) ([Windows.Storage.Streams.IRandomAccessStreamWithContentType])
+    $stage = "input_stream"
+    $reportedContentType = [string]$stream.ContentType
+    if ([uint64]$stream.Size -gt 1572864) { $script:ArtworkDiagnostic = "invalid_stream_size"; return $null }
+    $getInputMethod = [Windows.Storage.Streams.IRandomAccessStream].GetMethod("GetInputStreamAt")
+    $inputStream = $getInputMethod.Invoke($stream, @([uint64]0))
+    $stage = "adapter"
+    $asStreamMethod = [System.IO.WindowsRuntimeStreamExtensions].GetMethods() | Where-Object {
+      $_.Name -eq "AsStreamForRead" -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq "IInputStream"
+    } | Select-Object -First 1
+    if (-not $asStreamMethod) { $script:ArtworkDiagnostic = "stream_adapter_unavailable"; return $null }
+    $dotnetStream = $asStreamMethod.Invoke($null, @($inputStream))
+    $stage = "copy"
+    $memory = New-Object System.IO.MemoryStream
+    $dotnetStream.CopyTo($memory)
+    $stage = "validate"
+    if ($memory.Length -eq 0 -or $memory.Length -gt 1572864) { $script:ArtworkDiagnostic = "invalid_image_size"; return $null }
+    $bytes = $memory.ToArray()
+    $contentType = Get-ImageContentType $bytes $reportedContentType
+    $script:ArtworkContentType = $contentType
+    if (-not $contentType) { $script:ArtworkDiagnostic = "unsupported_content_type"; return $null }
+    $script:ArtworkDiagnostic = "available"
+    return "data:$contentType;base64,$([Convert]::ToBase64String($bytes))"
+  } catch {
+    $script:ArtworkDiagnostic = "read_failed_${stage}_$($_.Exception.GetType().Name)"
+    return $null
+  } finally {
+    if ($memory) { $memory.Dispose() }
+    if ($dotnetStream) { $dotnetStream.Dispose() }
+  }
 }
 
 if ($Action -eq "open") {
@@ -64,7 +113,8 @@ if ($Action -eq "getSession") {
   $status = $session.GetPlaybackInfo().PlaybackStatus.ToString()
   $sourceId = $session.SourceAppUserModelId
   $source = if ($sourceId -match "(?i)(youtube|cinhimbnkkghhklpknlkffjgod)") { "YouTube Music" } else { $sourceId }
-  Write-Result @{ available = $true; provider = "Windows GSMTC"; source = $source; sourceAppId = $sourceId; title = if ($properties) { $properties.Title } else { $null }; artist = if ($properties) { $properties.Artist } else { $null }; album = if ($properties) { $properties.AlbumTitle } else { $null }; playbackStatus = $status; artworkUrl = $null; collectedAt = [DateTime]::UtcNow.ToString("o") }
+  $artworkDataUrl = if ($properties) { Read-ThumbnailDataUri $properties.Thumbnail } else { $null }
+  Write-Result @{ available = $true; provider = "Windows GSMTC"; source = $source; sourceAppId = $sourceId; title = if ($properties) { $properties.Title } else { $null }; artist = if ($properties) { $properties.Artist } else { $null }; album = if ($properties) { $properties.AlbumTitle } else { $null }; playbackStatus = $status; artworkUrl = $artworkDataUrl; artworkStatus = $script:ArtworkDiagnostic; artworkContentType = $script:ArtworkContentType; collectedAt = [DateTime]::UtcNow.ToString("o") }
   exit 0
 }
 

@@ -46,6 +46,8 @@ class AssistantToolContext:
     user_id: str = "john"
     session_id: str = "local-jarvis"
     request_id: str = "local-request"
+    source_message_id: str = "local-source"
+    conversation_id: str = "local-jarvis"
     source: str = "jarvis-chat"
     timezone: str = "America/New_York"
 

@@ -936,15 +936,15 @@
 .mediaMain {
   display: grid;
   min-width: 0;
-  grid-template-columns: 76px minmax(0, 1fr);
+  grid-template-columns: 84px minmax(0, 1fr);
   align-items: center;
   gap: 0.85rem;
 }
 
 .albumArt {
   display: grid;
-  width: 76px;
-  height: 76px;
+  width: 84px;
+  height: 84px;
   place-items: center;
   overflow: hidden;
   border: 1px solid rgba(255, 122, 0, 0.32);
@@ -1012,7 +1012,7 @@
 
 .mediaControls {
   display: flex;
-  min-height: 5.8rem;
+  min-height: 3.2rem;
   flex: 1;
   flex-direction: column;
   align-items: center;
@@ -1020,8 +1020,7 @@
   gap: 0.46rem;
 }
 
-.primaryControls,
-.secondaryControls {
+.primaryControls {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1029,10 +1028,6 @@
 
 .primaryControls {
   gap: 0.72rem;
-}
-
-.secondaryControls {
-  gap: 0.5rem;
 }
 
 .mediaControls button {
@@ -1046,12 +1041,6 @@
   color: #dff8ff;
   cursor: pointer;
   transition: transform 180ms, border-color 180ms, background 180ms, box-shadow 180ms;
-}
-
-.secondaryControls button {
-  width: 1.78rem;
-  height: 1.78rem;
-  color: rgba(223, 248, 255, 0.72);
 }
 
 .mediaControls .openMusic {

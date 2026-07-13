@@ -4,7 +4,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { MEDIA_ACTIONS, MediaService, parseMediaResult, validateMusicUrl } = require("../media.cjs");
+const { MEDIA_ACTIONS, MediaService, parseMediaResult, validateArtworkDataUrl, validateMusicUrl } = require("../media.cjs");
 
 test("media actions and music URL are narrowly allowlisted", async () => {
   assert.deepEqual([...MEDIA_ACTIONS], ["getSession", "playPause", "play", "pause", "next", "previous", "volumeUp", "volumeDown", "mute", "open"]);
@@ -26,6 +26,14 @@ test("YouTube Music session metadata validates and stale failures are marked", a
   const stale = await service.getSession({ force: true });
   assert.equal(stale.stale, true);
   assert.equal(stale.staleReason, "timeout");
+});
+
+test("album artwork accepts only bounded image data URLs", () => {
+  const artwork = "data:image/jpeg;base64," + Buffer.from("safe-thumbnail").toString("base64");
+  assert.equal(validateArtworkDataUrl(artwork), artwork);
+  assert.equal(validateArtworkDataUrl("https://i.ytimg.com/anything"), null);
+  assert.equal(validateArtworkDataUrl("data:text/html;base64,PHNjcmlwdD4="), null);
+  assert.equal(parseMediaResult(JSON.stringify({ available: true, source: "YouTube Music", artworkUrl: artwork, playbackStatus: "Paused" }), "getSession").artworkUrl, artwork);
 });
 
 test("no-session response is explicit and helper prefers YouTube sessions", () => {

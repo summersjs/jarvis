@@ -4,7 +4,16 @@ import re
 import urllib.error
 import urllib.request
 
-from backend.assistant.tools.registry import AssistantToolContext, execute_tool_calls, select_tools
+from backend.assistant.execution import (
+    capability_manifest,
+    capability_manifest_prompt,
+    detect_nonexecuted_action,
+    development_trace_enabled,
+    execute_governed_tool_calls,
+    record_nonexecuted_action,
+    validate_final_response,
+)
+from backend.assistant.tools.registry import AssistantToolContext, select_tools
 from backend.prompts.jarvis import JARVIS_SYSTEM_PROMPT
 from backend.prompts.user_profile import JOHN_USER_PROFILE
 
@@ -50,24 +59,37 @@ def get_ollama_status() -> dict:
         }
 
 
-def chat_with_jarvis(messages: list[dict], model: str | None = None) -> dict:
+def chat_with_jarvis(messages: list[dict], model: str | None = None, context: AssistantToolContext | None = None) -> dict:
     selected_model = (model or OLLAMA_MODEL).strip()
+    context = context or AssistantToolContext()
     latest_user_text = next(
         (item.get("content", "") for item in reversed(messages) if item.get("role") == "user" and item.get("content")),
         "",
     )
-    tool_calls = select_tools(latest_user_text)
+    manifest = capability_manifest()
+    nonexecuted_action = detect_nonexecuted_action(latest_user_text, context)
+    tool_calls = [] if nonexecuted_action else select_tools(latest_user_text)
     tool_calls.extend(select_followup_tools(messages, latest_user_text, tool_calls))
-    tool_results = execute_tool_calls(tool_calls, AssistantToolContext())
+    tool_results, executions, execution_trace = execute_governed_tool_calls(tool_calls, context)
+    if nonexecuted_action:
+        executions.append(nonexecuted_action)
+        record_nonexecuted_action(nonexecuted_action)
+        execution_trace.append({"event": "capability_unavailable", "status": nonexecuted_action.execution_status})
+        if nonexecuted_action.execution_status == "unavailable":
+            return build_service_result(
+                nonexecuted_action.user_message, selected_model, tool_results, executions, manifest,
+                context, execution_trace, "deterministic_unavailable",
+            )
     identity_reply = identity_response_for(latest_user_text)
     if identity_reply:
-        return {"message": {"role": "assistant", "content": identity_reply}, "model": selected_model, "tools": tool_results}
-    action_reply = build_action_reply(tool_results)
+        return build_service_result(identity_reply, selected_model, tool_results, executions, manifest, context, execution_trace, "identity")
+    action_reply = build_action_reply(tool_results, executions)
     if action_reply:
-        return {"message": {"role": "assistant", "content": action_reply}, "model": selected_model, "tools": tool_results}
+        return build_service_result(action_reply, selected_model, tool_results, executions, manifest, context, execution_trace, "tool_action")
 
     safe_messages = [
         {"role": "system", "content": JARVIS_SYSTEM_PROMPT},
+        {"role": "system", "content": capability_manifest_prompt(manifest)},
         {"role": "system", "content": JOHN_USER_PROFILE},
         *(
             [
@@ -119,7 +141,10 @@ def chat_with_jarvis(messages: list[dict], model: str | None = None) -> dict:
             raise OllamaServiceError(f"Model {selected_model} is not installed. Run: ollama pull {selected_model}", "model_missing")
         raise OllamaServiceError("Ollama returned an empty response.", "invalid_response")
 
-    return {"message": {"role": "assistant", "content": enforce_jarvis_identity(content.strip())}, "model": selected_model, "tools": tool_results}
+    return build_service_result(
+        enforce_jarvis_identity(content.strip()), selected_model, tool_results, executions, manifest,
+        context, execution_trace, "model_response",
+    )
 
 
 def identity_response_for(text: str) -> str:
@@ -194,7 +219,7 @@ def infer_followup_symptom(text: str) -> str:
     return "custom_event"
 
 
-def build_action_reply(tool_results: list[dict]) -> str:
+def build_action_reply(tool_results: list[dict], executions: list) -> str:
     write_results = [item for item in tool_results if item.get("access") == "write"]
     if not write_results:
         return ""
@@ -202,11 +227,12 @@ def build_action_reply(tool_results: list[dict]) -> str:
     confirmations = []
     failures = []
     for item in write_results:
+        execution = next((action for action in executions if action.tool_name == item.get("tool")), None)
         result = item.get("result") or {}
-        if result.get("needs_input"):
-            failures.append(str(result.get("question") or "I need a little more information before I can do that."))
-        elif item.get("success") and result.get("updated") is not False:
+        if execution and execution.execution_status == "succeeded" and execution.verification and execution.verification.status == "verified":
             confirmations.append(format_write_confirmation(item.get("tool"), result))
+        elif execution:
+            failures.append(execution.user_message)
         else:
             reason = result.get("reason") or (item.get("error") or {}).get("message") or "Jarvis could not complete that update."
             failures.append(f"I could not update {friendly_tool_name(item.get('tool'))}: {reason}")
@@ -314,6 +340,33 @@ def build_tool_context_message(tool_results: list[dict]) -> str:
             json.dumps(tool_results, default=str)[:12000],
         ]
     )
+
+
+def build_service_result(content, selected_model, tool_results, executions, manifest, context, trace, response_source):
+    guarded_content, validation = validate_final_response(str(content).strip(), executions)
+    result = {
+        "message": {"role": "assistant", "content": guarded_content},
+        "model": selected_model,
+        "tools": tool_results,
+        "actions": [item.model_dump() for item in executions],
+        "capabilities": manifest.model_dump(),
+    }
+    if development_trace_enabled():
+        result["executionTrace"] = {
+            "requestId": context.request_id,
+            "intent": executions[0].intent if executions else "conversation",
+            "proposedAction": executions[0].requested_action if executions else None,
+            "capabilityLookup": "available" if not executions or executions[0].tool_name else executions[0].execution_status,
+            "selectedTool": executions[0].tool_name if executions else None,
+            "confirmationRequired": executions[0].requires_confirmation if executions else False,
+            "events": trace,
+            "finalExecutionStatus": executions[0].execution_status if executions else None,
+            "finalResponseValidation": validation,
+            "responseSource": response_source,
+            "cacheStatus": "miss",
+            "streaming": False,
+        }
+    return result
 
 
 def extract_message_content(data: dict) -> str:

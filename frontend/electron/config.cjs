@@ -11,6 +11,7 @@ function resolveDesktopConfig({ env = process.env, isPackaged = false } = {}) {
   const jarvisRoute = normalizeRoute(env.JARVIS_ASSISTANT_ROUTE || DEFAULT_JARVIS_ROUTE);
   const musicUrl = parseHttpUrl(env.JARVIS_MUSIC_URL || DEFAULT_MUSIC_URL, "JARVIS_MUSIC_URL");
   const preferencePath = env.JARVIS_STARTUP_PREFERENCE_PATH || null;
+  const speedTestIntervalHours = boundedNumber(env.JARVIS_SPEED_TEST_INTERVAL_HOURS, 24, 1, 168, "JARVIS_SPEED_TEST_INTERVAL_HOURS");
 
   return {
     isDevelopment: env.ELECTRON_IS_DEV === "1" || !isPackaged,
@@ -21,7 +22,15 @@ function resolveDesktopConfig({ env = process.env, isPackaged = false } = {}) {
     jarvisRoute,
     musicUrl: musicUrl.toString(),
     preferencePath,
+    speedTestIntervalHours,
   };
+}
+
+function boundedNumber(value, fallback, minimum, maximum, name) {
+  if (value === undefined || value === "") return fallback;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < minimum || number > maximum) throw new Error(`${name} must be between ${minimum} and ${maximum}.`);
+  return number;
 }
 
 function parseHttpUrl(value, name) {

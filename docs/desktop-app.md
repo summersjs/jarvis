@@ -8,7 +8,11 @@ Jarvis Desktop is a secure Electron shell around the existing Next.js `/desktop`
 - `frontend/electron/preload.cjs`: narrow `contextBridge` API. Node.js and raw Electron APIs are not exposed to the web renderer.
 - `frontend/electron/offline.html`: local, secret-free offline screen with Retry and Open logs actions.
 - `frontend/electron/dev-launcher.cjs`: reuses a running frontend or starts one, waits for `/desktop`, starts Electron, and cleans up only the frontend process it created.
+- `frontend/electron/gpu.cjs`: direct, argument-array `nvidia-smi` collection with a four-second cache.
+- `frontend/electron/windows-storage.ps1`: fixed C: query through `Win32_LogicalDisk`; no renderer-selected paths.
+- `frontend/electron/windows-network.ps1`: fixed active-adapter query. SSID is separately parsed from `netsh wlan show interfaces` without profile or credential commands.
 - `frontend/electron/windows-media.ps1`: fixed, allowlisted Windows media-session and volume operations. It cannot execute renderer-supplied commands.
+- `frontend/electron/speed-test.cjs`: cached estimated download/upload/latency measurement against Cloudflare's edge endpoints.
 - Electron stores non-secret window, startup, weather, media, and assistant UI preferences in its per-user application data directory.
 
 ## Requirements
@@ -79,6 +83,7 @@ Artifacts are written to `frontend\dist-electron`. No auto-updater is configured
 - `JARVIS_MUSIC_URL`: approved YouTube Music fallback URL. Default: `https://music.youtube.com/`. The native launcher prefers the installed YouTube Music PWA.
 - `JARVIS_WEATHER_LOCATION`: optional default city/state used when the user has not saved a location or granted browser geolocation.
 - `JARVIS_WEATHER_CACHE_SECONDS`: live Open-Meteo cache duration. Default: 600.
+- `JARVIS_SPEED_TEST_INTERVAL_HOURS`: automatic estimated speed-test interval, from 1 to 168 hours. Default: 24.
 - `JARVIS_STARTUP_PREFERENCE_PATH`: optional absolute path for Electron window/startup preferences. The default is Electron's user-data directory.
 - `ELECTRON_IS_DEV=1`: enables development logging; `desktop:dev` sets it automatically.
 
@@ -111,9 +116,15 @@ If the shell says Jarvis is offline:
 3. Confirm Windows can reach WSL localhost and that no firewall rule blocks ports 3000 or 8000.
 4. Set `JARVIS_DESKTOP_URL` to the reachable deployed Jarvis URL if the frontend is not local.
 
-Windows media transport uses the current Global System Media Transport Controls session. If the installed YouTube Music PWA is not running or has not created a media session, the dashboard reports media unavailable; **Music** still opens the installed PWA (or the configured web URL as fallback). Account playlist search and login automation are intentionally absent.
+Windows media transport uses Global System Media Transport Controls. It prefers a YouTube Music Chrome/Edge/PWA session, then falls back to the current Windows media session. If metadata is unavailable, fixed Windows media keys remain available where supported. **Music** opens the installed PWA or the configured web URL. There is no dedicated official YouTube Music remote-control API, and Jarvis does not use DOM automation, cookies, private endpoints, or account login automation.
 
-CPU/RAM/uptime come from Electron's local OS view. The fixed read-only Windows telemetry helper adds NVIDIA GPU utilization/temperature, system-drive usage, and network throughput when Windows exposes them. Missing sensors remain labeled unavailable instead of receiving demo values.
+CPU/RAM/uptime come from Electron's local OS view. NVIDIA data comes directly from `nvidia-smi.exe`, discovered through PATH and supported NVIDIA/Windows locations. C: size/free-space comes from `Win32_LogicalDisk`. Network state comes from the active Windows adapter plus `netsh wlan show interfaces`; newer Windows versions can require Location Services before revealing SSID. Missing fields remain labeled unavailable instead of receiving demo values.
+
+Storage uses binary units (`GiB` and `TiB`) so the displayed total matches Windows' usable capacity rather than a nominal drive label. Storage refreshes once per minute, network every 20 seconds, and GPU about every four seconds while the dashboard is visible.
+
+The optional automatic speed test runs no more than once per configured interval and stores only the latest successful result. It transfers approximately 20 MB using fixed Cloudflare edge download/upload endpoints, so the UI labels it **Estimated internet speed**. A manual Test now action is available; failed refreshes preserve the prior good result.
+
+The current Google OAuth integration requests only `https://www.googleapis.com/auth/calendar`. Windows media-session control requires no Google OAuth. YouTube Data API and IFrame Player integration are deferred; no YouTube scopes, browser tokens, or client secrets were added.
 
 Weather comes from validated Open-Meteo responses. Set a city/state in Desktop Settings, choose Fahrenheit or Celsius, or explicitly grant browser geolocation. Jarvis shows an unavailable state instead of demo readings when location or the provider is unavailable.
 

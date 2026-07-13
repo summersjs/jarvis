@@ -1,6 +1,5 @@
 "use strict";
 
-const os = require("node:os");
 const path = require("node:path");
 const {
   app,
@@ -17,9 +16,13 @@ const {
 const { closeAction, navigationAction } = require("./behavior.cjs");
 const { checkReachable, ConnectionMonitor } = require("./connection.cjs");
 const { resolveDesktopConfig } = require("./config.cjs");
+const { GpuCollector } = require("./gpu.cjs");
 const { createLogger } = require("./logger.cjs");
-const { runMediaAction } = require("./media.cjs");
-const { collectWindowsTelemetry } = require("./telemetry.cjs");
+const { MediaService } = require("./media.cjs");
+const { NetworkCollector } = require("./network.cjs");
+const { SpeedTestService } = require("./speed-test.cjs");
+const { StorageCollector } = require("./storage.cjs");
+const { collectSystemStats } = require("./system-stats.cjs");
 const { compactBounds, JsonStateStore, visibleBounds } = require("./window-state.cjs");
 
 let config;
@@ -32,6 +35,12 @@ let tray = null;
 let connectionMonitor = null;
 let isQuitting = false;
 let saveTimer = null;
+let gpuCollector;
+let storageCollector;
+let networkCollector;
+let speedTestService;
+let mediaService;
+const nativeHealth = { startedAt: new Date().toISOString(), collectors: {} };
 
 app.setName("Jarvis Desktop");
 
@@ -53,6 +62,11 @@ async function startApplication() {
     ? path.resolve(config.preferencePath)
     : path.join(app.getPath("userData"), "desktop-state.json");
   stateStore = new JsonStateStore(preferencePath);
+  gpuCollector = new GpuCollector();
+  storageCollector = new StorageCollector();
+  networkCollector = new NetworkCollector();
+  speedTestService = new SpeedTestService({ store: stateStore, intervalMs: config.speedTestIntervalHours * 60 * 60 * 1000 });
+  mediaService = new MediaService({ musicUrl: stateStore.get("musicUrl", config.musicUrl) });
 
   logger("electron-startup", `mode=${config.isDevelopment ? "development" : "production"}`);
   logger("target-url", config.publicTargetUrl);
@@ -358,6 +372,25 @@ function registerIpcHandlers() {
   ipcMain.handle("desktop:get-launch-at-startup", () => Boolean(stateStore.get("launchAtStartup", false)));
   ipcMain.handle("desktop:set-launch-at-startup", (_event, enabled) => setLaunchAtStartup(enabled));
   ipcMain.handle("desktop:get-system-stats", () => collectSystemStats());
+  ipcMain.handle("jarvis:telemetry:getGpu", () => trackedCollector("gpu", () => gpuCollector.get()));
+  ipcMain.handle("jarvis:telemetry:getStorage", () => trackedCollector("storage", () => storageCollector.get()));
+  ipcMain.handle("jarvis:telemetry:getNetwork", () => trackedCollector("network", () => networkCollector.get()));
+  ipcMain.handle("jarvis:network:getSpeedResult", () => {
+    const result = speedTestService.getResult({ autoRun: stateStore.get("automaticSpeedTest", true) });
+    recordCollector("speedTest", result);
+    return result;
+  });
+  ipcMain.handle("jarvis:network:runSpeedTest", () => trackedCollector("speedTest", () => speedTestService.run({ manual: true })));
+  ipcMain.handle("jarvis:media:getSession", () => {
+    if (!stateStore.get("mediaControlEnabled", true)) return { available: false, provider: "Windows GSMTC", reason: "disabled" };
+    return trackedCollector("media", () => mediaService.getSession());
+  });
+  ipcMain.handle("jarvis:media:executeAction", (_event, action) => {
+    if (!stateStore.get("mediaControlEnabled", true)) return { available: false, provider: "Windows GSMTC", reason: "disabled" };
+    return trackedCollector("media", () => mediaService.execute(action));
+  });
+  ipcMain.handle("jarvis:media:openYouTubeMusic", () => trackedCollector("media", () => mediaService.execute("open")));
+  ipcMain.handle("jarvis:native:getHealth", () => config.isDevelopment ? getNativeHealth() : { available: false, reason: "development_only" });
   ipcMain.handle("desktop:open-jarvis-assistant", () => { openJarvisAssistant(); return true; });
   ipcMain.handle("desktop:hide-jarvis-assistant", () => { assistantWindow?.hide(); return true; });
   ipcMain.handle("desktop:open-full-jarvis", () => { navigateTo(config.jarvisUrl); assistantWindow?.hide(); return true; });
@@ -370,12 +403,6 @@ function registerIpcHandlers() {
     openJarvisAssistant();
     return true;
   });
-  ipcMain.handle("desktop:media-command", (_event, action) => {
-    if (!stateStore.get("mediaControlEnabled", true) && action !== "openYouTubeMusic") {
-      return { available: false, reason: "Windows media controls are disabled in Jarvis settings." };
-    }
-    return runMediaAction(action, { musicUrl: stateStore.get("musicUrl", config.musicUrl) });
-  });
   ipcMain.handle("desktop:launch-app", async (_event, appId) => {
     if (typeof appId !== "string") throw new TypeError("Application id must be a string.");
     const targets = {
@@ -384,7 +411,7 @@ function registerIpcHandlers() {
       discord: "discord://",
       terminal: "wt:",
     };
-    if (appId === "youtube-music") return runMediaAction("openYouTubeMusic", { musicUrl: stateStore.get("musicUrl", config.musicUrl) });
+    if (appId === "youtube-music") return mediaService.execute("open");
     const target = targets[appId];
     if (!target) return false;
     await shell.openExternal(target);
@@ -402,6 +429,7 @@ function getDesktopPreferences() {
     weatherUnit: stateStore.get("weatherUnit", "fahrenheit"),
     musicUrl: stateStore.get("musicUrl", config.musicUrl),
     mediaControlEnabled: stateStore.get("mediaControlEnabled", true),
+    automaticSpeedTest: stateStore.get("automaticSpeedTest", true),
     ttsMuted: Boolean(stateStore.get("ttsMuted", false)),
     launchAtStartup: Boolean(stateStore.get("launchAtStartup", false)),
   };
@@ -418,37 +446,51 @@ function setDesktopPreference(payload) {
     weatherUnit: (value) => ["fahrenheit", "celsius"].includes(value),
     musicUrl: (value) => typeof value === "string" && /^https:\/\/music\.youtube\.com(?:\/.*)?$/.test(value),
     mediaControlEnabled: (value) => typeof value === "boolean",
+    automaticSpeedTest: (value) => typeof value === "boolean",
     ttsMuted: (value) => typeof value === "boolean",
   };
   if (!Object.hasOwn(validators, payload.key) || !validators[payload.key](payload.value)) throw new TypeError("Unsupported desktop preference.");
   stateStore.set(payload.key, payload.value);
   if (payload.key === "jarvisAlwaysOnTop") assistantWindow?.setAlwaysOnTop(payload.value);
+  if (payload.key === "musicUrl") mediaService.setMusicUrl(payload.value);
   return getDesktopPreferences();
 }
 
-async function collectSystemStats() {
-  const windowsTelemetryPromise = collectWindowsTelemetry();
-  const start = cpuSnapshot();
-  await new Promise((resolve) => setTimeout(resolve, 300));
-  const end = cpuSnapshot();
-  const totalDelta = end.total - start.total;
-  const idleDelta = end.idle - start.idle;
-  const cpuUsage = totalDelta > 0 ? Math.round((1 - idleDelta / totalDelta) * 100) : 0;
-  const ramUsage = Math.round((1 - os.freemem() / os.totalmem()) * 100);
-  const uptimeMinutes = Math.floor(os.uptime() / 60);
-  return {
-    cpuUsage,
-    ramUsage,
-    uptime: `${String(Math.floor(uptimeMinutes / 60)).padStart(2, "0")}:${String(uptimeMinutes % 60).padStart(2, "0")}`,
-    ...await windowsTelemetryPromise,
+async function trackedCollector(name, operation) {
+  try {
+    const result = await operation();
+    recordCollector(name, result);
+    return result;
+  } catch (error) {
+    const result = { available: false, reason: error instanceof TypeError ? "invalid_action" : "collector_failed", collectedAt: new Date().toISOString() };
+    recordCollector(name, result);
+    if (error instanceof TypeError) throw error;
+    return result;
+  }
+}
+
+function recordCollector(name, result) {
+  const previous = nativeHealth.collectors[name] || { timeoutCount: 0 };
+  nativeHealth.collectors[name] = {
+    provider: result?.provider || previous.provider || null,
+    lastAttempt: new Date().toISOString(),
+    lastSuccess: result?.available ? (result.collectedAt || result.testedAt || new Date().toISOString()) : previous.lastSuccess || null,
+    error: result?.available ? null : (result?.reason || result?.refreshFailureReason || null),
+    timeoutCount: previous.timeoutCount + ((result?.reason || result?.refreshFailureReason) === "timeout" ? 1 : 0),
   };
 }
 
-function cpuSnapshot() {
-  return os.cpus().reduce((summary, cpu) => {
-    const total = Object.values(cpu.times).reduce((sum, value) => sum + value, 0);
-    return { idle: summary.idle + cpu.times.idle, total: summary.total + total };
-  }, { idle: 0, total: 0 });
+function getNativeHealth() {
+  return {
+    available: true,
+    electronDetected: true,
+    platform: process.platform,
+    startedAt: nativeHealth.startedAt,
+    collectors: nativeHealth.collectors,
+    ssidPermissionStatus: networkCollector.cached?.value?.ssidPermissionStatus || "unknown",
+    activeMediaSource: mediaService.cached?.value?.source || null,
+    speedTestProvider: speedTestService.getResult().provider,
+  };
 }
 
 function safeLogUrl(value) {

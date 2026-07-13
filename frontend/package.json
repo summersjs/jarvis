@@ -15,6 +15,7 @@
     "desktop:dev": "node electron/dev-launcher.cjs",
     "desktop:start": "electron .",
     "desktop:test": "node --test electron/test/*.test.cjs",
+    "desktop:native-smoke": "node electron/native-smoke.cjs",
     "desktop:build": "electron-builder --dir --win --x64",
     "desktop:package": "electron-builder --win --x64"
   },

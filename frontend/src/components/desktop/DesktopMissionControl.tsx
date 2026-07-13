@@ -86,18 +86,15 @@ type TelemetryMetric = {
 
 type NativeStats = {
   cpuUsage?: number;
-  cpuTemp?: number;
-  gpuUsage?: number;
-  gpuTemp?: number;
-  gpuHotspot?: number;
   ramUsage?: number;
-  storageUsage?: number;
-  nvmeTemp?: number;
-  fanRpm?: number;
-  networkUp?: string;
-  networkDown?: string;
   uptime?: string;
 };
+
+type GpuTelemetry = { available: boolean; reason?: string; provider?: string; name?: string; utilizationPercent?: number; memoryUsedMb?: number; memoryTotalMb?: number; temperatureC?: number | null; powerWatts?: number | null; driverVersion?: string | null; collectedAt?: string };
+type StorageTelemetry = { available: boolean; reason?: string; provider?: string; drive?: string; filesystem?: string | null; volumeLabel?: string | null; totalBytes?: number; usedBytes?: number; freeBytes?: number; usedPercent?: number; collectedAt?: string };
+type NetworkTelemetry = { available: boolean; reason?: string; provider?: string; connected?: boolean; status?: "connected" | "localOnly" | "offline" | "unavailable"; interfaceType?: "wifi" | "ethernet" | "other" | null; interfaceName?: string | null; ssid?: string | null; ssidPermissionStatus?: string; linkSpeedMbps?: number | null; ipv4Address?: string | null; internetReachable?: boolean; collectedAt?: string };
+type SpeedTestResult = { available: boolean; status?: "success" | "running" | "notTested" | "failed"; estimated?: boolean; downloadMbps?: number; uploadMbps?: number; latencyMs?: number; jitterMs?: number; provider?: string; testedAt?: string; running?: boolean; refreshFailed?: boolean; reason?: string };
+type NativeHealth = { available: boolean; electronDetected?: boolean; platform?: string; collectors?: Record<string, { provider?: string | null; lastAttempt?: string; lastSuccess?: string | null; error?: string | null; timeoutCount?: number }>; ssidPermissionStatus?: string; activeMediaSource?: string | null; speedTestProvider?: string };
 
 type CalendarEvent = {
   title: string;
@@ -114,6 +111,9 @@ type MediaStatus = {
   artworkUrl?: string | null;
   isPlaying?: boolean;
   source?: string | null;
+  playbackStatus?: string;
+  collectedAt?: string;
+  stale?: boolean;
 };
 
 type WeatherStatus = {
@@ -141,15 +141,23 @@ type DesktopPreferences = {
   weatherUnit: "fahrenheit" | "celsius";
   musicUrl: string;
   mediaControlEnabled: boolean;
+  automaticSpeedTest: boolean;
 };
 
 declare global {
   interface Window {
     jarvisDesktop?: {
       getSystemStats?: () => Promise<NativeStats>;
+      getGpuTelemetry?: () => Promise<GpuTelemetry>;
+      getStorageTelemetry?: () => Promise<StorageTelemetry>;
+      getNetworkTelemetry?: () => Promise<NetworkTelemetry>;
+      getInternetSpeedResult?: () => Promise<SpeedTestResult>;
+      runInternetSpeedTest?: () => Promise<SpeedTestResult>;
+      getMediaSession?: () => Promise<MediaStatus>;
+      executeMediaAction?: (action: "playPause" | "play" | "pause" | "next" | "previous" | "volumeUp" | "volumeDown" | "mute") => Promise<{ available: boolean }>;
+      openYouTubeMusic?: () => Promise<{ available: boolean }>;
+      getNativeHealth?: () => Promise<NativeHealth>;
       launchApp?: (appId: string) => Promise<void>;
-      getMediaStatus?: () => Promise<MediaStatus | null>;
-      controlMedia?: (action: "previousTrack" | "playPause" | "nextTrack" | "volumeDown" | "volumeUp" | "mute") => Promise<void>;
       openJarvisAssistant?: () => Promise<boolean>;
       hideJarvisAssistant?: () => Promise<boolean>;
       openFullJarvis?: () => Promise<boolean>;
@@ -182,16 +190,28 @@ export default function DesktopMissionControl() {
   const [now, setNow] = useState(() => new Date());
   const [dashboard, setDashboard] = useState<ForgeDashboard>({});
   const [systemStats, setSystemStats] = useState<NativeStats | null>(null);
+  const [gpu, setGpu] = useState<GpuTelemetry | null>(null);
+  const [storage, setStorage] = useState<StorageTelemetry | null>(null);
+  const [network, setNetwork] = useState<NetworkTelemetry | null>(null);
+  const [speedResult, setSpeedResult] = useState<SpeedTestResult | null>(null);
   const [mediaStatus, setMediaStatus] = useState<MediaStatus | null>(null);
   const [weather, setWeather] = useState<WeatherStatus | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [preferences, setPreferences] = useState<DesktopPreferences>(() => loadBrowserPreferences());
   const [calendarLine, setCalendarLine] = useState("Calendar link online");
   const [dataState, setDataState] = useState("Synchronizing Forge");
+  const [documentVisible, setDocumentVisible] = useState(true);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const update = () => setDocumentVisible(document.visibilityState === "visible");
+    update();
+    document.addEventListener("visibilitychange", update);
+    return () => document.removeEventListener("visibilitychange", update);
   }, []);
 
   useEffect(() => {
@@ -259,20 +279,20 @@ export default function DesktopMissionControl() {
       if (loading) return;
       loading = true;
       try {
-        const bridgeStatus = await window.jarvisDesktop?.getMediaStatus?.();
+        const bridgeStatus = await window.jarvisDesktop?.getMediaSession?.();
         if (!cancelled) setMediaStatus(bridgeStatus || readBrowserMediaSession());
       } finally {
         loading = false;
       }
     }
 
-    loadMediaStatus();
-    const timer = window.setInterval(loadMediaStatus, 5_000);
+    if (documentVisible) loadMediaStatus();
+    const timer = documentVisible ? window.setInterval(loadMediaStatus, 5_000) : null;
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      if (timer !== null) window.clearInterval(timer);
     };
-  }, []);
+  }, [documentVisible]);
 
   useEffect(() => {
     let cancelled = false;
@@ -289,13 +309,18 @@ export default function DesktopMissionControl() {
       }
     }
 
-    loadStats();
-    const timer = window.setInterval(loadStats, 5_000);
+    if (documentVisible) loadStats();
+    const timer = documentVisible ? window.setInterval(loadStats, 5_000) : null;
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      if (timer !== null) window.clearInterval(timer);
     };
-  }, []);
+  }, [documentVisible]);
+
+  useEffect(() => nativePoll(window.jarvisDesktop?.getGpuTelemetry, setGpu, documentVisible, 4_000), [documentVisible]);
+  useEffect(() => nativePoll(window.jarvisDesktop?.getStorageTelemetry, setStorage, documentVisible, 60_000), [documentVisible]);
+  useEffect(() => nativePoll(window.jarvisDesktop?.getNetworkTelemetry, setNetwork, documentVisible, 20_000), [documentVisible]);
+  useEffect(() => nativePoll(window.jarvisDesktop?.getInternetSpeedResult, setSpeedResult, documentVisible, 30_000), [documentVisible]);
 
   const projects = useMemo(() => {
     const liveProjects = dashboard.recently_updated?.length ? dashboard.recently_updated : dashboard.projects;
@@ -304,7 +329,7 @@ export default function DesktopMissionControl() {
 
   const activeProject = projects[0] || fallbackProjects[0];
   const goals = dashboard.goals?.length ? dashboard.goals.slice(0, 4) : [];
-  const metrics = buildTelemetryMetrics(systemStats, weather);
+  const metrics = buildTelemetryMetrics(systemStats, gpu, storage, network, speedResult, weather);
   const events = useMemo(() => parseCalendarEvents(calendarLine), [calendarLine]);
 
   return (
@@ -343,7 +368,7 @@ export default function DesktopMissionControl() {
 
       <QuickLaunchDock />
       <NowPlayingBar media={mediaStatus} />
-      {settingsOpen && <DesktopSettings preferences={preferences} onChange={setPreferences} onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <DesktopSettings preferences={preferences} speedResult={speedResult} onSpeedResult={setSpeedResult} onChange={setPreferences} onClose={() => setSettingsOpen(false)} />}
       <SystemOnline dataState={dataState} />
     </main>
   );
@@ -410,6 +435,7 @@ function TelemetryOrbit({ metrics }: { metrics: TelemetryMetric[] }) {
           key={id}
           className={`${styles.telemetryNode} ${styles[position]}`}
           style={{ "--level": `${Math.max(4, Math.min(level, 100))}%` } as React.CSSProperties}
+          title={`${label}: ${value}. ${detail}`}
         >
           <div className={styles.nodeRing}>
             <Icon size={18} />
@@ -566,20 +592,18 @@ function QuickLaunchDock() {
 
 function NowPlayingBar({ media }: { media: MediaStatus | null }) {
   const isPlaying = media?.isPlaying ?? false;
-  const title = media?.available ? (media.title || "Untitled media") : "Media unavailable";
-  const artist = media?.available ? (media.artist || "Artist unavailable") : (media?.reason || "No compatible Windows media session");
-  const source = media?.available ? friendlyMediaSource(media.source) : "Windows Media";
+  const title = media?.available ? (media.title || "Active session") : "Not playing";
+  const artist = media?.available ? (media.artist || "Metadata unavailable") : "Open YouTube Music to begin";
+  const source = media?.available ? friendlyMediaSource(media.source) : "YouTube Music";
 
-  async function control(action: "previousTrack" | "playPause" | "nextTrack" | "volumeDown" | "volumeUp" | "mute") {
-    if (window.jarvisDesktop?.controlMedia) {
-      await window.jarvisDesktop.controlMedia(action);
-      return;
-    }
+  async function control(action: "previous" | "playPause" | "next" | "volumeDown" | "volumeUp" | "mute") {
+    if (window.jarvisDesktop?.executeMediaAction) await window.jarvisDesktop.executeMediaAction(action);
+    else if (action === "playPause") window.open("https://music.youtube.com", "_blank", "noopener,noreferrer");
+  }
 
-    if (action === "playPause") {
-      await window.jarvisDesktop?.launchApp?.("youtube-music");
-      window.open("https://music.youtube.com", "_blank", "noopener,noreferrer");
-    }
+  async function openMusic() {
+    if (window.jarvisDesktop?.openYouTubeMusic) await window.jarvisDesktop.openYouTubeMusic();
+    else window.open("https://music.youtube.com", "_blank", "noopener,noreferrer");
   }
 
   return (
@@ -592,23 +616,19 @@ function NowPlayingBar({ media }: { media: MediaStatus | null }) {
         )}
       </div>
       <div className={styles.trackInfo}>
-        <span>{source}</span>
+        <span>{source}{media?.stale ? " · stale" : ""}</span>
         <strong>{title}</strong>
         <em>{artist}</em>
       </div>
       <div className={styles.mediaControls}>
-        <button type="button" aria-label="Previous track" onClick={() => control("previousTrack")}>
-          <SkipBack size={17} />
-        </button>
-        <button type="button" className={styles.playPause} aria-label={isPlaying ? "Pause" : "Play"} onClick={() => control("playPause")}>
-          {isPlaying ? <Pause size={18} /> : <Play size={18} />}
-        </button>
-        <button type="button" aria-label="Next track" onClick={() => control("nextTrack")}>
-          <SkipForward size={17} />
-        </button>
-        <button type="button" aria-label="Volume down" onClick={() => control("volumeDown")}><Volume1 size={16} /></button>
-        <button type="button" aria-label="Volume up" onClick={() => control("volumeUp")}><Volume2 size={16} /></button>
-        <button type="button" aria-label="Mute" onClick={() => control("mute")}><VolumeX size={16} /></button>
+        {!media?.available ? <button className={styles.openMusic} type="button" onClick={openMusic}>Open YouTube Music</button> : <>
+          <button type="button" aria-label="Previous track" onClick={() => control("previous")}><SkipBack size={17} /></button>
+          <button type="button" className={styles.playPause} aria-label={isPlaying ? "Pause" : "Play"} onClick={() => control("playPause")}>{isPlaying ? <Pause size={18} /> : <Play size={18} />}</button>
+          <button type="button" aria-label="Next track" onClick={() => control("next")}><SkipForward size={17} /></button>
+          <button type="button" aria-label="Volume down" onClick={() => control("volumeDown")}><Volume1 size={16} /></button>
+          <button type="button" aria-label="Volume up" onClick={() => control("volumeUp")}><Volume2 size={16} /></button>
+          <button type="button" aria-label="Mute" onClick={() => control("mute")}><VolumeX size={16} /></button>
+        </>}
       </div>
     </aside>
   );
@@ -640,12 +660,15 @@ function readBrowserMediaSession(): MediaStatus | null {
   if (!mediaSession?.metadata) return null;
 
   return {
+    available: true,
     title: mediaSession.metadata.title,
     artist: mediaSession.metadata.artist,
     album: mediaSession.metadata.album,
     artworkUrl: mediaSession.metadata.artwork?.at(-1)?.src || mediaSession.metadata.artwork?.[0]?.src,
     isPlaying: mediaSession.playbackState === "playing",
     source: "YouTube Music",
+    playbackStatus: mediaSession.playbackState,
+    collectedAt: new Date().toISOString(),
   };
 }
 
@@ -665,14 +688,23 @@ function DriftingParticles() {
   );
 }
 
-function buildTelemetryMetrics(stats: NativeStats | null, weather: WeatherStatus | null): TelemetryMetric[] {
+function buildTelemetryMetrics(stats: NativeStats | null, gpu: GpuTelemetry | null, storage: StorageTelemetry | null, network: NetworkTelemetry | null, speed: SpeedTestResult | null, weather: WeatherStatus | null): TelemetryMetric[] {
   const weatherUnit = weather?.unit === "celsius" ? "C" : "F";
+  const gpuDetail = gpu?.available
+    ? `${gpu.temperatureC === null || gpu.temperatureC === undefined ? "Temp —" : `${Math.round(gpu.temperatureC)}°C`} · ${formatGigabytes(gpu.memoryUsedMb)} / ${formatGigabytes(gpu.memoryTotalMb)} VRAM`
+    : "NVIDIA telemetry unavailable";
+  const storageDetail = storage?.available
+    ? `${formatBinaryBytes(storage.usedBytes)} / ${formatBinaryBytes(storage.totalBytes)} · ${formatBinaryBytes(storage.freeBytes)} free · ${storage.drive}`
+    : "Windows C: unavailable";
+  const networkName = network?.interfaceType === "wifi" ? (network.ssid || (network.ssidPermissionStatus === "hiddenByWindows" ? "SSID hidden by Windows" : "Wi-Fi")) : network?.interfaceType === "ethernet" ? "Ethernet" : network?.interfaceName || "No connection";
+  const networkSpeed = speed?.available ? ` · ${Math.round(speed.downloadMbps || 0)} Mbps estimated` : " · Speed not tested";
+  const networkDetail = network?.connected ? `${networkName}${network.linkSpeedMbps ? ` · ${network.linkSpeedMbps} Mbps link` : ""}${networkSpeed}` : network?.status === "offline" ? "Offline" : "Network unavailable";
   return [
-    { id: "cpu", label: "CPU", value: percent(stats?.cpuUsage), detail: stats?.cpuTemp === undefined ? "Temperature unavailable" : tempDetail(stats.cpuTemp), level: stats?.cpuUsage ?? 4, Icon: Cpu, position: "nodeCpu" },
-    { id: "gpu", label: "GPU", value: percent(stats?.gpuUsage), detail: stats?.gpuHotspot !== undefined ? `Hotspot ${stats.gpuHotspot}C` : stats?.gpuTemp !== undefined ? `${stats.gpuTemp}C` : "Temperature unavailable", level: stats?.gpuUsage ?? 4, Icon: MonitorCog, position: "nodeGpu" },
+    { id: "cpu", label: "CPU", value: percent(stats?.cpuUsage), detail: "Windows host usage", level: stats?.cpuUsage ?? 4, Icon: Cpu, position: "nodeCpu" },
+    { id: "gpu", label: "GPU", value: gpu?.available ? percent(gpu.utilizationPercent) : "—", detail: gpuDetail, level: gpu?.available ? gpu.utilizationPercent || 4 : 4, Icon: MonitorCog, position: "nodeGpu" },
     { id: "ram", label: "RAM", value: percent(stats?.ramUsage), detail: "Memory", level: stats?.ramUsage ?? 4, Icon: MemoryStick, position: "nodeRam" },
-    { id: "storage", label: "Storage", value: percent(stats?.storageUsage), detail: stats?.nvmeTemp === undefined ? "Temperature unavailable" : tempDetail(stats.nvmeTemp), level: stats?.storageUsage ?? 4, Icon: HardDrive, position: "nodeStorage" },
-    { id: "network", label: "Net", value: stats?.networkDown || "—", detail: stats?.networkUp ? `Up ${stats.networkUp}` : "Network unavailable", level: stats?.networkDown ? 36 : 4, Icon: Network, position: "nodeNetwork" },
+    { id: "storage", label: "Storage", value: storage?.available ? percent(storage.usedPercent) : "—", detail: storageDetail, level: storage?.available ? storage.usedPercent || 4 : 4, Icon: HardDrive, position: "nodeStorage" },
+    { id: "network", label: "Net", value: network?.status === "connected" ? "Connected" : network?.status === "localOnly" ? "Local only" : network?.status === "offline" ? "Offline" : "—", detail: networkDetail, level: network?.status === "connected" ? 100 : network?.status === "localOnly" ? 55 : 4, Icon: Network, position: "nodeNetwork" },
     { id: "weather", label: "Weather", value: weather?.available ? `${Math.round(weather.temperature || 0)}°${weatherUnit}` : "—", detail: weather?.available ? `${weather.conditions} · Feels ${Math.round(weather.apparentTemperature || 0)}° · Rain ${weather.precipitationProbability}% · ${formatUpdated(weather.fetchedAt)}` : (weather?.reason || "Weather unavailable"), level: weather?.available ? 70 : 4, Icon: Cloud, position: "nodeWeather" },
     { id: "uptime", label: "Uptime", value: stats?.uptime || "—", detail: stats?.uptime ? "Session" : "Unavailable", level: stats?.uptime ? 74 : 4, Icon: Timer, position: "nodeUptime" },
     { id: "bridge", label: "Bridge", value: stats ? "Live" : "Wait", detail: stats ? "Native feed" : "Telemetry pending", level: stats ? 100 : 12, Icon: Zap, position: "nodeBridge" },
@@ -702,8 +734,14 @@ function percent(value: number | undefined) {
   return value === undefined ? "—" : `${Math.round(value)}%`;
 }
 
-function tempDetail(value: number) {
-  return `${Math.round(value)}C`;
+function formatGigabytes(value?: number) {
+  return value === undefined ? "—" : `${(value / 1024).toFixed(value >= 10_240 ? 0 : 1)} GB`;
+}
+
+function formatBinaryBytes(value?: number) {
+  if (value === undefined) return "—";
+  const gib = value / 1024 ** 3;
+  return gib >= 1024 ? `${(gib / 1024).toFixed(2)} TiB` : `${gib.toFixed(gib >= 100 ? 0 : 1)} GiB`;
 }
 
 function formatUpdated(value?: string) {
@@ -712,12 +750,15 @@ function formatUpdated(value?: string) {
 }
 
 function loadBrowserPreferences(): DesktopPreferences {
-  const defaults: DesktopPreferences = { weatherLocation: process.env.NEXT_PUBLIC_JARVIS_WEATHER_LOCATION || "", weatherLatitude: null, weatherLongitude: null, weatherUnit: "fahrenheit", musicUrl: "https://music.youtube.com/", mediaControlEnabled: true };
+  const defaults: DesktopPreferences = { weatherLocation: process.env.NEXT_PUBLIC_JARVIS_WEATHER_LOCATION || "", weatherLatitude: null, weatherLongitude: null, weatherUnit: "fahrenheit", musicUrl: "https://music.youtube.com/", mediaControlEnabled: true, automaticSpeedTest: true };
   if (typeof window === "undefined") return defaults;
   try { return { ...defaults, ...JSON.parse(window.localStorage.getItem("jarvis.desktop.preferences") || "{}") }; } catch { return defaults; }
 }
 
-function DesktopSettings({ preferences, onChange, onClose }: { preferences: DesktopPreferences; onChange: (value: DesktopPreferences) => void; onClose: () => void }) {
+function DesktopSettings({ preferences, speedResult, onSpeedResult, onChange, onClose }: { preferences: DesktopPreferences; speedResult: SpeedTestResult | null; onSpeedResult: (value: SpeedTestResult) => void; onChange: (value: DesktopPreferences) => void; onClose: () => void }) {
+  const [nativeHealth, setNativeHealth] = useState<NativeHealth | null>(null);
+  const [testingSpeed, setTestingSpeed] = useState(false);
+  useEffect(() => { void window.jarvisDesktop?.getNativeHealth?.().then(setNativeHealth); }, []);
   function update<K extends keyof DesktopPreferences>(key: K, value: DesktopPreferences[K]) {
     const next = { ...preferences, [key]: value };
     onChange(next);
@@ -735,6 +776,12 @@ function DesktopSettings({ preferences, onChange, onClose }: { preferences: Desk
       updateMany({ weatherLatitude: position.coords.latitude, weatherLongitude: position.coords.longitude });
     });
   }
+  async function runSpeedTest() {
+    if (testingSpeed || !window.jarvisDesktop?.runInternetSpeedTest) return;
+    setTestingSpeed(true);
+    try { onSpeedResult(await window.jarvisDesktop.runInternetSpeedTest()); }
+    finally { setTestingSpeed(false); }
+  }
   return <aside className={styles.settingsPanel}>
     <header><strong>Desktop Settings</strong><button type="button" onClick={onClose}><X size={17} /></button></header>
     <label>Weather city/state<input value={preferences.weatherLocation} onChange={(event) => updateMany({ weatherLocation: event.target.value, weatherLatitude: null, weatherLongitude: null })} placeholder="City, State" /></label>
@@ -742,8 +789,29 @@ function DesktopSettings({ preferences, onChange, onClose }: { preferences: Desk
     <label>Units<select value={preferences.weatherUnit} onChange={(event) => update("weatherUnit", event.target.value as DesktopPreferences["weatherUnit"])}><option value="fahrenheit">Fahrenheit</option><option value="celsius">Celsius</option></select></label>
     <label>Music URL<input value={preferences.musicUrl} onChange={(event) => update("musicUrl", event.target.value)} /></label>
     <label><input type="checkbox" checked={preferences.mediaControlEnabled} onChange={(event) => update("mediaControlEnabled", event.target.checked)} /> Windows media controls enabled</label>
+    <label><input type="checkbox" checked={preferences.automaticSpeedTest} onChange={(event) => update("automaticSpeedTest", event.target.checked)} /> Daily estimated internet speed test</label>
+    <p>Uses approximately 20 MB per test. Results are cached for 24 hours.</p>
+    <button type="button" onClick={runSpeedTest} disabled={testingSpeed}>{testingSpeed ? "Testing…" : "Test internet speed now"}</button>
+    <p>{speedResult?.available ? `${Math.round(speedResult.downloadMbps || 0)} Mbps down · ${Math.round(speedResult.uploadMbps || 0)} Mbps up · ${speedResult.latencyMs} ms · ${formatUpdated(speedResult.testedAt)}` : "Internet speed has not been tested."}</p>
+    {nativeHealth?.available && <details><summary>Native diagnostics</summary><pre>{JSON.stringify(nativeHealth, null, 2)}</pre></details>}
     <button type="button" onClick={() => window.jarvisDesktop?.resetJarvisPosition?.()}>Reset Jarvis window position</button>
   </aside>;
+}
+
+function nativePoll<T>(loader: (() => Promise<T>) | undefined, setter: (value: T) => void, visible: boolean, intervalMs: number) {
+  if (!loader || !visible) return undefined;
+  let cancelled = false;
+  let loading = false;
+  const load = async () => {
+    if (loading) return;
+    loading = true;
+    try { const value = await loader(); if (!cancelled) setter(value); }
+    catch { /* Main process returns structured unavailable states; IPC transport failures remain non-fatal. */ }
+    finally { loading = false; }
+  };
+  void load();
+  const timer = window.setInterval(load, intervalMs);
+  return () => { cancelled = true; window.clearInterval(timer); };
 }
 
 function formatTime(date: Date) {

@@ -324,6 +324,31 @@ function getEventType(title: string): CalendarEvent["type"] {
   return "default";
 }
 
+function waitForCalendarOAuth(popup: Window): Promise<boolean> {
+  return new Promise((resolve) => {
+    const apiOrigin = new URL(API_BASE).origin;
+    let receivedResult = false;
+
+    const cleanup = (result: boolean) => {
+      window.clearInterval(closeWatcher);
+      window.clearTimeout(timeout);
+      window.removeEventListener("message", onMessage);
+      resolve(result);
+    };
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== apiOrigin || event.data?.type !== "jarvis:calendar-auth") return;
+      receivedResult = true;
+      cleanup(event.data.status === "ok");
+    };
+    const closeWatcher = window.setInterval(() => {
+      if (popup.closed && !receivedResult) cleanup(false);
+    }, 500);
+    const timeout = window.setTimeout(() => cleanup(false), 10 * 60_000);
+
+    window.addEventListener("message", onMessage);
+  });
+}
+
 function stripBirthdayTitle(title: string) {
   return title
     .replace(/'s birthday$/i, " Birthday")
@@ -451,13 +476,14 @@ export default function CommandCenterPage() {
     }
   }
 
-  async function resyncCalendar() {
+  async function resyncCalendar(allowReauthentication = true) {
     setError("");
     setCalendarSyncMessage("");
     setIsCalendarSyncing(true);
 
     try {
-      const res = await fetch(`${API_BASE}/calendar/resync`, {
+      const returnOrigin = typeof window === "undefined" ? "" : window.location.origin;
+      const res = await fetch(`${API_BASE}/calendar/resync?return_origin=${encodeURIComponent(returnOrigin)}`, {
         method: "POST",
         headers: {
           "x-api-key": API_KEY,
@@ -477,6 +503,24 @@ export default function CommandCenterPage() {
           if (statusRes.ok) {
             setStatus(await statusRes.json());
           }
+        }
+      } else if (data.status === "auth_required" && data.reauth_url && allowReauthentication) {
+        const shouldReconnect = window.confirm("Google Calendar needs to be reauthenticated. Reconnect it now?");
+        if (!shouldReconnect) {
+          setCalendarSyncMessage("Calendar reconnect cancelled. Click sync when you are ready.");
+          return;
+        }
+        const popup = window.open(data.reauth_url, "jarvis-calendar-auth", "popup=yes,width=560,height=720");
+        if (!popup) {
+          setCalendarSyncMessage("Calendar authentication popup was blocked. Allow popups for Jarvis and try again.");
+          return;
+        }
+        setCalendarSyncMessage("Finish signing in with Google in the authentication window...");
+        const completed = await waitForCalendarOAuth(popup);
+        if (completed) {
+          await resyncCalendar(false);
+        } else {
+          setCalendarSyncMessage("Calendar authentication was not completed. Click sync to try again.");
         }
       } else {
         setCalendarSyncMessage(data.message || "Calendar needs re-authentication.");
@@ -512,9 +556,9 @@ export default function CommandCenterPage() {
                 <p className="text-lg font-semibold text-green-200/80">
                   {dashboard ? formatDate(dashboard.date) : "Loading today..."}
                 </p>
-                <Link href="/chloe" className="command-nav-link gap-2 px-3 py-2 text-xs font-black uppercase tracking-[0.22em]">
+                <Link href="/jarvis" className="command-nav-link gap-2 px-3 py-2 text-xs font-black uppercase tracking-[0.22em]">
                   <BrainCircuit className="h-4 w-4" />
-                  Chloe
+                  Jarvis
                 </Link>
               </div>
               {dashboard?.mission_phase && (

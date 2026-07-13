@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -17,6 +19,9 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 TOKEN_PATH = BASE_DIR / "token.json"
 CREDS_PATH = BASE_DIR / "credentials.json"
 DEFAULT_TIMEZONE = "America/New_York"
+DEFAULT_REDIRECT_URI = "http://127.0.0.1:8000/calendar/oauth/callback"
+OAUTH_STATE_TTL_SECONDS = 600
+_OAUTH_STATES: dict[str, dict[str, str | float]] = {}
 
 
 class CalendarIntegrationError(RuntimeError):
@@ -25,6 +30,71 @@ class CalendarIntegrationError(RuntimeError):
 
 class CalendarAuthRequired(CalendarIntegrationError):
     pass
+
+
+def _calendar_redirect_uri() -> str:
+    return os.getenv("JARVIS_CALENDAR_REDIRECT_URI", DEFAULT_REDIRECT_URI).strip()
+
+
+def _allowed_return_origin(origin: str | None) -> str:
+    candidate = (origin or "http://127.0.0.1:3000").rstrip("/")
+    allowed = {
+        "http://127.0.0.1:3000",
+        "http://localhost:3000",
+        "https://jarvis.schoolyardshowdown.com",
+        "https://jarvis-git-master-johnfsummers-9948s-projects.vercel.app",
+    }
+    return candidate if candidate in allowed else "http://127.0.0.1:3000"
+
+
+def _prune_oauth_states() -> None:
+    cutoff = time.time() - OAUTH_STATE_TTL_SECONDS
+    for state, details in list(_OAUTH_STATES.items()):
+        if float(details.get("created_at", 0)) < cutoff:
+            _OAUTH_STATES.pop(state, None)
+
+
+def begin_calendar_oauth(return_origin: str | None = None) -> dict:
+    if not CREDS_PATH.exists():
+        raise CalendarAuthRequired("Google Calendar credentials.json is missing.")
+
+    _prune_oauth_states()
+    state = secrets.token_urlsafe(32)
+    redirect_uri = _calendar_redirect_uri()
+    flow = InstalledAppFlow.from_client_secrets_file(str(CREDS_PATH), SCOPES, state=state)
+    flow.redirect_uri = redirect_uri
+    authorization_url, _ = flow.authorization_url(
+        access_type="offline",
+        include_granted_scopes="true",
+        prompt="consent",
+        state=state,
+    )
+    _OAUTH_STATES[state] = {
+        "created_at": time.time(),
+        "redirect_uri": redirect_uri,
+        "return_origin": _allowed_return_origin(return_origin),
+    }
+    return {
+        "authorization_url": authorization_url,
+        "expires_in": OAUTH_STATE_TTL_SECONDS,
+    }
+
+
+def complete_calendar_oauth(state: str, code: str) -> dict:
+    _prune_oauth_states()
+    details = _OAUTH_STATES.pop(state, None)
+    if not details:
+        raise CalendarAuthRequired("This Calendar authorization request expired. Start it again from Jarvis.")
+
+    flow = InstalledAppFlow.from_client_secrets_file(str(CREDS_PATH), SCOPES, state=state)
+    flow.redirect_uri = str(details["redirect_uri"])
+    flow.fetch_token(code=code)
+    TOKEN_PATH.write_text(flow.credentials.to_json())
+    TOKEN_PATH.chmod(0o600)
+    return {
+        "return_origin": str(details["return_origin"]),
+        "token_valid": flow.credentials.valid,
+    }
 
 
 def get_calendar_service():
@@ -75,10 +145,18 @@ def refresh_calendar_auth() -> dict:
             TOKEN_PATH.write_text(creds.to_json())
             refreshed = True
         except RefreshError as exc:
-            raise CalendarAuthRequired(f"Google Calendar token refresh failed: {exc}") from exc
+            raise CalendarAuthRequired("Google Calendar authorization expired. Reauthenticate to reconnect it.") from exc
 
-    service = build("calendar", "v3", credentials=creds)
-    profile = service.calendarList().get(calendarId="primary").execute()
+    if not creds.valid:
+        raise CalendarAuthRequired("Google Calendar authorization is no longer valid. Reauthenticate to reconnect it.")
+
+    try:
+        service = build("calendar", "v3", credentials=creds)
+        profile = service.calendarList().get(calendarId="primary").execute()
+    except HttpError as exc:
+        if exc.resp.status in {401, 403}:
+            raise CalendarAuthRequired("Google Calendar access was revoked. Reauthenticate to reconnect it.") from exc
+        raise
     return {
         "credentials_file": str(CREDS_PATH),
         "token_file": str(TOKEN_PATH),

@@ -4,7 +4,7 @@ from fastapi.responses import Response
 from backend.assistant.tools.registry import tool_status
 from backend.core.security import verify_api_key
 from backend.schemas.assistant import AssistantChatRequest, AssistantSpeechRequest
-from backend.services.ollama_service import OllamaServiceError, chat_with_chloe, get_ollama_status
+from backend.services.ollama_service import OllamaServiceError, chat_with_jarvis, get_ollama_status
 from backend.services.tts_service import get_tts_status, synthesize_speech
 
 router = APIRouter(dependencies=[Depends(verify_api_key)])
@@ -23,7 +23,7 @@ def assistant_tools_status():
 @router.post("/assistant/chat")
 def assistant_chat(payload: AssistantChatRequest):
     try:
-        return chat_with_chloe([message.dict() for message in payload.messages], payload.model)
+        return chat_with_jarvis([message.dict() for message in payload.messages], payload.model)
     except OllamaServiceError as exc:
         raise HTTPException(status_code=503, detail={"code": exc.code, "message": str(exc)}) from exc
 

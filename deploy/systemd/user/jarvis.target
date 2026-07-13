@@ -1,0 +1,7 @@
+[Unit]
+Description=Jarvis application stack
+Wants=jarvis-backend.service jarvis-frontend.service
+After=network.target
+
+[Install]
+WantedBy=default.target

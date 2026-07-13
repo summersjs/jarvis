@@ -5,7 +5,7 @@ import urllib.error
 import urllib.request
 
 from backend.assistant.tools.registry import AssistantToolContext, execute_tool_calls, select_tools
-from backend.prompts.chloe import CHLOE_SYSTEM_PROMPT
+from backend.prompts.jarvis import JARVIS_SYSTEM_PROMPT
 from backend.prompts.user_profile import JOHN_USER_PROFILE
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
@@ -50,7 +50,7 @@ def get_ollama_status() -> dict:
         }
 
 
-def chat_with_chloe(messages: list[dict], model: str | None = None) -> dict:
+def chat_with_jarvis(messages: list[dict], model: str | None = None) -> dict:
     selected_model = (model or OLLAMA_MODEL).strip()
     latest_user_text = next(
         (item.get("content", "") for item in reversed(messages) if item.get("role") == "user" and item.get("content")),
@@ -64,7 +64,7 @@ def chat_with_chloe(messages: list[dict], model: str | None = None) -> dict:
         return {"message": {"role": "assistant", "content": action_reply}, "model": selected_model, "tools": tool_results}
 
     safe_messages = [
-        {"role": "system", "content": CHLOE_SYSTEM_PROMPT},
+        {"role": "system", "content": JARVIS_SYSTEM_PROMPT},
         {"role": "system", "content": JOHN_USER_PROFILE},
         *(
             [
@@ -113,6 +113,10 @@ def chat_with_chloe(messages: list[dict], model: str | None = None) -> dict:
         raise OllamaServiceError("Ollama returned an empty response.", "invalid_response")
 
     return {"message": {"role": "assistant", "content": content.strip()}, "model": selected_model, "tools": tool_results}
+
+
+# Compatibility alias for any older local integration importing this symbol.
+chat_with_chloe = chat_with_jarvis
 
 
 def select_followup_tools(messages: list[dict], latest_user_text: str, existing_calls: list[dict]) -> list[dict]:

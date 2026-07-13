@@ -35,18 +35,21 @@ from backend.services.shopping_service import (
 from backend.services.workout_service import get_next_workout_logic, get_todays_workout_summary
 
 
-READ_TOOLS_ENABLED = os.getenv("CHLOE_TOOLS_ENABLED", "true").lower() == "true"
-WRITE_TOOLS_ENABLED = os.getenv("CHLOE_WRITE_TOOLS_ENABLED", "true").lower() == "true"
-CONFIRMATION_TOOLS_ENABLED = os.getenv("CHLOE_CONFIRMATION_TOOLS_ENABLED", "false").lower() == "true"
-MAX_TOOL_CALLS = int(os.getenv("CHLOE_MAX_TOOL_CALLS", "5"))
+READ_TOOLS_ENABLED = os.getenv("JARVIS_TOOLS_ENABLED", os.getenv("CHLOE_TOOLS_ENABLED", "true")).lower() == "true"
+WRITE_TOOLS_ENABLED = os.getenv("JARVIS_WRITE_TOOLS_ENABLED", os.getenv("CHLOE_WRITE_TOOLS_ENABLED", "true")).lower() == "true"
+CONFIRMATION_TOOLS_ENABLED = os.getenv(
+    "JARVIS_CONFIRMATION_TOOLS_ENABLED",
+    os.getenv("CHLOE_CONFIRMATION_TOOLS_ENABLED", "false"),
+).lower() == "true"
+MAX_TOOL_CALLS = int(os.getenv("JARVIS_MAX_TOOL_CALLS", os.getenv("CHLOE_MAX_TOOL_CALLS", "5")))
 
 
 @dataclass(frozen=True)
 class AssistantToolContext:
     user_id: str = "john"
-    session_id: str = "local-chloe"
+    session_id: str = "local-jarvis"
     request_id: str = "local-request"
-    source: str = "chloe-chat"
+    source: str = "jarvis-chat"
     timezone: str = "America/New_York"
 
 
@@ -390,11 +393,11 @@ def log_goal_progress_tool(context: AssistantToolContext, input_data: dict[str, 
     today = datetime.now(LOCAL_TZ).date().isoformat()
     payload = GoalLogCreate(
         value=float(input_data.get("value") or 1),
-        notes=str(input_data.get("notes") or f"Logged from Chloe: {goal_query}").strip(),
+        notes=str(input_data.get("notes") or f"Logged from Jarvis: {goal_query}").strip(),
         log_type=str(input_data.get("log_type") or "progress"),
         planned_for=str(input_data.get("planned_for") or today),
         metadata={
-            "source": "chloe",
+            "source": "jarvis",
             "session_id": context.session_id,
             "request_id": context.request_id,
             "goal_query": goal_query,
@@ -422,7 +425,7 @@ def add_shopping_item_tool(context: AssistantToolContext, input_data: dict[str, 
             item_name=item_name,
             quantity=input_data.get("quantity"),
             category=input_data.get("category"),
-            source="chloe",
+            source="jarvis",
         )
     )
     return {"updated": True, "shopping_list": {"id": shopping_list.get("id"), "title": shopping_list.get("title")}, "item": summarize_shopping_item(item)}
@@ -454,7 +457,7 @@ def log_health_event_tool(context: AssistantToolContext, input_data: dict[str, A
             event_type=event_type,
             severity=input_data.get("severity"),
             notes=str(input_data.get("notes") or "").strip() or None,
-            context={"source": "chloe", "request_id": context.request_id},
+            context={"source": "jarvis", "request_id": context.request_id},
         )
     )
     return {"updated": True, "event": {"id": event.get("id"), "event_type": event.get("event_type"), "event_date": event.get("event_date"), "notes": event.get("notes")}}
@@ -468,7 +471,7 @@ def upsert_health_checkin_tool(context: AssistantToolContext, input_data: dict[s
         water_oz=input_data.get("water_oz"),
         caffeine_mg=input_data.get("caffeine_mg"),
         notes=input_data.get("notes"),
-        source_data={"source": "chloe", "request_id": context.request_id},
+        source_data={"source": "jarvis", "request_id": context.request_id},
     )
     checkin = upsert_daily_checkin(payload)
     return {"updated": True, "checkin": {"id": checkin.get("id"), "checkin_date": checkin.get("checkin_date"), "water_oz": checkin.get("water_oz"), "caffeine_mg": checkin.get("caffeine_mg")}}
@@ -508,7 +511,7 @@ def complete_daily_checkin_tool(context: AssistantToolContext, input_data: dict[
         workout_completed=input_data.get("workout_completed"),
         meals_completed=input_data.get("meals_completed"),
         notes=input_data.get("notes"),
-        source_data={"source": "chloe", "request_id": context.request_id},
+        source_data={"source": "jarvis", "request_id": context.request_id},
     )
     checkin = upsert_daily_checkin(payload)
     return {"updated": True, "checkin": summarize_checkin(checkin)}
@@ -543,7 +546,7 @@ def create_goal_tool(context: AssistantToolContext, input_data: dict[str, Any]) 
             unit=input_data.get("unit"),
             frequency=input_data.get("frequency"),
             mission_type=input_data.get("mission_type") or infer_mission_type(goal_type, input_data.get("frequency")),
-            metadata={"source": "chloe", "request_id": context.request_id},
+            metadata={"source": "jarvis", "request_id": context.request_id},
         )
     )
     return {"updated": True, "goal": summarize_goal(goal)}
@@ -562,7 +565,7 @@ def complete_meal_tool(context: AssistantToolContext, input_data: dict[str, Any]
     meta = meal_meta(meal)
     if meta.get("completed"):
         return {"updated": True, "already_done": True, "meal": summarize_meal(meal)}
-    meta.update({"completed": True, "completed_at": datetime.now(LOCAL_TZ).isoformat(), "completed_by": "chloe"})
+    meta.update({"completed": True, "completed_at": datetime.now(LOCAL_TZ).isoformat(), "completed_by": "jarvis"})
     updated = update_meal_plan_entry(meal["id"], MealPlanEntryUpdate(notes=build_meal_notes(meta)))
     return {"updated": bool(updated), "meal": summarize_meal(updated or meal)}
 
@@ -581,7 +584,7 @@ def log_caffeine_drink_tool(context: AssistantToolContext, input_data: dict[str,
             caffeine_mg=nutrition["caffeine_mg"],
             notes=f"Logged {nutrition['label']}.",
             source_data={
-                "source": "chloe",
+                "source": "jarvis",
                 "caffeine_items": [{"name": nutrition["label"], "size_oz": nutrition["size_oz"]}],
                 "caffeine_nutrition": {"calories": nutrition["calories"], "protein_g": 0, "carbs_g": nutrition["carbs_g"], "fat_g": 0},
             },
@@ -595,7 +598,7 @@ def log_caffeine_drink_tool(context: AssistantToolContext, input_data: dict[str,
             custom_meal_name=nutrition["label"],
             notes=build_meal_notes({
                 "source": "caffeine",
-                "note": "Logged by Chloe.",
+                "note": "Logged by Jarvis.",
                 "calories": nutrition["calories"],
                 "protein_g": 0,
                 "carbs_g": nutrition["carbs_g"],
@@ -632,7 +635,7 @@ def capture_forge_spark_tool(context: AssistantToolContext, input_data: dict[str
     spark_text = clean_sentence(str(input_data.get("spark_text") or ""))
     if not spark_text:
         return {"updated": False, "reason": "No spark text supplied."}
-    spark = create_forge_spark(ForgeSparkCreate(user_id=context.user_id, spark_text=spark_text, category=input_data.get("category"), tags=["chloe"]))
+    spark = create_forge_spark(ForgeSparkCreate(user_id=context.user_id, spark_text=spark_text, category=input_data.get("category"), tags=["jarvis"]))
     return {"updated": True, "spark": {"id": spark.get("id"), "spark_text": spark.get("spark_text"), "category": spark.get("category")}}
 
 

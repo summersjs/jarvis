@@ -1,17 +1,17 @@
-# Chloe Assistant Endpoint Audit
+# Jarvis Assistant Endpoint Audit
 
 Date: 2026-07-12
 
-Jarvis is a FastAPI backend protected by the shared API key dependency. Chloe does not receive raw Supabase access, SQL access, shell access, filesystem access, or arbitrary HTTP endpoint access.
+Jarvis is a FastAPI backend protected by the shared API key dependency. Jarvis does not receive raw Supabase access, SQL access, shell access, filesystem access, or arbitrary HTTP endpoint access.
 
-## Current Chloe Tool Exposure
+## Current Jarvis Tool Exposure
 
 The first assistant tool layer is read-only and gated by feature flags:
 
-- `CHLOE_TOOLS_ENABLED`: defaults to `true`
-- `CHLOE_WRITE_TOOLS_ENABLED`: defaults to `true`
-- `CHLOE_CONFIRMATION_TOOLS_ENABLED`: defaults to `false`
-- `CHLOE_MAX_TOOL_CALLS`: defaults to `5`
+- `JARVIS_TOOLS_ENABLED`: defaults to `true`
+- `JARVIS_WRITE_TOOLS_ENABLED`: defaults to `true`
+- `JARVIS_CONFIRMATION_TOOLS_ENABLED`: defaults to `false`
+- `JARVIS_MAX_TOOL_CALLS`: defaults to `5`
 
 Registered read tools:
 
@@ -25,11 +25,11 @@ Registered read tools:
 - `get_today_workout`
 - `get_recent_health_summary`
 
-The chat route injects approved tool results into Chloe's system context. Chloe is instructed to use supplied data only, and to never claim she changed data unless a backend tool result reports success.
+The chat route injects approved tool results into Jarvis's system context. Jarvis is instructed to use supplied data only, and to never claim she changed data unless a backend tool result reports success.
 
 ## Risk Classification
 
-Read-only, currently exposed to Chloe:
+Read-only, currently exposed to Jarvis:
 
 - Morning brief
 - Daily debrief
@@ -40,7 +40,7 @@ Read-only, currently exposed to Chloe:
 - Today's workout and next workout context
 - Recent health dashboard summary
 
-Validated write tools currently exposed to Chloe:
+Validated write tools currently exposed to Jarvis:
 
 - `log_goal_progress`: logs progress/completion against the best matching active goal. Example: "I went on a date with Tierra."
 - `add_shopping_item`: adds an item to the current shopping list.
@@ -51,7 +51,7 @@ Validated write tools currently exposed to Chloe:
 - `complete_forge_project`: archives/completes a matching Forge project.
 - `capture_forge_spark`: saves a Forge spark/idea.
 
-Medium-risk writes, not broadly exposed to Chloe:
+Medium-risk writes, not broadly exposed to Jarvis:
 
 - Arbitrary goal field edits
 - Arbitrary Forge project/task/session/note/file/ledger edits
@@ -59,7 +59,7 @@ Medium-risk writes, not broadly exposed to Chloe:
 - Food Vault inventory changes
 - Finance transaction and budget changes
 
-High-risk or destructive actions, not exposed to Chloe:
+High-risk or destructive actions, not exposed to Jarvis:
 
 - Deletes across goals, Forge, archive, shopping, meal planner, recipes, food vault, and health
 - Calendar resync
@@ -84,18 +84,18 @@ Relevant route modules include:
 
 ## Guardrails
 
-- Chloe tools are allowlisted by name in `backend/assistant/tools/registry.py`.
+- Jarvis tools are allowlisted by name in `backend/assistant/tools/registry.py`.
 - Tool selection is server-side keyword matching, not model-controlled function execution.
 - Tool responses are trimmed and sanitized to small JSON payloads.
 - Write tools are narrow, typed wrappers around existing service functions.
 - Destructive delete tools are not registered.
 - Confirmation flows are not implemented yet.
-- Errors return generic unavailable messages to Chloe instead of stack traces.
+- Errors return generic unavailable messages to Jarvis instead of stack traces.
 
 ## Next Hardening Steps
 
 - Add per-tool audit logging with request ID, user ID, source, selected tool, result status, and duration.
 - Add confirmation-token flow before any future write action.
 - Add tests for tool selection, write-disabled behavior, and schema validation.
-- Add stricter redaction for sensitive calendar/health fields if Chloe starts reading wider datasets.
+- Add stricter redaction for sensitive calendar/health fields if Jarvis starts reading wider datasets.
 - Add rate limiting around `/assistant/chat` and `/assistant/tools/status`.

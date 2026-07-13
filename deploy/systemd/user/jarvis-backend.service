@@ -1,0 +1,13 @@
+[Unit]
+Description=Jarvis FastAPI backend
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/john/development/jarvis
+ExecStart=/home/john/development/jarvis/scripts/run-backend.sh
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=jarvis.target

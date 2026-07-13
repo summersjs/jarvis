@@ -2,16 +2,26 @@
   "name": "frontend",
   "version": "0.1.0",
   "private": true,
+  "description": "Jarvis life command center web frontend and secure Electron desktop shell",
+  "author": "John Summers",
+  "packageManager": "npm@11.16.0",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "desktop:dev": "node electron/dev-launcher.cjs",
+    "desktop:start": "electron .",
+    "desktop:test": "node --test electron/test/*.test.cjs",
+    "desktop:build": "electron-builder --dir --win --x64",
+    "desktop:package": "electron-builder --win --x64"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.2.1",
     "lucide-react": "^1.17.0",
-    "next": "16.2.3",
+    "next": "^16.2.10",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
@@ -20,9 +30,54 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "electron": "^43.1.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^9",
-    "eslint-config-next": "16.2.3",
+    "eslint-config-next": "^16.2.10",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "build": {
+    "appId": "com.summersjs.jarvis.desktop",
+    "productName": "Jarvis Desktop",
+    "asar": true,
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "electron/**/*",
+      "package.json",
+      "!electron/test/**/*",
+      "!node_modules/**/*"
+    ],
+    "win": {
+      "icon": "electron/assets/tray.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "artifactName": "Jarvis-Desktop-Setup-${version}-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "Jarvis-Desktop-Portable-${version}-${arch}.${ext}"
+    }
+  },
+  "overrides": {
+    "postcss": "8.5.19"
   }
 }

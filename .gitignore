@@ -21,6 +21,7 @@ node_modules/
 .next/
 out/
 frontend/.npm-cache/
+frontend/dist-electron/
 
 # OS junk
 .DS_Store

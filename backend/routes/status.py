@@ -76,7 +76,7 @@ def _ollama_check():
         raise RuntimeError("Ollama is offline")
     if not status.get("modelAvailable"):
         raise RuntimeError(f"{status.get('model', 'Configured model')} is not installed")
-    return f"{status.get('model')} ready for Chloe"
+    return f"{status.get('model')} ready for Jarvis"
 
 
 def _tts_check():
@@ -103,15 +103,15 @@ def get_status():
         _run_check("Health Ops", _table_check("health_events")),
         _run_check("Food Vault", _table_check("food_vault_items")),
         _run_check("Shopping Lists", _table_check("shopping_lists")),
-        _run_check("Chloe Local LLM", _ollama_check),
-        _run_check("Chloe Voice TTS", _tts_check),
+        _run_check("Jarvis Local LLM", _ollama_check),
+        _run_check("Jarvis Voice TTS", _tts_check),
     ]
     offline_count = sum(1 for check in checks if check["state"] == "offline")
     overall = "Online" if offline_count == 0 else "Degraded"
 
     return {
         "systems": overall,
-        "brain": "Chloe local LLM wired - qwen3:8b",
+        "brain": "Jarvis local LLM wired - qwen3:8b",
         "user": "John Summers Sr",
         "clearance": "Active",
         "checked_at": datetime.now(timezone.utc).isoformat(),

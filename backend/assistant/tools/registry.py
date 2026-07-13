@@ -1,23 +1,42 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Callable
 
 from backend.core.config import LOCAL_TZ
 from backend.services.briefing_service import build_morning_brief
 from backend.services.calendar_service import get_calendar_events_for_date
 from backend.services.debrief_service import build_daily_debrief_summary
-from backend.services.forge_service import is_project_active, list_forge_projects
-from backend.services.goal_service import get_goal, list_goals
-from backend.services.health_service import build_health_dashboard
-from backend.services.shopping_service import get_shopping_list, list_shopping_lists
+from backend.schemas.forge import ForgeProjectUpdate, ForgeSparkCreate, ForgeTaskUpdate
+from backend.schemas.goal import GoalCreate, GoalLogCreate
+from backend.schemas.health import HealthDailyCheckinUpsert, HealthEventCreate
+from backend.schemas.meal_planner import MealPlanEntryCreate, MealPlanEntryUpdate
+from backend.schemas.shopping import ShoppingListItemCreate, ShoppingListItemUpdate
+from backend.services.forge_service import (
+    create_forge_spark,
+    is_project_active,
+    list_forge_projects,
+    list_forge_tasks,
+    update_forge_project,
+    update_forge_task,
+)
+from backend.services.goal_service import create_goal, create_goal_log, get_goal, list_goals
+from backend.services.health_service import build_health_dashboard, create_health_event, upsert_daily_checkin
+from backend.services.meal_planner_service import create_meal_plan_entry, list_meal_plan_entries, update_meal_plan_entry
+from backend.services.shopping_service import (
+    add_shopping_list_item,
+    get_shopping_list,
+    list_shopping_lists,
+    update_shopping_list_item,
+)
 from backend.services.workout_service import get_next_workout_logic, get_todays_workout_summary
 
 
 READ_TOOLS_ENABLED = os.getenv("CHLOE_TOOLS_ENABLED", "true").lower() == "true"
-WRITE_TOOLS_ENABLED = os.getenv("CHLOE_WRITE_TOOLS_ENABLED", "false").lower() == "true"
+WRITE_TOOLS_ENABLED = os.getenv("CHLOE_WRITE_TOOLS_ENABLED", "true").lower() == "true"
 CONFIRMATION_TOOLS_ENABLED = os.getenv("CHLOE_CONFIRMATION_TOOLS_ENABLED", "false").lower() == "true"
 MAX_TOOL_CALLS = int(os.getenv("CHLOE_MAX_TOOL_CALLS", "5"))
 
@@ -85,18 +104,120 @@ def select_read_tools(user_text: str) -> list[str]:
     return list(dict.fromkeys(selected))[:MAX_TOOL_CALLS]
 
 
+def select_tools(user_text: str) -> list[dict[str, Any]]:
+    calls = [{"name": name, "input": {}} for name in select_read_tools(user_text)]
+    lower = user_text.lower()
+    wants_tomorrow_schedule = any(phrase in lower for phrase in ["tomorrow", "tomorrow's"]) and any(word in lower for word in ["calendar", "schedule", "going on", "have going", "events"])
+    if wants_tomorrow_schedule:
+        calls = [call for call in calls if call["name"] != "get_today_schedule"]
+        calls.append({"name": "get_schedule_for_date", "input": {"date_offset": 1, "label": "tomorrow"}})
+    if WRITE_TOOLS_ENABLED:
+        calls.extend(select_write_tools(user_text))
+    deduped: list[dict[str, Any]] = []
+    seen = set()
+    for call in calls:
+        key = (call["name"], str(sorted((call.get("input") or {}).items())))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(call)
+    return deduped[:MAX_TOOL_CALLS]
+
+
+def select_write_tools(user_text: str) -> list[dict[str, Any]]:
+    text = user_text.strip()
+    lower = text.lower()
+    calls: list[dict[str, Any]] = []
+
+    date_match = re.search(r"\b(?:went on|had|completed)\s+(?:a\s+)?date\b", lower)
+    if date_match:
+        person_match = re.search(r"\bdate\s+with\s+([a-z][a-z'-]*)", lower)
+        person = clean_title_case(person_match.group(1) if person_match else "")
+        notes = clean_sentence(text) or f"Went on a date{f' with {person}' if person else ''}."
+        calls.append({"name": "log_goal_progress", "input": {"goal_query": "date", "value": 1, "log_type": "completed", "notes": notes}})
+
+    checkin_fields = parse_checkin_fields(lower)
+    if "complete my daily check" in lower or "daily check in" in lower or "daily check-in" in lower or checkin_fields:
+        fields = checkin_fields
+        calls.append({"name": "complete_daily_checkin", "input": fields})
+
+    goal_fields = parse_goal_create_fields(text)
+    if "create a goal" in lower or "new goal" in lower or {"title", "category", "goal_type"} <= set(goal_fields):
+        calls.append({"name": "create_goal", "input": goal_fields})
+
+    meal_match = re.search(r"\b(?:log|mark|complete)\s+(?:my\s+)?(breakfast|lunch|dinner|snack)\b", lower)
+    if meal_match:
+        calls.append({"name": "complete_meal", "input": {"meal_type": meal_match.group(1)}})
+
+    red_bull_match = re.search(r"\b(?:drank|had|log(?:ged)?)\s+(?:a\s+)?(?:(?:\d+(?:\.\d+)?\s*(?:oz|ounce|ounces)\s+)?(?:red bull|redbull)|(?:red bull|redbull))\b", lower)
+    if red_bull_match:
+        calls.append({"name": "log_caffeine_drink", "input": parse_caffeine_drink_fields(lower, "Red Bull")})
+
+    goal_match = re.search(r"\b(?:log|record|mark)\s+(?:that\s+)?(?:i\s+)?(?:completed|finished|did)\s+(.+?)(?:\s+(?:for|toward)\s+(?:my\s+)?goal)?[.!?]?$", lower)
+    if goal_match and "date" not in lower:
+        activity = clean_sentence(goal_match.group(1))
+        calls.append({"name": "log_goal_progress", "input": {"goal_query": activity, "value": 1, "log_type": "completed", "notes": f"Completed: {activity}."}})
+
+    shopping_match = re.search(r"\badd\s+(.+?)\s+to\s+(?:my\s+)?(?:shopping|grocery)(?:\s+list)?", lower)
+    if shopping_match:
+        item_name = clean_sentence(shopping_match.group(1))
+        calls.append({"name": "add_shopping_item", "input": {"item_name": item_name}})
+
+    checked_match = re.search(r"\b(?:check off|mark)\s+(.+?)\s+(?:as\s+)?(?:bought|done|checked)", lower)
+    if checked_match and ("shopping" in lower or "grocery" in lower or "list" in lower):
+        calls.append({"name": "check_shopping_item", "input": {"item_query": clean_sentence(checked_match.group(1))}})
+
+    symptom = infer_health_event_type(lower)
+    if symptom:
+        calls.append({"name": "log_health_event", "input": {"event_type": symptom, "notes": text}})
+    elif re.search(r"\b(?:log|record|add)\s+(?:a\s+)?symptom\b", lower):
+        calls.append({"name": "log_health_event", "input": {}})
+
+    water_match = re.search(r"\b(?:drank|had|log(?:ged)?)\s+(\d+(?:\.\d+)?)\s*(?:oz|ounces)\s+(?:of\s+)?water\b", lower)
+    caffeine_match = re.search(r"\b(?:had|drank|log(?:ged)?)\s+(\d+(?:\.\d+)?)\s*(?:mg)\s+(?:of\s+)?caffeine\b", lower)
+    if water_match or caffeine_match:
+        calls.append({"name": "complete_daily_checkin", "input": {
+            "water_oz": float(water_match.group(1)) if water_match else None,
+            "caffeine_mg": float(caffeine_match.group(1)) if caffeine_match else None,
+            "notes": text,
+        }})
+
+    project_complete = re.search(r"\b(?:archive|complete|mark)\s+(?:project\s+)?(.+?)\s+(?:as\s+)?(?:complete|completed|archived|done)\b", lower)
+    if project_complete and ("project" in lower or "forge" in lower):
+        calls.append({"name": "complete_forge_project", "input": {"project_query": clean_sentence(project_complete.group(1))}})
+
+    task_complete = re.search(r"\b(?:complete|finish|mark)\s+(?:task\s+)?(.+?)\s+(?:as\s+)?(?:done|complete|completed)\b", lower)
+    if task_complete and "goal" not in lower and "project" not in lower:
+        calls.append({"name": "complete_forge_task", "input": {"task_query": clean_sentence(task_complete.group(1))}})
+
+    spark_match = re.search(r"\b(?:capture|save|remember)\s+(?:this\s+)?(?:spark|idea):?\s+(.+)", text, re.IGNORECASE)
+    if spark_match:
+        calls.append({"name": "capture_forge_spark", "input": {"spark_text": clean_sentence(spark_match.group(1))}})
+
+    return calls
+
+
 def execute_selected_tools(tool_names: list[str], context: AssistantToolContext | None = None) -> list[dict[str, Any]]:
+    return execute_tool_calls([{"name": name, "input": {}} for name in tool_names], context)
+
+
+def execute_tool_calls(tool_calls: list[dict[str, Any]], context: AssistantToolContext | None = None) -> list[dict[str, Any]]:
     context = context or AssistantToolContext()
     results = []
-    for name in tool_names[:MAX_TOOL_CALLS]:
+    for call in tool_calls[:MAX_TOOL_CALLS]:
+        name = str(call.get("name") or "")
+        input_data = call.get("input") or {}
         tool = TOOL_REGISTRY.get(name)
         if not tool:
             results.append({"tool": name, "success": False, "error": {"code": "UNAVAILABLE", "message": "Tool is not registered."}})
             continue
+        if tool.access != "read" and not WRITE_TOOLS_ENABLED:
+            results.append({"tool": name, "success": False, "error": {"code": "WRITE_DISABLED", "message": "Write tools are disabled."}})
+            continue
         try:
-            results.append({"tool": name, "success": True, "result": tool.execute(context, {})})
+            results.append({"tool": name, "access": tool.access, "success": True, "result": tool.execute(context, input_data)})
         except Exception:
-            results.append({"tool": name, "success": False, "error": {"code": "UNAVAILABLE", "message": "Jarvis could not load that read-only tool right now."}})
+            results.append({"tool": name, "access": tool.access, "success": False, "error": {"code": "UNAVAILABLE", "message": "Jarvis could not complete that approved tool right now."}})
     return results
 
 
@@ -138,6 +259,26 @@ def get_today_schedule_tool(context: AssistantToolContext, _input: dict[str, Any
                 "location": event.get("location"),
             }
             for event in events[:8]
+        ],
+    }
+
+
+def get_schedule_for_date_tool(context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
+    offset = int(input_data.get("date_offset") or 0)
+    label = str(input_data.get("label") or "that day")
+    target_date = datetime.now(LOCAL_TZ).date() + timedelta(days=offset)
+    events = get_calendar_events_for_date(target_date)
+    return {
+        "date": target_date.isoformat(),
+        "label": label,
+        "events": [
+            {
+                "title": event.get("summary"),
+                "start": event.get("start"),
+                "end": event.get("end"),
+                "location": event.get("location"),
+            }
+            for event in events[:10]
         ],
     }
 
@@ -240,14 +381,549 @@ def get_recent_health_summary_tool(context: AssistantToolContext, _input: dict[s
     }
 
 
+def log_goal_progress_tool(context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
+    goal_query = str(input_data.get("goal_query") or "").strip()
+    goal = find_best_goal(context.user_id, goal_query)
+    if not goal:
+        return {"updated": False, "reason": "No matching goal found.", "goal_query": goal_query}
+
+    today = datetime.now(LOCAL_TZ).date().isoformat()
+    payload = GoalLogCreate(
+        value=float(input_data.get("value") or 1),
+        notes=str(input_data.get("notes") or f"Logged from Chloe: {goal_query}").strip(),
+        log_type=str(input_data.get("log_type") or "progress"),
+        planned_for=str(input_data.get("planned_for") or today),
+        metadata={
+            "source": "chloe",
+            "session_id": context.session_id,
+            "request_id": context.request_id,
+            "goal_query": goal_query,
+        },
+    )
+    result = create_goal_log(goal["id"], payload)
+    updated_goal = (result or {}).get("goal") or get_goal(goal["id"])
+    return {
+        "updated": bool(result),
+        "goal": summarize_goal(updated_goal or goal),
+        "log": summarize_goal_log((result or {}).get("log")),
+    }
+
+
+def add_shopping_item_tool(context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
+    item_name = clean_sentence(str(input_data.get("item_name") or ""))
+    if not item_name:
+        return {"updated": False, "reason": "No item name supplied."}
+    shopping_list = find_default_shopping_list(context.user_id)
+    if not shopping_list:
+        return {"updated": False, "reason": "No shopping list found."}
+    item = add_shopping_list_item(
+        ShoppingListItemCreate(
+            shopping_list_id=shopping_list["id"],
+            item_name=item_name,
+            quantity=input_data.get("quantity"),
+            category=input_data.get("category"),
+            source="chloe",
+        )
+    )
+    return {"updated": True, "shopping_list": {"id": shopping_list.get("id"), "title": shopping_list.get("title")}, "item": summarize_shopping_item(item)}
+
+
+def check_shopping_item_tool(context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
+    item_query = clean_sentence(str(input_data.get("item_query") or ""))
+    shopping_list = find_default_shopping_list(context.user_id)
+    if not shopping_list:
+        return {"updated": False, "reason": "No shopping list found."}
+    item = find_best_shopping_item(shopping_list, item_query)
+    if not item:
+        return {"updated": False, "reason": "No matching shopping item found.", "item_query": item_query}
+    updated = update_shopping_list_item(item["id"], ShoppingListItemUpdate(is_checked=True))
+    return {"updated": bool(updated), "shopping_list": {"id": shopping_list.get("id"), "title": shopping_list.get("title")}, "item": summarize_shopping_item(updated or item)}
+
+
+def log_health_event_tool(context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
+    event_type = clean_sentence(str(input_data.get("event_type") or ""))
+    if not event_type:
+        return {
+            "updated": False,
+            "needs_input": True,
+            "question": "What symptom should I log, and how severe is it if you want that included?",
+        }
+    event = create_health_event(
+        HealthEventCreate(
+            user_id=context.user_id,
+            event_type=event_type,
+            severity=input_data.get("severity"),
+            notes=str(input_data.get("notes") or "").strip() or None,
+            context={"source": "chloe", "request_id": context.request_id},
+        )
+    )
+    return {"updated": True, "event": {"id": event.get("id"), "event_type": event.get("event_type"), "event_date": event.get("event_date"), "notes": event.get("notes")}}
+
+
+def upsert_health_checkin_tool(context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
+    today = datetime.now(LOCAL_TZ).date().isoformat()
+    payload = HealthDailyCheckinUpsert(
+        user_id=context.user_id,
+        checkin_date=str(input_data.get("checkin_date") or today),
+        water_oz=input_data.get("water_oz"),
+        caffeine_mg=input_data.get("caffeine_mg"),
+        notes=input_data.get("notes"),
+        source_data={"source": "chloe", "request_id": context.request_id},
+    )
+    checkin = upsert_daily_checkin(payload)
+    return {"updated": True, "checkin": {"id": checkin.get("id"), "checkin_date": checkin.get("checkin_date"), "water_oz": checkin.get("water_oz"), "caffeine_mg": checkin.get("caffeine_mg")}}
+
+
+def complete_daily_checkin_tool(context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
+    allowed_fields = {
+        "energy",
+        "mood",
+        "stress",
+        "sleep_quality",
+        "hours_slept",
+        "water_oz",
+        "caffeine_mg",
+        "workout_completed",
+        "meals_completed",
+        "notes",
+    }
+    supplied = {key: value for key, value in input_data.items() if key in allowed_fields and value is not None}
+    if not supplied:
+        return {
+            "updated": False,
+            "needs_input": True,
+            "question": "Give me any check-in fields you want saved: energy, mood, stress, sleep quality, hours slept, water ounces, caffeine mg, workout completed, meals completed, and notes.",
+        }
+    today = datetime.now(LOCAL_TZ).date().isoformat()
+    payload = HealthDailyCheckinUpsert(
+        user_id=context.user_id,
+        checkin_date=str(input_data.get("checkin_date") or today),
+        energy=input_data.get("energy"),
+        mood=input_data.get("mood"),
+        stress=input_data.get("stress"),
+        sleep_quality=input_data.get("sleep_quality"),
+        hours_slept=input_data.get("hours_slept"),
+        water_oz=input_data.get("water_oz"),
+        caffeine_mg=input_data.get("caffeine_mg"),
+        workout_completed=input_data.get("workout_completed"),
+        meals_completed=input_data.get("meals_completed"),
+        notes=input_data.get("notes"),
+        source_data={"source": "chloe", "request_id": context.request_id},
+    )
+    checkin = upsert_daily_checkin(payload)
+    return {"updated": True, "checkin": summarize_checkin(checkin)}
+
+
+def create_goal_tool(context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
+    title = clean_sentence(str(input_data.get("title") or ""))
+    category = clean_sentence(str(input_data.get("category") or ""))
+    goal_type = clean_sentence(str(input_data.get("goal_type") or ""))
+    missing = []
+    if not title:
+        missing.append("title")
+    if not category:
+        missing.append("category")
+    if not goal_type:
+        missing.append("goal type")
+    if missing:
+        return {
+            "updated": False,
+            "needs_input": True,
+            "question": "I can create that goal. Tell me the title, category, goal type, target value if it has one, unit, and frequency if it repeats.",
+            "missing": missing,
+        }
+    goal = create_goal(
+        GoalCreate(
+            user_id=context.user_id,
+            title=title,
+            description=input_data.get("description"),
+            category=category,
+            goal_type=goal_type,
+            target_value=input_data.get("target_value"),
+            unit=input_data.get("unit"),
+            frequency=input_data.get("frequency"),
+            mission_type=input_data.get("mission_type") or infer_mission_type(goal_type, input_data.get("frequency")),
+            metadata={"source": "chloe", "request_id": context.request_id},
+        )
+    )
+    return {"updated": True, "goal": summarize_goal(goal)}
+
+
+def complete_meal_tool(context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
+    meal_type = normalize_meal_type(str(input_data.get("meal_type") or ""))
+    if not meal_type:
+        return {"updated": False, "needs_input": True, "question": "Which meal should I log: breakfast, lunch, dinner, or snack?"}
+    today = datetime.now(LOCAL_TZ).date().isoformat()
+    meals = list_meal_plan_entries(context.user_id, today, today)
+    candidates = [meal for meal in meals if normalize_meal_type(str(meal.get("meal_type") or "")) == meal_type]
+    if not candidates:
+        return {"updated": False, "reason": f"I could not find a planned {meal_type} for today."}
+    meal = candidates[0]
+    meta = meal_meta(meal)
+    if meta.get("completed"):
+        return {"updated": True, "already_done": True, "meal": summarize_meal(meal)}
+    meta.update({"completed": True, "completed_at": datetime.now(LOCAL_TZ).isoformat(), "completed_by": "chloe"})
+    updated = update_meal_plan_entry(meal["id"], MealPlanEntryUpdate(notes=build_meal_notes(meta)))
+    return {"updated": bool(updated), "meal": summarize_meal(updated or meal)}
+
+
+def log_caffeine_drink_tool(context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
+    drink = str(input_data.get("drink") or "Red Bull")
+    size_oz = input_data.get("size_oz")
+    if size_oz is None:
+        return {"updated": False, "needs_input": True, "question": f"What size was the {drink}? For Red Bull, 8.4 oz, 12 oz, 16 oz, or 20 oz works."}
+    nutrition = red_bull_nutrition(float(size_oz))
+    today = datetime.now(LOCAL_TZ).date().isoformat()
+    checkin = upsert_daily_checkin(
+        HealthDailyCheckinUpsert(
+            user_id=context.user_id,
+            checkin_date=today,
+            caffeine_mg=nutrition["caffeine_mg"],
+            notes=f"Logged {nutrition['label']}.",
+            source_data={
+                "source": "chloe",
+                "caffeine_items": [{"name": nutrition["label"], "size_oz": nutrition["size_oz"]}],
+                "caffeine_nutrition": {"calories": nutrition["calories"], "protein_g": 0, "carbs_g": nutrition["carbs_g"], "fat_g": 0},
+            },
+        )
+    )
+    create_meal_plan_entry(
+        MealPlanEntryCreate(
+            user_id=context.user_id,
+            meal_date=today,
+            meal_type="snack",
+            custom_meal_name=nutrition["label"],
+            notes=build_meal_notes({
+                "source": "caffeine",
+                "note": "Logged by Chloe.",
+                "calories": nutrition["calories"],
+                "protein_g": 0,
+                "carbs_g": nutrition["carbs_g"],
+                "fat_g": 0,
+                "caffeine_mg": nutrition["caffeine_mg"],
+                "completed": True,
+                "completed_at": datetime.now(LOCAL_TZ).isoformat(),
+                "servings": 1,
+            }),
+        )
+    )
+    return {"updated": True, "drink": nutrition, "checkin": summarize_checkin(checkin)}
+
+
+def complete_forge_project_tool(context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
+    project_query = clean_sentence(str(input_data.get("project_query") or ""))
+    project = find_best_forge_project(context.user_id, project_query)
+    if not project:
+        return {"updated": False, "reason": "No matching Forge project found.", "project_query": project_query}
+    updated = update_forge_project(project["id"], ForgeProjectUpdate(status="Archived", progress_percent=100))
+    return {"updated": bool(updated), "project": summarize_forge_project(updated or project)}
+
+
+def complete_forge_task_tool(context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
+    task_query = clean_sentence(str(input_data.get("task_query") or ""))
+    task = find_best_forge_task(context.user_id, task_query)
+    if not task:
+        return {"updated": False, "reason": "No matching Forge task found.", "task_query": task_query}
+    updated = update_forge_task(task["id"], ForgeTaskUpdate(status="Done", completed_at=datetime.now(LOCAL_TZ).isoformat()))
+    return {"updated": bool(updated), "task": summarize_forge_task(updated or task)}
+
+
+def capture_forge_spark_tool(context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
+    spark_text = clean_sentence(str(input_data.get("spark_text") or ""))
+    if not spark_text:
+        return {"updated": False, "reason": "No spark text supplied."}
+    spark = create_forge_spark(ForgeSparkCreate(user_id=context.user_id, spark_text=spark_text, category=input_data.get("category"), tags=["chloe"]))
+    return {"updated": True, "spark": {"id": spark.get("id"), "spark_text": spark.get("spark_text"), "category": spark.get("category")}}
+
+
+def find_best_goal(user_id: str, query: str) -> dict | None:
+    goals = list_goals(user_id, active_only=True)
+    normalized_query = query.strip().lower()
+    if normalized_query in {"date", "dating"}:
+        date_goal = best_match(goals, "date", ["title"])
+        if date_goal:
+            return date_goal
+    return best_match(goals, query, ["title", "category", "description"])
+
+
+def find_best_forge_project(user_id: str, query: str) -> dict | None:
+    return best_match(list_forge_projects(user_id), query, ["title", "category", "summary", "next_milestone"])
+
+
+def find_best_forge_task(user_id: str, query: str) -> dict | None:
+    tasks = [task for task in list_forge_tasks(user_id) if str(task.get("status") or "").lower() not in {"done", "complete", "completed"}]
+    return best_match(tasks, query, ["title", "description", "milestone_group"])
+
+
+def find_default_shopping_list(user_id: str) -> dict | None:
+    lists = list_shopping_lists(user_id)
+    if not lists:
+        return None
+    preferred = next((row for row in lists if "week of" in str(row.get("title") or "").lower()), lists[0])
+    return get_shopping_list(preferred["id"]) or preferred
+
+
+def find_best_shopping_item(shopping_list: dict, query: str) -> dict | None:
+    items = shopping_list.get("items") or []
+    return best_match(items, query, ["item_name", "category"])
+
+
+def meal_meta(entry: dict) -> dict[str, Any]:
+    notes = entry.get("notes") or ""
+    if isinstance(notes, str) and notes.startswith("JARVIS_META:"):
+        try:
+            import json
+
+            return json.loads(notes.replace("JARVIS_META:", "", 1))
+        except Exception:
+            return {}
+    return {
+        "source": "recipe" if entry.get("recipe_id") else "custom",
+        "note": notes or None,
+        "completed": False,
+        "completed_at": None,
+        "servings": 1,
+    }
+
+
+def build_meal_notes(meta: dict[str, Any]) -> str:
+    import json
+
+    return f"JARVIS_META:{json.dumps(meta)}"
+
+
+def normalize_meal_type(value: str) -> str:
+    text = value.strip().lower()
+    if text in {"breakfast", "lunch", "dinner"}:
+        return text
+    if text.startswith("snack"):
+        return "snack"
+    return ""
+
+
+def summarize_meal(meal: dict | None) -> dict | None:
+    if not meal:
+        return None
+    meta = meal_meta(meal)
+    return {
+        "id": meal.get("id"),
+        "meal_date": meal.get("meal_date"),
+        "meal_type": meal.get("meal_type"),
+        "name": meal.get("custom_meal_name") or (meal.get("recipes") or {}).get("title"),
+        "completed": bool(meta.get("completed")),
+    }
+
+
+def summarize_checkin(checkin: dict | None) -> dict | None:
+    if not checkin:
+        return None
+    return {
+        "id": checkin.get("id"),
+        "checkin_date": checkin.get("checkin_date"),
+        "energy": checkin.get("energy"),
+        "mood": checkin.get("mood"),
+        "stress": checkin.get("stress"),
+        "sleep_quality": checkin.get("sleep_quality"),
+        "hours_slept": checkin.get("hours_slept"),
+        "water_oz": checkin.get("water_oz"),
+        "caffeine_mg": checkin.get("caffeine_mg"),
+        "workout_completed": checkin.get("workout_completed"),
+        "meals_completed": checkin.get("meals_completed"),
+    }
+
+
+def parse_checkin_fields(text: str) -> dict[str, Any]:
+    fields: dict[str, Any] = {}
+    patterns = {
+        "energy": r"\benergy\s*(?:is|was|:)?\s*(\d{1,2})\b",
+        "mood": r"\bmood\s*(?:is|was|:)?\s*(\d{1,2})\b",
+        "stress": r"\bstress\s*(?:is|was|:)?\s*(\d{1,2})\b",
+        "sleep_quality": r"\bsleep quality\s*(?:is|was|:)?\s*(\d{1,2})\b",
+        "hours_slept": r"\b(?:slept|sleep)\s*(?:for)?\s*(\d+(?:\.\d+)?)\s*(?:hours|hrs|hr)\b",
+        "water_oz": r"\bwater\s*(?:is|was|:)?\s*(\d+(?:\.\d+)?)\s*(?:oz|ounces)?\b",
+        "caffeine_mg": r"\bcaffeine\s*(?:is|was|:)?\s*(\d+(?:\.\d+)?)\s*(?:mg)?\b",
+        "meals_completed": r"\b(?:meals completed|ate)\s*(?:is|was|:)?\s*(\d{1,2})\b",
+    }
+    for key, pattern in patterns.items():
+        match = re.search(pattern, text)
+        if match:
+            value = float(match.group(1))
+            fields[key] = int(value) if value.is_integer() else value
+    if "workout" in text:
+        if any(word in text for word in ["yes", "done", "completed", "did"]):
+            fields["workout_completed"] = True
+        elif any(word in text for word in ["no", "missed", "skipped"]):
+            fields["workout_completed"] = False
+    return fields
+
+
+def parse_goal_create_fields(text: str) -> dict[str, Any]:
+    fields: dict[str, Any] = {}
+    title_match = re.search(r"(?:called|named|title)\s+['\"]?([^,'\".]+)", text, re.IGNORECASE)
+    category_match = re.search(r"\bcategory\s+['\"]?([a-zA-Z ]+?)(?:,|\.|\s+type|\s+target|\s+frequency|$)", text, re.IGNORECASE)
+    type_match = re.search(r"\b(?:type|goal type)\s+([a-zA-Z_]+)", text, re.IGNORECASE)
+    target_match = re.search(r"\btarget\s+(\d+(?:\.\d+)?)", text, re.IGNORECASE)
+    unit_match = re.search(r"\bunit\s+([a-zA-Z]+)", text, re.IGNORECASE)
+    frequency_match = re.search(r"\b(daily|weekly|monthly)\b", text, re.IGNORECASE)
+    if title_match:
+        fields["title"] = clean_sentence(title_match.group(1))
+    if category_match:
+        fields["category"] = clean_sentence(category_match.group(1))
+    if type_match:
+        fields["goal_type"] = clean_sentence(type_match.group(1)).lower()
+    if target_match:
+        fields["target_value"] = float(target_match.group(1))
+    if unit_match:
+        fields["unit"] = clean_sentence(unit_match.group(1))
+    if frequency_match:
+        fields["frequency"] = frequency_match.group(1).lower()
+    return fields
+
+
+def parse_caffeine_drink_fields(text: str, drink: str) -> dict[str, Any]:
+    fields: dict[str, Any] = {"drink": drink}
+    size_match = re.search(r"\b(8\.4|12|16|20)\s*(?:oz|ounce|ounces)?\b", text)
+    if size_match:
+        fields["size_oz"] = float(size_match.group(1))
+    return fields
+
+
+def red_bull_nutrition(size_oz: float) -> dict[str, Any]:
+    known = {
+        8.4: {"caffeine_mg": 80, "calories": 110, "carbs_g": 28},
+        12.0: {"caffeine_mg": 114, "calories": 160, "carbs_g": 39},
+        16.0: {"caffeine_mg": 151, "calories": 220, "carbs_g": 54},
+        20.0: {"caffeine_mg": 189, "calories": 270, "carbs_g": 66},
+    }
+    closest = min(known, key=lambda item: abs(item - size_oz))
+    values = known[closest]
+    return {"label": f"{closest:g} oz Red Bull", "size_oz": closest, **values}
+
+
+def infer_mission_type(goal_type: str | None, frequency: str | None) -> str:
+    if frequency:
+        return "standard"
+    if (goal_type or "").lower() in {"habit", "count", "binary"}:
+        return "standard"
+    return "objective"
+
+
+def best_match(rows: list[dict], query: str, fields: list[str]) -> dict | None:
+    query_tokens = tokenize(query)
+    if not query_tokens:
+        return None
+    best_row = None
+    best_score = 0
+    for row in rows:
+        score = 0
+        for index, field in enumerate(fields):
+            field_value = str(row.get(field) or "").lower()
+            field_tokens = tokenize(field_value)
+            weight = max(1, len(fields) - index)
+            score += len(query_tokens & field_tokens) * weight
+            if query_tokens and query_tokens <= field_tokens:
+                score += weight
+        if score > best_score:
+            best_score = score
+            best_row = row
+    return best_row if best_score > 0 else None
+
+
+def infer_health_event_type(text: str) -> str | None:
+    event_keywords = {
+        "headache": "headache",
+        "brain fog": "brain_fog",
+        "foggy": "brain_fog",
+        "forgot": "forgetfulness",
+        "forgetfulness": "forgetfulness",
+        "lightheaded": "lightheaded",
+        "dizzy": "lightheaded",
+        "heart flutter": "heart_flutter",
+        "flutter": "heart_flutter",
+        "diarrhea": "diarrhea",
+        "deep breath": "deep_breath_awareness",
+    }
+    if not any(prefix in text for prefix in ["log", "record", "had", "have", "having", "felt", "feeling"]):
+        return None
+    for keyword, event_type in event_keywords.items():
+        if keyword in text:
+            return event_type
+    return None
+
+
+def clean_sentence(value: str) -> str:
+    return re.sub(r"\s+", " ", value.strip(" .!?;:\"'")).strip()
+
+
+def clean_title_case(value: str) -> str:
+    cleaned = clean_sentence(value)
+    return " ".join(part.capitalize() for part in cleaned.split())
+
+
+def tokenize(value: str) -> set[str]:
+    stop_words = {"a", "an", "and", "as", "for", "i", "my", "of", "on", "the", "to", "with"}
+    return {token for token in re.findall(r"[a-z0-9]+", value.lower()) if token not in stop_words}
+
+
+def summarize_goal(goal: dict | None) -> dict | None:
+    if not goal:
+        return None
+    return {
+        "id": goal.get("id"),
+        "title": goal.get("title"),
+        "status": goal.get("status"),
+        "current_value": goal.get("current_value"),
+        "target_value": goal.get("target_value"),
+        "progress": goal.get("progress"),
+        "standard": goal.get("standard"),
+    }
+
+
+def summarize_goal_log(log: dict | None) -> dict | None:
+    if not log:
+        return None
+    return {"id": log.get("id"), "value": log.get("value"), "log_type": log.get("log_type"), "notes": log.get("notes"), "planned_for": log.get("planned_for")}
+
+
+def summarize_shopping_item(item: dict | None) -> dict | None:
+    if not item:
+        return None
+    return {"id": item.get("id"), "name": item.get("item_name"), "quantity": item.get("quantity"), "category": item.get("category"), "checked": item.get("is_checked")}
+
+
+def summarize_forge_project(project: dict | None) -> dict | None:
+    if not project:
+        return None
+    return {"id": project.get("id"), "title": project.get("title"), "status": project.get("status"), "progress_percent": project.get("progress_percent")}
+
+
+def summarize_forge_task(task: dict | None) -> dict | None:
+    if not task:
+        return None
+    return {"id": task.get("id"), "title": task.get("title"), "status": task.get("status"), "completed_at": task.get("completed_at")}
+
+
 TOOL_REGISTRY: dict[str, AssistantToolDefinition] = {
     "get_morning_brief": AssistantToolDefinition("get_morning_brief", "Get today's sanitized morning brief.", 1, "read", False, get_morning_brief_tool),
     "get_daily_debrief": AssistantToolDefinition("get_daily_debrief", "Get today's sanitized daily debrief summary.", 1, "read", False, get_daily_debrief_tool),
     "get_today_schedule": AssistantToolDefinition("get_today_schedule", "Get today's calendar schedule.", 1, "read", False, get_today_schedule_tool),
+    "get_schedule_for_date": AssistantToolDefinition("get_schedule_for_date", "Get calendar schedule for a requested date offset.", 1, "read", False, get_schedule_for_date_tool),
     "list_active_goals": AssistantToolDefinition("list_active_goals", "List active Jarvis goals.", 1, "read", False, list_active_goals_tool),
     "get_goal": AssistantToolDefinition("get_goal", "Get one goal by server-approved ID.", 1, "read", False, get_goal_tool),
     "list_shopping_items": AssistantToolDefinition("list_shopping_items", "List current shopping list items.", 1, "read", False, list_shopping_items_tool),
     "list_active_forge_projects": AssistantToolDefinition("list_active_forge_projects", "List active Forge projects.", 1, "read", False, list_active_forge_projects_tool),
     "get_today_workout": AssistantToolDefinition("get_today_workout", "Get today's workout and next workout context.", 1, "read", False, get_today_workout_tool),
     "get_recent_health_summary": AssistantToolDefinition("get_recent_health_summary", "Get recent health dashboard summary.", 1, "read", False, get_recent_health_summary_tool),
+    "log_goal_progress": AssistantToolDefinition("log_goal_progress", "Log progress against the best matching active goal.", 2, "write", False, log_goal_progress_tool),
+    "add_shopping_item": AssistantToolDefinition("add_shopping_item", "Add an item to the current shopping list.", 2, "write", False, add_shopping_item_tool),
+    "check_shopping_item": AssistantToolDefinition("check_shopping_item", "Check off an item on the current shopping list.", 2, "write", False, check_shopping_item_tool),
+    "log_health_event": AssistantToolDefinition("log_health_event", "Log a health symptom/event.", 2, "write", False, log_health_event_tool),
+    "upsert_health_checkin": AssistantToolDefinition("upsert_health_checkin", "Update today's health check-in values.", 2, "write", False, upsert_health_checkin_tool),
+    "complete_daily_checkin": AssistantToolDefinition("complete_daily_checkin", "Complete or update today's daily health check-in.", 2, "write", False, complete_daily_checkin_tool),
+    "create_goal": AssistantToolDefinition("create_goal", "Create a new Jarvis goal from supplied fields.", 2, "write", False, create_goal_tool),
+    "complete_meal": AssistantToolDefinition("complete_meal", "Mark a planned meal eaten.", 2, "write", False, complete_meal_tool),
+    "log_caffeine_drink": AssistantToolDefinition("log_caffeine_drink", "Log a caffeine drink with nutrition context.", 2, "write", False, log_caffeine_drink_tool),
+    "complete_forge_project": AssistantToolDefinition("complete_forge_project", "Archive/complete a matching Forge project.", 3, "write", False, complete_forge_project_tool),
+    "complete_forge_task": AssistantToolDefinition("complete_forge_task", "Mark a matching Forge task complete.", 2, "write", False, complete_forge_task_tool),
+    "capture_forge_spark": AssistantToolDefinition("capture_forge_spark", "Capture a Forge spark/idea.", 2, "write", False, capture_forge_spark_tool),
 }

@@ -5,6 +5,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bot,
   Clipboard,
+  Mic,
+  MicOff,
   Pause,
   Play,
   RotateCcw,
@@ -45,6 +47,39 @@ type AssistantStatus = {
   tools?: { readToolsEnabled: boolean; writeToolsEnabled: boolean; confirmationToolsEnabled: boolean; tools?: Array<{ name: string }> };
 };
 
+type SpeechRecognitionResultLike = {
+  isFinal: boolean;
+  0: { transcript: string };
+};
+
+type SpeechRecognitionEventLike = {
+  resultIndex: number;
+  results: {
+    length: number;
+    [index: number]: SpeechRecognitionResultLike;
+  };
+};
+
+type SpeechRecognitionErrorLike = {
+  error?: string;
+};
+
+type SpeechRecognitionLike = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onend: (() => void) | null;
+  onerror: ((event: SpeechRecognitionErrorLike) => void) | null;
+  onaudiostart?: (() => void) | null;
+  onspeechstart?: (() => void) | null;
+};
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+
 const VOICES: Array<{ id: VoiceId; label: string }> = [
   { id: "af_bella", label: "Bella" },
   { id: "af_nicole", label: "Nicole" },
@@ -68,9 +103,16 @@ export default function ChloePage() {
   const [activeReadout, setActiveReadout] = useState<ReadoutKind | null>(null);
   const [activeAudioId, setActiveAudioId] = useState<string | null>(null);
   const [isPaused, setIsPaused] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(() => Boolean(getSpeechRecognitionConstructor()));
+  const [isListening, setIsListening] = useState(false);
+  const [voiceTranscript, setVoiceTranscript] = useState("");
+  const [voiceHint, setVoiceHint] = useState("");
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrls = useRef(new Map<string, string>());
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const voiceTranscriptRef = useRef("");
+  const speechStopTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     window.localStorage.setItem(HISTORY_KEY, JSON.stringify(messages.slice(-40)));
@@ -93,6 +135,13 @@ export default function ChloePage() {
     loadStatus();
     const timer = window.setInterval(loadStatus, 30_000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      recognitionRef.current?.abort();
+      clearSpeechStopTimer();
+    };
   }, []);
 
   useEffect(() => () => {
@@ -139,8 +188,8 @@ export default function ChloePage() {
     return data.message.content as string;
   }
 
-  async function sendMessage() {
-    const content = input.trim();
+  async function sendMessage(contentOverride?: string) {
+    const content = (contentOverride ?? input).trim();
     if (!content || status === "Thinking") return;
     setInput("");
     setError("");
@@ -265,6 +314,102 @@ export default function ChloePage() {
     }
   }
 
+  function toggleListening() {
+    if (!speechSupported || status === "Thinking") return;
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+      setVoiceHint(voiceTranscriptRef.current ? "Sending what I heard..." : "Stopped. I did not catch words yet.");
+      return;
+    }
+    const Recognition = getSpeechRecognitionConstructor();
+    if (!Recognition) {
+      setSpeechSupported(false);
+      setError("Voice input is not available in this browser.");
+      return;
+    }
+    stopAudio(false);
+    clearSpeechStopTimer();
+    setVoiceTranscript("");
+    setVoiceHint("Listening through Chrome...");
+    voiceTranscriptRef.current = "";
+    const recognition = new Recognition();
+    recognitionRef.current = recognition;
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+    let finalTranscript = "";
+    let latestInterimTranscript = "";
+    recognition.onaudiostart = () => setVoiceHint("Mic is open. Start talking.");
+    recognition.onspeechstart = () => setVoiceHint("I hear you...");
+    recognition.onresult = (event) => {
+      let interimTranscript = "";
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const result = event.results[index];
+        if (result.isFinal) {
+          finalTranscript += result[0].transcript;
+        } else {
+          interimTranscript += result[0].transcript;
+        }
+      }
+      latestInterimTranscript = interimTranscript;
+      const heardText = `${finalTranscript} ${latestInterimTranscript}`.trim();
+      voiceTranscriptRef.current = heardText;
+      setVoiceTranscript(heardText);
+      setInput(heardText);
+      setVoiceHint("Heard that. Pause or tap Listening to send.");
+      scheduleSpeechStop(recognition);
+    };
+    recognition.onerror = (event) => {
+      setIsListening(false);
+      clearSpeechStopTimer();
+      if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+        setError("Chrome does not have microphone permission for Chloe. Allow the mic for this site, then try Talk again.");
+      } else if (event.error === "audio-capture") {
+        setError("Chrome cannot reach your microphone. Check that your AirPods are selected as the input device.");
+      } else if (event.error !== "no-speech") {
+        setError("I could not catch that. Try Talk again or type it in.");
+      }
+    };
+    recognition.onend = () => {
+      setIsListening(false);
+      clearSpeechStopTimer();
+      const spokenText = (finalTranscript || voiceTranscriptRef.current).trim();
+      if (spokenText) {
+        setVoiceHint("Sending what I heard...");
+        void sendMessage(spokenText).finally(() => {
+          setVoiceTranscript("");
+          setVoiceHint("");
+          voiceTranscriptRef.current = "";
+        });
+      } else {
+        setVoiceHint("I did not catch words. Check Chrome mic permission and AirPods input.");
+      }
+    };
+    setError("");
+    setIsListening(true);
+    try {
+      recognition.start();
+    } catch {
+      setIsListening(false);
+      setError("Voice input could not start. Refresh Chloe and try Talk again.");
+    }
+  }
+
+  function scheduleSpeechStop(recognition: SpeechRecognitionLike) {
+    clearSpeechStopTimer();
+    speechStopTimerRef.current = window.setTimeout(() => {
+      recognition.stop();
+    }, 1400);
+  }
+
+  function clearSpeechStopTimer() {
+    if (speechStopTimerRef.current !== null) {
+      window.clearTimeout(speechStopTimerRef.current);
+      speechStopTimerRef.current = null;
+    }
+  }
+
   async function previewVoice() {
     stopAudio();
     await speakMessage({ id: "preview", role: "assistant", content: "Good evening, John. Chloe is online." });
@@ -363,6 +508,15 @@ export default function ChloePage() {
         {error && <div className="chloe-error">{error}</div>}
 
         <footer className="composer">
+          {(isListening || voiceHint || voiceTranscript) && (
+            <div className={`voice-listener ${isListening ? "active" : ""}`}>
+              <div>
+                <Mic size={16} />
+                <span>{voiceHint || "Voice input ready."}</span>
+              </div>
+              {voiceTranscript && <strong>{voiceTranscript}</strong>}
+            </div>
+          )}
           <textarea
             value={input}
             onChange={(event) => setInput(event.target.value)}
@@ -377,9 +531,19 @@ export default function ChloePage() {
           <div className="composer-actions">
             <Link href="/" className="ghost-action">Command Center</Link>
             <button className="ghost-action" type="button" onClick={clearChat}><Trash2 size={16} /> New</button>
+            <button
+              className={`ghost-action ${isListening ? "listening" : ""}`}
+              type="button"
+              onClick={toggleListening}
+              disabled={!speechSupported || status === "Thinking"}
+              title={speechSupported ? "Talk to Chloe" : "Voice input is not available in this browser"}
+            >
+              {isListening ? <MicOff size={16} /> : <Mic size={16} />}
+              {isListening ? "Listening" : "Talk"}
+            </button>
             {activeAudioId && <button className="ghost-action" type="button" onClick={togglePause}>{isPaused ? <Play size={16} /> : <Pause size={16} />} Audio</button>}
             {activeAudioId && <button className="ghost-action" type="button" onClick={() => stopAudio()}><Square size={16} /> Stop</button>}
-            <button className="send-button" type="button" onClick={sendMessage} disabled={!input.trim() || status === "Thinking"}>
+            <button className="send-button" type="button" onClick={() => sendMessage()} disabled={!input.trim() || status === "Thinking"}>
               {status === "Thinking" ? <X size={18} /> : <Send size={18} />}
               {status === "Thinking" ? "Thinking" : "Send"}
             </button>
@@ -514,6 +678,7 @@ function ChloeStyles() {
       .segmented button { border: 0; border-radius: 8px; background: transparent; color: rgba(236,248,255,.68); padding: .52rem .74rem; font-weight: 800; }
       .segmented button.active { background: rgba(255,122,0,.18); color: #fff4e9; box-shadow: inset 0 0 12px rgba(255,122,0,.12); }
       .ghost-action, .icon-button { display: inline-flex; align-items: center; gap: .42rem; padding: .62rem .76rem; text-decoration: none; }
+      .ghost-action.listening { border-color: rgba(255,185,111,.78); background: rgba(255,122,0,.22); box-shadow: 0 0 20px rgba(255,122,0,.24), inset 0 0 14px rgba(255,122,0,.12); }
       .ghost-action:hover:not(:disabled), .icon-button:hover, .send-button:hover:not(:disabled), .message-actions button:hover { transform: translateY(-2px); border-color: rgba(255,185,111,.62); background: rgba(25,12,0,.72); box-shadow: 0 0 18px rgba(255,122,0,.2); }
       .ghost-action:disabled { opacity: .45; cursor: not-allowed; }
       .conversation { min-height: 0; overflow-y: auto; display: grid; align-content: start; gap: .8rem; padding: .4rem .25rem; }
@@ -529,6 +694,10 @@ function ChloeStyles() {
       .message-actions button { display: inline-flex; align-items: center; gap: .35rem; border: 1px solid rgba(98,201,255,.18); border-radius: 999px; background: rgba(0,0,0,.26); color: #dff8ff; padding: .38rem .55rem; }
       .chloe-error { border: 1px solid rgba(248,113,113,.34); border-radius: 10px; background: rgba(127,29,29,.2); color: #fecaca; padding: .7rem .8rem; }
       .composer { display: grid; gap: .75rem; border-top: 1px solid rgba(98,201,255,.16); padding-top: .85rem; }
+      .voice-listener { border: 1px solid rgba(98,201,255,.24); border-radius: 10px; background: rgba(0,13,24,.62); color: rgba(236,248,255,.78); padding: .68rem .78rem; display: grid; gap: .38rem; }
+      .voice-listener.active { border-color: rgba(255,185,111,.7); box-shadow: 0 0 18px rgba(255,122,0,.16), inset 0 0 14px rgba(8,191,255,.06); }
+      .voice-listener div { display: flex; align-items: center; gap: .45rem; color: #42d1ff; font-size: .72rem; font-weight: 900; letter-spacing: .1em; text-transform: uppercase; }
+      .voice-listener strong { color: #fff4e9; font-size: .94rem; line-height: 1.4; }
       .composer textarea { min-height: 6rem; resize: vertical; border: 1px solid rgba(98,201,255,.22); border-radius: 12px; background: rgba(0,0,0,.5); color: #ecf8ff; padding: .9rem; outline: none; box-shadow: inset 0 0 18px rgba(0,0,0,.5); }
       .composer textarea:focus { border-color: rgba(255,185,111,.62); box-shadow: 0 0 22px rgba(255,122,0,.14), inset 0 0 18px rgba(0,0,0,.5); }
       .composer-actions { justify-content: flex-end; }
@@ -538,4 +707,13 @@ function ChloeStyles() {
       @media (max-width: 780px) { .chloe-console { height: auto; min-height: calc(100vh - 2rem); } .message-bubble { max-width: 100%; } }
     `}</style>
   );
+}
+
+function getSpeechRecognitionConstructor(): SpeechRecognitionConstructor | null {
+  if (typeof window === "undefined") return null;
+  const speechWindow = window as typeof window & {
+    SpeechRecognition?: SpeechRecognitionConstructor;
+    webkitSpeechRecognition?: SpeechRecognitionConstructor;
+  };
+  return speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition || null;
 }

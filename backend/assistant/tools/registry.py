@@ -155,10 +155,11 @@ def is_live_commerce_request(text: str) -> bool:
 
 
 def extract_price_query(text: str) -> str:
-    cleaned = re.sub(r"(?i)\b(?:what(?:'s| is| are)?|how much(?: does| is| are)?|find|check|compare|show me|tell me)\b", " ", text)
+    cleaned = re.sub(r"(?i)\b(?:what(?:'s|s| is| are)?|how much(?: does| is| are)?|find|check|compare|show me|tell me)\b", " ", text)
     cleaned = re.sub(r"(?i)\b(?:current|live|nearby|local|prices?|cost|costs|availability|in stock|at stores?|near me|around me|please)\b", " ", cleaned)
-    cleaned = re.sub(r"(?i)\b(?:at|from|kroger|walmart|instacart)\b", " ", cleaned)
+    cleaned = re.sub(r"(?i)\b(?:the|at|from|of|for|kroger|walmart|instacart)\b", " ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" ?.,")
+    cleaned = re.sub(r"(?i)\bredbull\b", "Red Bull", cleaned)
     return cleaned or text.strip()
 
 

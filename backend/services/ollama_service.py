@@ -360,9 +360,11 @@ def build_live_price_reply(user_text: str, tool_results: list[dict]) -> str:
     offers = result.get("offers") or []
     if not item or not item.get("success") or not result.get("verified") or not offers:
         providers = result.get("providers") or []
+        configured = [provider.get("provider") for provider in providers if provider.get("configured") and not provider.get("error")]
         missing = [provider.get("provider") for provider in providers if not provider.get("configured")]
-        suffix = f" Missing provider credentials: {', '.join(filter(None, missing))}." if missing else ""
-        return "I don't have a verified live source for that price, so I won't guess." + suffix
+        checked = f" I checked {', '.join(filter(None, configured))}, but it returned no matching verified price." if configured else ""
+        optional = f" Other providers not configured: {', '.join(filter(None, missing))}." if missing else ""
+        return "I don't have a verified live source for that price, so I won't guess." + checked + optional
 
     lines = []
     for offer in offers[:5]:

@@ -17,6 +17,12 @@ class LivePriceGateTests(unittest.TestCase):
         calls = select_tools("What are Red Bull prices at Kroger near me?")
         self.assertEqual(calls[0]["input"]["query"], "Red Bull")
 
+    def test_exact_redbull_phrasings_normalize_for_kroger(self):
+        for prompt in ("whats the price of redbull at kroger?", "whats the price of redbull"):
+            with self.subTest(prompt=prompt):
+                calls = select_tools(prompt)
+                self.assertEqual(calls[0]["input"]["query"], "Red Bull")
+
     @patch.dict("os.environ", {}, clear=True)
     def test_no_credentials_means_no_verified_price(self):
         result = search_live_prices("Red Bull")

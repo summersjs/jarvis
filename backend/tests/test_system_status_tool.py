@@ -8,6 +8,7 @@ class SystemStatusToolTests(unittest.TestCase):
     def test_running_and_red_phrases_select_live_status(self):
         for prompt in [
             "Is everything running?",
+            "Are all systems up?",
             "Check the ping and tell me if anything is red",
             "What is the system status?",
         ]:

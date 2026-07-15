@@ -91,6 +91,10 @@ def select_read_tools(user_text: str) -> list[str]:
     status_phrases = [
         "everything running",
         "everything is running",
+        "all systems up",
+        "systems up",
+        "all systems running",
+        "systems running",
         "anything red",
         "system status",
         "systems status",

@@ -30,7 +30,7 @@ const MODE_KEY = "jarvis.assistant.outputMode";
 const VOICE_KEY = "jarvis.assistant.voice";
 const MODEL_KEY = "jarvis.assistant.model";
 const IDENTITY_VERSION_KEY = "jarvis.assistant.identityVersion";
-const IDENTITY_VERSION = "jarvis-2026-07-13-v3-execution-truth";
+const IDENTITY_VERSION = "jarvis-2026-07-15-v4-desktop-chat";
 const CONVERSATION_KEY = "jarvis.assistant.conversationId";
 const EXECUTION_TRUTH_MIGRATION_KEY = "jarvis.assistant.executionTruthMigration";
 const LEGACY_STORAGE_KEYS = {
@@ -150,8 +150,10 @@ export default function JarvisPage() {
     for (const key of Object.values(LEGACY_STORAGE_KEYS)) window.localStorage.removeItem(key);
     if (window.localStorage.getItem(EXECUTION_TRUTH_MIGRATION_KEY) !== IDENTITY_VERSION) {
       window.localStorage.removeItem(HISTORY_KEY);
+      window.localStorage.removeItem(MODEL_KEY);
       window.localStorage.setItem(EXECUTION_TRUTH_MIGRATION_KEY, IDENTITY_VERSION);
       setMessages([]);
+      setSelectedModel("");
     }
     window.localStorage.setItem(IDENTITY_VERSION_KEY, IDENTITY_VERSION);
     void window.jarvisDesktop?.getDesktopPreferences?.().then((preferences) => {

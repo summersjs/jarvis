@@ -166,6 +166,9 @@ def chat_with_jarvis(messages: list[dict], model: str | None = None, context: As
     action_reply = build_action_reply(tool_results, executions, context.request_id)
     if action_reply:
         return build_service_result(action_reply, selected_model, tool_results, executions, manifest, context, execution_trace, "tool_action")
+    status_reply = build_system_status_reply(tool_results)
+    if status_reply:
+        return build_service_result(status_reply, selected_model, tool_results, executions, manifest, context, execution_trace, "system_status")
 
     safe_messages = [
         {"role": "system", "content": JARVIS_SYSTEM_PROMPT},
@@ -321,6 +324,27 @@ def build_action_reply(tool_results: list[dict], executions: list, request_id: s
     if not lines:
         return ""
     return " ".join(lines)
+
+
+def build_system_status_reply(tool_results: list[dict]) -> str:
+    status_result = next((item for item in tool_results if item.get("tool") == "get_system_status"), None)
+    if not status_result:
+        return ""
+    if not status_result.get("success"):
+        return "I could not complete the live system checks. The status probe is red."
+
+    result = status_result.get("result") or {}
+    checks = result.get("checks") or []
+    red = result.get("red_checks") or []
+    if not red:
+        return f"I ran the live ping: all {len(checks)} checks are green."
+
+    details = []
+    for check in red:
+        label = check.get("label") or "Unknown service"
+        detail = check.get("detail") or "Offline"
+        details.append(f"{label}: {detail}")
+    return f"I ran the live ping. {len(red)} of {len(checks)} checks are red: " + "; ".join(details)
 
 
 def format_write_confirmation(tool_name: str | None, result: dict, request_id: str = "") -> str:

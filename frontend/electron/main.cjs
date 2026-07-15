@@ -79,7 +79,7 @@ async function startApplication() {
 
   logger("electron-startup", `mode=${config.isDevelopment ? "development" : "production"}`);
   logger("target-url", config.publicTargetUrl);
-  applyLaunchAtStartup(stateStore.get("launchAtStartup", false));
+  applyLaunchAtStartup(stateStore.get("launchAtStartup", true));
   registerIpcHandlers();
   session.defaultSession.setPermissionCheckHandler((_webContents, permission, requestingOrigin) => permission === "geolocation" && requestingOrigin === config.targetOrigin);
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback, details) => {
@@ -261,7 +261,7 @@ function createTray() {
 
 function rebuildTrayMenu() {
   if (!tray) return;
-  const launchAtStartup = stateStore.get("launchAtStartup", false);
+  const launchAtStartup = stateStore.get("launchAtStartup", true);
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: "Open Jarvis Dashboard", click: () => navigateTo(config.targetUrl) },
     { label: "Open Jarvis Assistant", click: openJarvisAssistant },
@@ -378,7 +378,7 @@ function registerIpcHandlers() {
     return online;
   });
   ipcMain.handle("desktop:open-logs", () => shell.showItemInFolder(logPath));
-  ipcMain.handle("desktop:get-launch-at-startup", () => Boolean(stateStore.get("launchAtStartup", false)));
+  ipcMain.handle("desktop:get-launch-at-startup", () => Boolean(stateStore.get("launchAtStartup", true)));
   ipcMain.handle("desktop:set-launch-at-startup", (_event, enabled) => setLaunchAtStartup(enabled));
   ipcMain.handle("desktop:get-system-stats", () => collectSystemStats());
   ipcMain.handle("jarvis:telemetry:getGpu", () => trackedCollector("gpu", () => gpuCollector.get()));

@@ -88,6 +88,18 @@ def select_read_tools(user_text: str) -> list[str]:
         return []
     text = user_text.lower()
     selected: list[str] = []
+    status_phrases = [
+        "everything running",
+        "everything is running",
+        "anything red",
+        "system status",
+        "systems status",
+        "health check",
+        "check the ping",
+        "check ping",
+    ]
+    if any(phrase in text for phrase in status_phrases):
+        selected.append("get_system_status")
     if "morning" in text and "brief" in text:
         selected.append("get_morning_brief")
     if "daily debrief" in text or "evening debrief" in text or ("debrief" in text and "daily" in text):
@@ -230,6 +242,23 @@ def get_morning_brief_tool(context: AssistantToolContext, _input: dict[str, Any]
         "training_max": data.get("training_max"),
         "business_status": data.get("business_status"),
         "journal_status": data.get("journal_status"),
+    }
+
+
+def get_system_status_tool(_context: AssistantToolContext, _input: dict[str, Any]) -> dict[str, Any]:
+    # Import here to keep status route initialization independent of the tool registry.
+    from backend.routes.status import get_status
+
+    status = get_status()
+    checks = status.get("checks") or []
+    red = [check for check in checks if check.get("state") == "offline"]
+    return {
+        "systems": status.get("systems"),
+        "checked_at": status.get("checked_at"),
+        "uptime_seconds": status.get("uptime_seconds"),
+        "all_green": not red,
+        "red_checks": red,
+        "checks": checks,
     }
 
 
@@ -913,6 +942,7 @@ def summarize_forge_task(task: dict | None) -> dict | None:
 
 
 TOOL_REGISTRY: dict[str, AssistantToolDefinition] = {
+    "get_system_status": AssistantToolDefinition("get_system_status", "Run the live Jarvis ping/health checks and report every red (offline) service.", 1, "read", False, get_system_status_tool),
     "get_morning_brief": AssistantToolDefinition("get_morning_brief", "Get today's sanitized morning brief.", 1, "read", False, get_morning_brief_tool),
     "get_daily_debrief": AssistantToolDefinition("get_daily_debrief", "Get today's sanitized daily debrief summary.", 1, "read", False, get_daily_debrief_tool),
     "get_today_schedule": AssistantToolDefinition("get_today_schedule", "Get today's calendar schedule.", 1, "read", False, get_today_schedule_tool),

@@ -70,13 +70,26 @@ def _calendar_credentials_check():
     return f"Google Calendar auth verified - {auth.get('calendar_summary', 'Primary calendar')}"
 
 
-def _ollama_check():
-    status = get_ollama_status()
+def _ollama_check(status=None):
+    status = status or get_ollama_status()
     if not status.get("online"):
         raise RuntimeError("Ollama is offline")
     if not status.get("modelAvailable"):
         raise RuntimeError(f"{status.get('model', 'Configured model')} is not installed")
-    return f"{status.get('model')} ready for Jarvis"
+    installed = status.get("installedModels") or status.get("models") or []
+    loaded = status.get("loadedModels") or []
+    active = status.get("activeModel") or status.get("configuredModel") or status.get("model")
+    runtime = "loaded" if loaded else "ready on demand"
+    return f"{active} {runtime} for Jarvis - {len(installed)} model{'s' if len(installed) != 1 else ''} installed"
+
+
+def _brain_summary(status):
+    if not status.get("online"):
+        return "Jarvis local LLM offline"
+    installed = status.get("installedModels") or status.get("models") or []
+    active = status.get("activeModel") or status.get("configuredModel") or status.get("model") or "Unknown model"
+    mode = "loaded" if status.get("loadedModels") else "default"
+    return f"Jarvis LLM online - {active} {mode} - {len(installed)} model{'s' if len(installed) != 1 else ''} installed"
 
 
 def _tts_check():
@@ -90,6 +103,7 @@ def _tts_check():
 @router.get("/status", dependencies=[Depends(verify_api_key)])
 def get_status():
     uptime_seconds = int((datetime.now(timezone.utc) - STARTED_AT).total_seconds())
+    ollama_status = get_ollama_status()
     checks = [
         _run_check("Local API", lambda: f"FastAPI online - uptime {uptime_seconds}s"),
         _run_check("Environment", _env_check),
@@ -103,7 +117,7 @@ def get_status():
         _run_check("Health Ops", _table_check("health_events")),
         _run_check("Food Vault", _table_check("food_vault_items")),
         _run_check("Shopping Lists", _table_check("shopping_lists")),
-        _run_check("Jarvis Local LLM", _ollama_check),
+        _run_check("Jarvis Local LLM", lambda: _ollama_check(ollama_status)),
         _run_check("Jarvis Voice TTS", _tts_check),
     ]
     offline_count = sum(1 for check in checks if check["state"] == "offline")
@@ -111,7 +125,8 @@ def get_status():
 
     return {
         "systems": overall,
-        "brain": "Jarvis local LLM wired - qwen3:8b",
+        "brain": _brain_summary(ollama_status),
+        "llm": ollama_status,
         "user": "John Summers Sr",
         "clearance": "Active",
         "checked_at": datetime.now(timezone.utc).isoformat(),

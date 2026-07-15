@@ -54,11 +54,21 @@ def _request_json(path: str, payload: dict | None = None, timeout: float = 8) ->
 def get_ollama_status() -> dict:
     try:
         tags = _request_json("/api/tags", timeout=3)
-        models = [item.get("name") for item in tags.get("models", [])]
+        models = [str(item.get("name")) for item in tags.get("models", []) if item.get("name")]
+        try:
+            running = _request_json("/api/ps", timeout=3)
+            loaded_models = [str(item.get("name")) for item in running.get("models", []) if item.get("name")]
+        except Exception:
+            loaded_models = []
+        active_model = loaded_models[0] if loaded_models else OLLAMA_MODEL
         return {
             "online": True,
             "modelAvailable": OLLAMA_MODEL in models,
             "model": OLLAMA_MODEL,
+            "configuredModel": OLLAMA_MODEL,
+            "activeModel": active_model,
+            "loadedModels": loaded_models,
+            "installedModels": models,
             "models": models,
         }
     except Exception:
@@ -66,6 +76,10 @@ def get_ollama_status() -> dict:
             "online": False,
             "modelAvailable": False,
             "model": OLLAMA_MODEL,
+            "configuredModel": OLLAMA_MODEL,
+            "activeModel": None,
+            "loadedModels": [],
+            "installedModels": [],
             "models": [],
         }
 

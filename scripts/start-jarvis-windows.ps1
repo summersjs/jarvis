@@ -26,9 +26,13 @@ Start-Process -FilePath $ollamaExe -ArgumentList "serve" -WindowStyle Hidden
 Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
     Where-Object { $_.CommandLine -match "uvicorn app:app" -and $_.CommandLine -match "8880" } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-Start-Process -FilePath $kokoroPython `
-    -ArgumentList "-m", "uvicorn", "app:app", "--host", $windowsHost, "--port", "8880" `
-    -WorkingDirectory $kokoroDirectory -WindowStyle Hidden
+if (Test-Path $kokoroPython) {
+    Start-Process -FilePath $kokoroPython `
+        -ArgumentList "-m", "uvicorn", "app:app", "--host", $windowsHost, "--port", "8880" `
+        -WorkingDirectory $kokoroDirectory -WindowStyle Hidden
+} else {
+    Write-Warning "Kokoro TTS environment is missing at $kokoroPython. Run the setup documented in services\kokoro-tts\README.md."
+}
 
 # User services supervise the Jarvis backend and frontend inside WSL.
 & wsl.exe -d $distro --exec systemctl --user start jarvis.target

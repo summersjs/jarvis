@@ -95,7 +95,7 @@ Do not put API keys, tokens, cookies, or credentials in these URLs. Query string
 - Use tray **Quit** to terminate Electron completely.
 - Alt+C creates or focuses exactly one compact Jarvis assistant window. The dashboard remains a separate window.
 - Closing the compact assistant hides it. Its bottom-right position, size, display, and optional always-on-top setting are remembered.
-- The tray's **Launch at startup** checkbox uses Electron's supported login-item API and defaults to off.
+- The tray's **Launch at startup** checkbox uses Electron's supported login-item API and defaults to on. Turning it off is remembered.
 - Window size, position, display, and fullscreen state are remembered and corrected if a monitor is removed.
 - External HTTP(S) and mail links open outside Electron. Untrusted navigation, popups, `file:`, `data:`, and `javascript:` navigation are blocked.
 

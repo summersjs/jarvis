@@ -73,6 +73,9 @@ def begin_calendar_oauth(return_origin: str | None = None) -> dict:
         "created_at": time.time(),
         "redirect_uri": redirect_uri,
         "return_origin": _allowed_return_origin(return_origin),
+        # google-auth-oauthlib enables PKCE for installed-app clients. The
+        # verifier must survive until the callback or Google rejects the code.
+        "code_verifier": flow.code_verifier or "",
     }
     return {
         "authorization_url": authorization_url,
@@ -88,6 +91,7 @@ def complete_calendar_oauth(state: str, code: str) -> dict:
 
     flow = InstalledAppFlow.from_client_secrets_file(str(CREDS_PATH), SCOPES, state=state)
     flow.redirect_uri = str(details["redirect_uri"])
+    flow.code_verifier = str(details.get("code_verifier") or "") or None
     flow.fetch_token(code=code)
     TOKEN_PATH.write_text(flow.credentials.to_json())
     TOKEN_PATH.chmod(0o600)

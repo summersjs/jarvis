@@ -207,6 +207,16 @@ type StatusResponse = {
   clearance: string;
   checked_at?: string;
   uptime_seconds?: number;
+  llm?: {
+    online: boolean;
+    modelAvailable: boolean;
+    model: string;
+    configuredModel?: string | null;
+    activeModel?: string | null;
+    loadedModels?: string[];
+    installedModels?: string[];
+    models?: string[];
+  };
   checks?: {
     label: string;
     state: "online" | "pending" | "offline";
@@ -1422,6 +1432,14 @@ function SystemStatusPanel({
   dashboard: DashboardResponse | null;
 }) {
   const realChecks = status.checks || [];
+  const llmCheck = realChecks.find((check) => check.label === "Jarvis Local LLM");
+  const llmOnline = status.llm?.online ?? llmCheck?.state === "online";
+  const installedModels = status.llm?.installedModels || status.llm?.models || [];
+  const loadedModels = status.llm?.loadedModels || [];
+  const activeModel = status.llm?.activeModel || status.llm?.configuredModel || status.llm?.model || "Unavailable";
+  const llmDetail = installedModels.length
+    ? `Installed: ${installedModels.join(" · ")}${loadedModels.length ? ` · Loaded: ${loadedModels.join(" · ")}` : " · Ready on demand"}`
+    : llmCheck?.detail || "No installed model information returned";
   const checkIcon = (label: string) => {
     const normalized = label.toLowerCase();
     if (normalized.includes("api")) return Server;
@@ -1434,14 +1452,15 @@ function SystemStatusPanel({
     if (normalized.includes("health")) return HeartPulse;
     if (normalized.includes("food")) return DatabaseZap;
     if (normalized.includes("shopping")) return ShoppingCart;
+    if (normalized.includes("llm") || normalized.includes("ollama")) return BrainCircuit;
     return Wifi;
   };
   const statusItems = realChecks.length
     ? [
         { label: "Systems", value: status.systems || "Online", Icon: Server, state: status.systems === "Online" ? "online" : "pending", detail: `${realChecks.filter((check) => check.state === "online").length}/${realChecks.length} checks online` },
-        { label: "LLM Layer", value: status.brain || "Pending", Icon: BrainCircuit, state: "pending", detail: "Kept planned for 07/20/2026" },
+        { label: "LLM Layer", value: activeModel, Icon: BrainCircuit, state: llmOnline ? "online" : "offline", detail: llmDetail },
         { label: "Clearance", value: status.clearance || "Active", Icon: ShieldCheck, state: "online", detail: status.user || "John Summers Sr" },
-        ...realChecks.map((check) => ({
+        ...realChecks.filter((check) => check.label !== "Jarvis Local LLM").map((check) => ({
           label: check.label,
           value: check.state === "online" ? "Online" : check.state === "pending" ? "Pending" : "Offline",
           Icon: checkIcon(check.label),
@@ -1451,7 +1470,7 @@ function SystemStatusPanel({
       ]
     : [
         { label: "Systems", value: status.systems || "Online", Icon: Server, state: "online", detail: "Backend online" },
-        { label: "LLM Layer", value: status.brain || "Pending", Icon: BrainCircuit, state: "pending", detail: "Kept planned for 07/20/2026" },
+        { label: "LLM Layer", value: activeModel, Icon: BrainCircuit, state: llmOnline ? "online" : "offline", detail: llmDetail },
         { label: "User", value: status.user || "John Summers Sr", Icon: UserRound, state: "online", detail: "Profile loaded" },
         { label: "Clearance", value: status.clearance || "Active", Icon: ShieldCheck, state: "online", detail: "API key accepted" },
         {
@@ -1483,9 +1502,9 @@ function SystemStatusPanel({
           </div>
         ))}
       </div>
-      <p className="mt-4 flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-yellow-300/70">
-        <AlertTriangle className="h-4 w-4" />
-        LLM reasoning remains pending until the planned 07/20/2026 milestone.
+      <p className={`mt-4 flex items-center gap-2 text-xs uppercase tracking-[0.18em] ${llmOnline ? "text-green-300/70" : "text-red-300/75"}`}>
+        {llmOnline ? <BrainCircuit className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
+        {llmOnline ? `${activeModel} is available to Jarvis.` : "The Jarvis LLM is currently unavailable."}
         {status.checked_at ? ` Last check: ${new Date(status.checked_at).toLocaleTimeString()}.` : ""}
       </p>
     </section>

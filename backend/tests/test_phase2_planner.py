@@ -59,6 +59,10 @@ class Phase2PlannerTests(unittest.TestCase):
         self.assertEqual(plan.steps[0].tool, "find_food_vault_matches")
         self.assertEqual(plan.steps[0].arguments["query"], "Reese's Big Cup")
 
+    def test_snack_parser_removes_my_snack_and_today_suffix(self):
+        plan = build_tool_plan("Can you add reeces big cup to my snack for today?", resolved(), ConversationState(conversation_id="phase2-snack-today"))
+        self.assertEqual(plan.steps[0].arguments["query"], "reeces big cup")
+
     def test_food_vault_and_recipe_plans_use_registered_tools(self):
         food = validate_tool_plan(build_tool_plan("Add Greek yogurt to my Food Vault", resolved(), ConversationState(conversation_id="phase2-food")))
         recipe = validate_tool_plan(build_tool_plan("Create a recipe called John's Chili", resolved(), ConversationState(conversation_id="phase2-recipe")))

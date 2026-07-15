@@ -26,7 +26,7 @@ class Phase3ContextUndoTests(unittest.TestCase):
             {"id": "food_1", "brand": "Reese's", "name": "Big Cup", "serving_size": "1 package"},
             {"id": "food_2", "brand": "Quaker", "name": "Oats", "serving_size": "1 cup"},
         ]
-        result = find_food_vault_matches_tool(AssistantToolContext(), {"query": "Reese Big Cup"})
+        result = find_food_vault_matches_tool(AssistantToolContext(), {"query": "reeces big cup"})
         self.assertTrue(result["verified"])
         self.assertEqual(result["matches"][0]["id"], "food_1")
         self.assertEqual(len(result["matches"]), 1)
@@ -68,6 +68,15 @@ class Phase3ContextUndoTests(unittest.TestCase):
         self.assertEqual(result.entity_updates.calories, 200)
         self.assertEqual(result.entity_updates.protein_g, 4)
         self.assertIsNone(result.entity_updates.serving_size)
+
+    def test_repeated_explicit_snack_request_uses_deterministic_resolution(self):
+        state = ConversationState(
+            conversation_id="phase3-repeat", active_intent="resolve_food_vault_meal_item",
+            pending_clarification=PendingClarification(question="Create a new Food Vault item?"),
+        )
+        result = deterministic_sensitive_resolution("Can you add Reece's big cup to my snack for today?", state)
+        self.assertEqual(result.entity_updates.product, "Reece's big cup")
+        self.assertEqual(result.operation_type, "write")
 
     def test_one_recent_verified_action_can_be_undone(self):
         now = datetime.now(timezone.utc)

@@ -565,12 +565,17 @@ def add_food_vault_item_tool(context: AssistantToolContext, input_data: dict[str
 
 def find_food_vault_matches_tool(context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
     query = clean_sentence(str(input_data.get("query") or ""))
-    tokens = {token for token in re.findall(r"[a-z0-9]+", query.lower()) if len(token) > 2}
+    def food_tokens(value: str) -> set[str]:
+        normalized = re.sub(r"(?i)\b(?:reece|reeces|reese|reeses)\b", "reese", value.replace("’", "'").replace("'s", "s"))
+        return {token for token in re.findall(r"[a-z0-9]+", normalized.lower()) if len(token) > 2}
+
+    tokens = food_tokens(query)
     matches = []
     minimum_score = max(1, (len(tokens) + 1) // 2)
     for item in list_food_vault_items(context.user_id):
         haystack = " ".join(str(item.get(key) or "") for key in ("brand", "name", "serving_size")).lower()
-        score = sum(token in haystack for token in tokens)
+        item_tokens = food_tokens(haystack)
+        score = len(tokens & item_tokens)
         if score >= minimum_score:
             matches.append((score, item))
     matches.sort(key=lambda pair: (-pair[0], str(pair[1].get("name") or "")))

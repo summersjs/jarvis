@@ -83,7 +83,7 @@ def build_tool_plan(message: str, resolution: ContextResolution, state: Conversa
 
     if re.search(r"\badd\b.+\b(?:snack|meal plan|breakfast|lunch|dinner)\b", lower):
         meal_type = next((value for value in ("breakfast", "lunch", "dinner", "snack") if value in lower), "snack")
-        name = extract_added_name(message, ("to a snack", "as a snack", "to my meal plan", "for breakfast", "for lunch", "for dinner"))
+        name = extract_added_name(message, ("to a snack", "to my snack", "as a snack", "to my meal plan", "for breakfast", "for lunch", "for dinner"))
         if not name:
             return clarification(resolution.intent, "What food or recipe should I add to today's meal plan?")
         return ready("resolve_food_vault_meal_item", "find_food_vault_matches", {"query": name})
@@ -147,6 +147,7 @@ def clarification(intent: str, question: str) -> ToolPlan:
 
 def extract_added_name(message: str, suffixes: tuple[str, ...]) -> str:
     value = re.sub(r"(?i)^.*?\b(?:add|save|put)\s+", "", message).strip(" .?")
+    value = re.sub(r"(?i)\s+(?:for\s+today|today)\s*$", "", value).strip(" .?")
     for suffix in suffixes:
         value = re.sub(rf"(?i)\s+{re.escape(suffix)}\s*$", "", value).strip(" .?")
     return value

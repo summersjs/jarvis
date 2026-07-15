@@ -146,6 +146,14 @@ def deterministic_sensitive_resolution(user_message: str, state: ConversationSta
             operation_type="write", needs_clarification=False, clarification_question=None,
         )
     pending = state.pending_clarification
+    snack_add = re.search(r"(?i)\badd\s+(.+?)\s+(?:to|as|for)\s+(?:my\s+|a\s+)?snack(?:\s+for\s+today)?\b", user_message)
+    if snack_add:
+        return ContextResolution(
+            request_type="follow_up" if state.active_intent or pending else "new_request",
+            intent="resolve_food_vault_meal_item", inherit_context=bool(state.active_intent or pending),
+            entity_updates={"product": snack_add.group(1).strip(" .?")}, reference_resolution=[], required_entities=[], missing_entities=[],
+            requires_tool=True, operation_type="write", needs_clarification=False, clarification_question=None,
+        )
     if pending and "food vault" in pending.question.lower():
         lower = user_message.lower()
         option = next((item for item in pending.options if str(item.get("name") or "").lower() in lower and item.get("id")), None)

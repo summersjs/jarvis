@@ -27,12 +27,14 @@ from backend.services.forge_service import (
 )
 from backend.services.goal_service import create_goal, create_goal_log, get_goal, list_goals
 from backend.services.health_service import build_health_dashboard, create_health_event, upsert_daily_checkin
-from backend.services.meal_planner_service import create_meal_plan_entry, list_meal_plan_entries, update_meal_plan_entry
-from backend.services.food_vault_service import create_food_vault_item
-from backend.services.recipe_service import create_recipe
+from backend.services.meal_planner_service import create_meal_plan_entry, delete_meal_plan_entry, get_meal_plan_entry, list_meal_plan_entries, update_meal_plan_entry
+from backend.services.food_vault_service import create_food_vault_item, delete_food_vault_item, get_food_vault_item, list_food_vault_items
+from backend.services.recipe_service import create_recipe, delete_recipe, get_recipe
 from backend.services.shopping_service import (
     add_shopping_list_item,
     create_shopping_list,
+    delete_shopping_list,
+    delete_shopping_list_item,
     get_shopping_list,
     list_shopping_lists,
     update_shopping_list_item,
@@ -547,11 +549,38 @@ def add_food_vault_item_tool(context: AssistantToolContext, input_data: dict[str
     name = clean_sentence(str(input_data.get("name") or ""))
     if not name:
         return {"updated": False, "needs_input": True, "question": "What food should I add to the Food Vault?"}
+    required = [key for key in ("calories", "protein_g", "carbs_g", "fat_g") if input_data.get(key) is None]
+    if required:
+        return {"updated": False, "needs_input": True, "question": "Before I create that Food Vault item, give me calories, protein, carbs, and fat.", "missing_entities": required}
     item = create_food_vault_item(FoodVaultItemCreate(
         user_id=context.user_id, name=name, brand=input_data.get("brand"), serving_size=input_data.get("serving_size"),
-        current_quantity=input_data.get("current_quantity", 0), shopping_category=input_data.get("shopping_category"), notes=input_data.get("notes"),
+        calories=input_data.get("calories"), protein_g=input_data.get("protein_g"), carbs_g=input_data.get("carbs_g"), fat_g=input_data.get("fat_g"),
+        package_quantity=input_data.get("package_quantity", 1), current_quantity=input_data.get("current_quantity", 0),
+        low_stock_threshold=input_data.get("low_stock_threshold", 0), estimated_price=input_data.get("estimated_price"),
+        default_store=input_data.get("default_store"), shopping_category=input_data.get("shopping_category"), notes=input_data.get("notes"),
+        is_favorite=bool(input_data.get("is_favorite", False)),
     ))
     return {"updated": bool(item), "food_vault_item": summarize_food_vault_item(item)}
+
+
+def find_food_vault_matches_tool(context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
+    query = clean_sentence(str(input_data.get("query") or ""))
+    tokens = {token for token in re.findall(r"[a-z0-9]+", query.lower()) if len(token) > 2}
+    matches = []
+    minimum_score = max(1, (len(tokens) + 1) // 2)
+    for item in list_food_vault_items(context.user_id):
+        haystack = " ".join(str(item.get(key) or "") for key in ("brand", "name", "serving_size")).lower()
+        score = sum(token in haystack for token in tokens)
+        if score >= minimum_score:
+            matches.append((score, item))
+    matches.sort(key=lambda pair: (-pair[0], str(pair[1].get("name") or "")))
+    options = [summarize_food_vault_item(item) for _, item in matches[:6]]
+    if options:
+        names = ", ".join(str(item.get("name")) for item in options)
+        question = f"I found these verified Food Vault matches: {names}. Did you mean one of those, or should I create a new item?"
+    else:
+        question = f"I couldn't find {query} in the Food Vault. Should I create a new item? If yes, I'll need name, calories, protein, carbs, and fat. Other fields are optional."
+    return {"verified": True, "query": query, "matches": options, "needs_input": True, "question": question, "options": options + [{"action": "create", "name": "Create a new item"}]}
 
 
 def add_recipe_tool(context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
@@ -607,6 +636,36 @@ def get_recent_price_comparison_tool(context: AssistantToolContext, input_data: 
     else:
         selected = None
     return {"verified": True, "comparison_id": comparison.result_id, "results": results, "selected": selected, "verified_at": comparison.verified_at.isoformat(), "expires_at": comparison.expires_at.isoformat() if comparison.expires_at else None}
+
+
+def remove_shopping_item_tool(_context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
+    record_id = str(input_data.get("record_id") or "")
+    deleted = delete_shopping_list_item(record_id) if record_id else None
+    return {"updated": bool(deleted), "deleted_record_id": record_id, "record_type": "shopping_item"}
+
+
+def remove_shopping_list_tool(_context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
+    record_id = str(input_data.get("record_id") or "")
+    deleted = delete_shopping_list(record_id) if record_id else None
+    return {"updated": bool(deleted), "deleted_record_id": record_id, "record_type": "shopping_list"}
+
+
+def remove_meal_plan_item_tool(_context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
+    record_id = str(input_data.get("record_id") or "")
+    deleted = delete_meal_plan_entry(record_id) if record_id else None
+    return {"updated": bool(deleted), "deleted_record_id": record_id, "record_type": "meal"}
+
+
+def remove_food_vault_item_tool(_context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
+    record_id = str(input_data.get("record_id") or "")
+    deleted = delete_food_vault_item(record_id) if record_id else None
+    return {"updated": bool(deleted), "deleted_record_id": record_id, "record_type": "food_vault_item"}
+
+
+def remove_recipe_tool(_context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
+    record_id = str(input_data.get("record_id") or "")
+    deleted = delete_recipe(record_id) if record_id else None
+    return {"updated": bool(deleted), "deleted_record_id": record_id, "record_type": "recipe"}
 
 
 def check_shopping_item_tool(context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
@@ -1109,6 +1168,7 @@ def summarize_forge_task(task: dict | None) -> dict | None:
 TOOL_REGISTRY: dict[str, AssistantToolDefinition] = {
     "search_live_prices": AssistantToolDefinition("search_live_prices", "Search configured live retail providers for current prices; refuses unsourced price claims.", 1, "read", False, search_live_prices_tool, "verified_provider_result"),
     "get_recent_price_comparison": AssistantToolDefinition("get_recent_price_comparison", "Read a fresh verified price comparison from bounded conversation state.", 1, "read", False, get_recent_price_comparison_tool, "verified_provider_result"),
+    "find_food_vault_matches": AssistantToolDefinition("find_food_vault_matches", "Find verified Food Vault matches before creating or planning a food item.", 1, "read", False, find_food_vault_matches_tool, "internal_record"),
     "get_system_status": AssistantToolDefinition("get_system_status", "Run the live Jarvis ping/health checks and report every red (offline) service.", 1, "read", False, get_system_status_tool),
     "get_morning_brief": AssistantToolDefinition("get_morning_brief", "Get today's sanitized morning brief.", 1, "read", False, get_morning_brief_tool),
     "get_daily_debrief": AssistantToolDefinition("get_daily_debrief", "Get today's sanitized daily debrief summary.", 1, "read", False, get_daily_debrief_tool),
@@ -1126,6 +1186,11 @@ TOOL_REGISTRY: dict[str, AssistantToolDefinition] = {
     "add_meal_plan_item": AssistantToolDefinition("add_meal_plan_item", "Add a food or recipe to a dated meal-plan slot; defaults an explicitly requested snack to today.", 2, "write", False, add_meal_plan_item_tool),
     "add_food_vault_item": AssistantToolDefinition("add_food_vault_item", "Add a named food to the Food Vault without inventing nutrition data.", 2, "write", False, add_food_vault_item_tool),
     "add_recipe": AssistantToolDefinition("add_recipe", "Create a recipe record from supplied recipe fields.", 2, "write", False, add_recipe_tool),
+    "remove_shopping_item": AssistantToolDefinition("remove_shopping_item", "Remove one exact shopping item as a bounded undo.", 3, "write", False, remove_shopping_item_tool),
+    "remove_shopping_list": AssistantToolDefinition("remove_shopping_list", "Remove one exact shopping list as a bounded undo.", 3, "write", False, remove_shopping_list_tool),
+    "remove_meal_plan_item": AssistantToolDefinition("remove_meal_plan_item", "Remove one exact meal-plan entry as a bounded undo.", 3, "write", False, remove_meal_plan_item_tool),
+    "remove_food_vault_item": AssistantToolDefinition("remove_food_vault_item", "Remove one exact Food Vault item as a bounded undo.", 3, "write", False, remove_food_vault_item_tool),
+    "remove_recipe": AssistantToolDefinition("remove_recipe", "Remove one exact recipe as a bounded undo.", 3, "write", False, remove_recipe_tool),
     "check_shopping_item": AssistantToolDefinition("check_shopping_item", "Check off an item on the current shopping list.", 2, "write", False, check_shopping_item_tool),
     "log_health_event": AssistantToolDefinition("log_health_event", "Log a health symptom/event.", 2, "write", False, log_health_event_tool),
     "upsert_health_checkin": AssistantToolDefinition("upsert_health_checkin", "Update today's health check-in values.", 2, "write", False, upsert_health_checkin_tool),

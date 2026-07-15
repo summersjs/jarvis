@@ -136,3 +136,35 @@ def safe_read_followup_resolution(user_message: str, state: ConversationState) -
         entity_updates=updates, reference_resolution=[], required_entities=[], missing_entities=[],
         requires_tool=True, operation_type=operation, needs_clarification=False, clarification_question=None,
     )
+
+
+def deterministic_sensitive_resolution(user_message: str, state: ConversationState) -> ContextResolution | None:
+    if re.fullmatch(r"(?i)\s*(?:undo(?: that)?|remove the last one)\s*[.!]?\s*", user_message):
+        return ContextResolution(
+            request_type="follow_up", intent="undo_last_action", inherit_context=True,
+            entity_updates={}, reference_resolution=[], required_entities=[], missing_entities=[], requires_tool=True,
+            operation_type="write", needs_clarification=False, clarification_question=None,
+        )
+    pending = state.pending_clarification
+    if pending and "food vault" in pending.question.lower():
+        lower = user_message.lower()
+        option = next((item for item in pending.options if str(item.get("name") or "").lower() in lower and item.get("id")), None)
+        nutrition: dict[str, Any] = {}
+        for key, pattern in {
+            "calories": r"\b(\d+(?:\.\d+)?)\s*(?:calories|cal)\b",
+            "protein_g": r"\b(\d+(?:\.\d+)?)\s*g?\s*protein\b",
+            "carbs_g": r"\b(\d+(?:\.\d+)?)\s*g?\s*carbs?\b",
+            "fat_g": r"\b(\d+(?:\.\d+)?)\s*g?\s*fat\b",
+        }.items():
+            match = re.search(pattern, user_message, re.IGNORECASE)
+            if match:
+                nutrition[key] = float(match.group(1))
+        if option or re.search(r"\b(?:create new|new one|make a new)\b", lower) or nutrition:
+            if option:
+                nutrition["food_vault_item_id"] = option["id"]
+            return ContextResolution(
+                request_type="follow_up", intent="resolve_food_vault_meal_item", inherit_context=True,
+                entity_updates=nutrition, reference_resolution=[], required_entities=[], missing_entities=[], requires_tool=True,
+                operation_type="write", needs_clarification=False, clarification_question=None,
+            )
+    return None

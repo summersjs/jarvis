@@ -66,6 +66,11 @@ class ConversationContextTests(unittest.TestCase):
         self.assertEqual(merged.entities.retailer, "Walmart")
         self.assertEqual(merged.entities.quantity, 2)
 
+    def test_followup_preserves_pending_clarification_for_planner(self):
+        state = ConversationState.model_validate({"conversation_id": "conversation-pending", "pending_clarification": {"question": "Create a new Food Vault item?"}})
+        merged, _ = merge_conversation_state(state, resolution(intent="resolve_food_vault_meal_item", operation_type="write"))
+        self.assertEqual(merged.pending_clarification.question, "Create a new Food Vault item?")
+
     def test_live_results_are_bounded_verified_targets_with_expiry(self):
         state = ConversationState(conversation_id="conversation-4")
         record_verified_tool_results(state, [{

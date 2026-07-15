@@ -54,6 +54,15 @@ type ChatMessage = {
   collapsed?: boolean;
   toolActions?: string[];
   actionReceipts?: ActionReceipt[];
+  contextResolution?: ContextResolutionMeta;
+};
+
+type ContextResolutionMeta = {
+  follow_up?: boolean;
+  inherited?: Record<string, string>;
+  changed?: Record<string, string>;
+  refreshed_live_results?: boolean;
+  pending_clarification?: string | null;
 };
 
 type ActionReceipt = {
@@ -242,6 +251,7 @@ export default function JarvisPage() {
       content: data.message.content as string,
       tools: (data.tools || []).map((tool: { tool?: string }) => tool.tool).filter(Boolean) as string[],
       actions: (data.actions || []) as ActionReceipt[],
+      contextResolution: (data.contextResolution || undefined) as ContextResolutionMeta | undefined,
     };
   }
 
@@ -267,6 +277,7 @@ export default function JarvisPage() {
         content: reply.content,
         toolActions: reply.tools,
         actionReceipts: reply.actions,
+        contextResolution: reply.contextResolution,
         collapsed: mode === "voice",
       };
       setMessages((current) => [...current, assistantMessage]);
@@ -491,6 +502,22 @@ export default function JarvisPage() {
     audioUrls.current.clear();
   }
 
+  async function startNewContext() {
+    const conversationId = getConversationId();
+    try {
+      const response = await fetch(`${API_BASE}/assistant/context/${encodeURIComponent(conversationId)}/reset`, {
+        method: "POST",
+        headers: { "x-api-key": API_KEY },
+      });
+      if (!response.ok) throw new Error(await friendlyError(response));
+      window.localStorage.removeItem(CONVERSATION_KEY);
+      getConversationId();
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Jarvis could not reset this context.");
+    }
+  }
+
   return (
     <main className={`jarvis-shell ${compact ? "compact" : ""}`}>
       <div className="jarvis-grid" />
@@ -575,6 +602,7 @@ export default function JarvisPage() {
                   </div>
                 )}
                 {!!message.toolActions?.length && <div className="tool-actions">Backend tool: {message.toolActions.join(", ")}</div>}
+                {message.contextResolution && <ContextResolutionCard context={message.contextResolution} />}
                 {!!message.actionReceipts?.length && (
                   <div className="action-receipts" aria-label="Action receipts">
                     {message.actionReceipts.map((receipt) => <ActionReceiptCard key={receipt.action_id} receipt={receipt} />)}
@@ -611,7 +639,8 @@ export default function JarvisPage() {
           />
           <div className="composer-actions">
             {!compact && <Link href="/" className="ghost-action">Command Center</Link>}
-            <button className="ghost-action" type="button" onClick={clearChat}><Trash2 size={16} /> New</button>
+            <button className="ghost-action" type="button" onClick={() => void startNewContext()}><RotateCcw size={16} /> New Context</button>
+            <button className="ghost-action" type="button" onClick={clearChat}><Trash2 size={16} /> Clear Chat</button>
             <button className="ghost-action" type="button" onClick={() => { const next = !ttsMuted; setTtsMuted(next); stopAudio(); void window.jarvisDesktop?.setDesktopPreference?.("ttsMuted", next); }}>{ttsMuted ? <VolumeX size={16} /> : <Volume2 size={16} />} {ttsMuted ? "Muted" : "Voice"}</button>
             {compact && <button className="ghost-action" type="button" onClick={() => { const next = !alwaysOnTop; setAlwaysOnTop(next); void window.jarvisDesktop?.setDesktopPreference?.("jarvisAlwaysOnTop", next); }}>{alwaysOnTop ? "Unpin" : "Pin"}</button>}
             <button
@@ -679,6 +708,21 @@ function ActionReceiptCard({ receipt }: { receipt: ActionReceipt }) {
       <span>Status: {status}</span>
       {receipt.verification?.summary && <small>{receipt.verification.summary}</small>}
       {verified && receipt.verification?.verified_at && <time dateTime={receipt.verification.verified_at}>Verified at: {new Date(receipt.verification.verified_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time>}
+    </section>
+  );
+}
+
+function ContextResolutionCard({ context }: { context: ContextResolutionMeta }) {
+  const inherited = Object.entries(context.inherited || {});
+  const changed = Object.entries(context.changed || {});
+  if (!context.follow_up && !inherited.length && !changed.length && !context.pending_clarification) return null;
+  return (
+    <section className="context-resolution" aria-label="Context resolution">
+      <strong>Context resolution</strong>
+      {!!inherited.length && <small>Inherited: {inherited.map(([key, value]) => `${key}: ${value}`).join(" · ")}</small>}
+      {!!changed.length && <small>Changed: {changed.map(([key, value]) => `${key}: ${value}`).join(" · ")}</small>}
+      {context.refreshed_live_results && <small>Live results refreshed</small>}
+      {context.pending_clarification && <small>Pending: {context.pending_clarification}</small>}
     </section>
   );
 }
@@ -829,6 +873,9 @@ function JarvisStyles() {
       .message-actions { display: flex; gap: .5rem; margin-top: .72rem; }
       .message-actions button { display: inline-flex; align-items: center; gap: .35rem; border: 1px solid rgba(98,201,255,.18); border-radius: 999px; background: rgba(0,0,0,.26); color: #dff8ff; padding: .38rem .55rem; }
       .tool-actions { margin-top: .6rem; color: #fbbf24; font-size: .72rem; font-weight: 800; text-transform: uppercase; }
+      .context-resolution { display: grid; gap: .2rem; margin-top: .65rem; border-left: 3px solid #38bdf8; border-radius: .25rem; background: rgba(3,105,161,.12); padding: .5rem .65rem; }
+      .context-resolution strong { color: #7dd3fc; font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; }
+      .context-resolution small { color: rgba(224,242,254,.76); font-size: .68rem; }
       .action-receipts { display: grid; gap: .45rem; margin-top: .7rem; }
       .action-receipt { display: grid; gap: .2rem; border-left: 3px solid #fbbf24; border-radius: .25rem; background: rgba(0,0,0,.3); padding: .55rem .65rem; }
       .action-receipt.verified { border-left-color: #4ade80; background: rgba(20,83,45,.18); }

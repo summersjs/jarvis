@@ -54,12 +54,10 @@ class Phase2PlannerTests(unittest.TestCase):
                 {"step_id": str(index), "tool": "search_live_prices", "arguments": {}, "depends_on": []} for index in range(6)
             ]})
 
-    def test_reeses_big_cup_defaults_to_todays_snack(self):
+    def test_reeses_big_cup_checks_food_vault_before_todays_snack(self):
         plan = build_tool_plan("Add Reese's Big Cup to a snack", resolved(), ConversationState(conversation_id="phase2-snack"))
-        self.assertEqual(plan.steps[0].tool, "add_meal_plan_item")
-        self.assertEqual(plan.steps[0].arguments["meal_type"], "snack")
-        self.assertEqual(plan.steps[0].arguments["custom_meal_name"], "Reese's Big Cup")
-        self.assertRegex(plan.steps[0].arguments["meal_date"], r"^\d{4}-\d{2}-\d{2}$")
+        self.assertEqual(plan.steps[0].tool, "find_food_vault_matches")
+        self.assertEqual(plan.steps[0].arguments["query"], "Reese's Big Cup")
 
     def test_food_vault_and_recipe_plans_use_registered_tools(self):
         food = validate_tool_plan(build_tool_plan("Add Greek yogurt to my Food Vault", resolved(), ConversationState(conversation_id="phase2-food")))
@@ -125,11 +123,13 @@ class Phase2PlannerTests(unittest.TestCase):
         self.assertEqual(result["meal"]["name"], "Reese's Big Cup")
 
     @patch("backend.assistant.tools.registry.create_food_vault_item")
-    def test_food_vault_tool_does_not_invent_nutrition(self, create):
+    def test_food_vault_tool_requires_nutrition_and_does_not_invent_optional_fields(self, create):
         create.return_value = {"id": "food_1", "name": "Greek yogurt"}
-        result = add_food_vault_item_tool(AssistantToolContext(), {"name": "Greek yogurt"})
+        missing = add_food_vault_item_tool(AssistantToolContext(), {"name": "Greek yogurt"})
+        self.assertTrue(missing["needs_input"])
+        result = add_food_vault_item_tool(AssistantToolContext(), {"name": "Greek yogurt", "calories": 100, "protein_g": 17, "carbs_g": 6, "fat_g": 0})
         payload = create.call_args.args[0]
-        self.assertIsNone(payload.calories)
+        self.assertIsNone(payload.estimated_price)
         self.assertTrue(result["updated"])
 
     @patch("backend.assistant.tools.registry.create_recipe")

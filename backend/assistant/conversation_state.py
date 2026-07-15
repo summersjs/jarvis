@@ -7,18 +7,19 @@ import threading
 from datetime import datetime, timezone
 from typing import Any
 
-from backend.schemas.conversation import ContextResolution, ContextResolutionMeta, ConversationEntities, ConversationState, PendingClarification, VerifiedToolResult
+from backend.schemas.conversation import ContextResolution, ContextResolutionMeta, ConversationEntities, ConversationState, PendingClarification, RecentAction, VerifiedToolResult
 from backend.utils.local_store import read_json, write_json
 
 
 STATE_FILE = "assistant_conversation_state.json"
 logger = logging.getLogger("jarvis.context")
 LIVE_RESULT_TTL_SECONDS = int(os.getenv("JARVIS_LIVE_RESULT_TTL_SECONDS", "900"))
-PRODUCT_FIELDS = {"brand", "size", "variant", "retailer", "shopping_list_item_id"}
+UNDO_WINDOW_SECONDS = int(os.getenv("JARVIS_UNDO_WINDOW_SECONDS", "600"))
+PRODUCT_FIELDS = {"brand", "size", "variant", "retailer", "shopping_list_item_id", "food_vault_item_id", "calories", "protein_g", "carbs_g", "fat_g", "serving_size"}
 INTENT_SCOPES = {
     "price": {"product", "brand", "size", "variant", "quantity", "location", "zip_code", "retailer", "shopping_list_id", "shopping_list_item_id"},
     "shopping": {"product", "brand", "size", "variant", "quantity", "retailer", "shopping_list_id", "shopping_list_item_id", "location", "zip_code"},
-    "meal": {"date_range", "meal_id", "quantity"},
+    "meal": {"date_range", "meal_id", "quantity", "product", "brand", "food_vault_item_id", "calories", "protein_g", "carbs_g", "fat_g", "serving_size"},
     "goal": {"goal_id", "date_range"},
     "health": {"health_event_id", "date_range"},
 }
@@ -73,6 +74,7 @@ def intent_scope(intent: str | None) -> set[str] | None:
 
 
 def merge_conversation_state(state: ConversationState, resolution: ContextResolution) -> tuple[ConversationState, ContextResolutionMeta]:
+    existing_clarification = state.pending_clarification
     old = state.entities.model_dump()
     updates = {key: value for key, value in resolution.entity_updates.model_dump().items() if value is not None}
     merged = dict(old) if resolution.inherit_context else {key: None for key in old}
@@ -110,7 +112,7 @@ def merge_conversation_state(state: ConversationState, resolution: ContextResolu
 
     state.active_intent = resolution.intent
     state.entities = ConversationEntities.model_validate(merged)
-    state.pending_clarification = clarification
+    state.pending_clarification = clarification or (existing_clarification if resolution.request_type == "follow_up" else None)
     state.updated_at = utc_now()
     logger.info(
         "context_merge conversation_id=%s success=true intent=%s inherited_count=%d changed_count=%d clarification=%s",
@@ -120,7 +122,7 @@ def merge_conversation_state(state: ConversationState, resolution: ContextResolu
         follow_up=resolution.request_type == "follow_up",
         inherited=inherited,
         changed=changed,
-        pending_clarification=clarification.question if clarification else None,
+        pending_clarification=state.pending_clarification.question if state.pending_clarification else None,
     )
 
 
@@ -189,3 +191,34 @@ def extract_record_ids(value: Any, prefix: str = "") -> dict[str, str]:
         for index, item in enumerate(value[:20]):
             found.update(extract_record_ids(item, f"{prefix}[{index}]"))
     return dict(list(found.items())[:30])
+
+
+REVERSIBLE_TOOLS = {
+    "add_shopping_item": ("item", "remove_shopping_item"),
+    "create_shopping_list": ("shopping_list", "remove_shopping_list"),
+    "add_meal_plan_item": ("meal", "remove_meal_plan_item"),
+    "add_food_vault_item": ("food_vault_item", "remove_food_vault_item"),
+    "add_recipe": ("recipe", "remove_recipe"),
+}
+
+
+def record_reversible_actions(state: ConversationState, executions: list[Any]) -> ConversationState:
+    now = utc_now()
+    for execution in executions:
+        if getattr(execution, "execution_status", None) != "succeeded" or not getattr(execution, "verification", None) or execution.verification.status != "verified":
+            continue
+        mapping = REVERSIBLE_TOOLS.get(str(execution.tool_name or ""))
+        if not mapping:
+            continue
+        result_key, reverse_tool = mapping
+        record = (execution.result or {}).get(result_key) or {}
+        record_id = record.get("id")
+        if not record_id:
+            continue
+        state.recent_actions.append(RecentAction(
+            execution_id=execution.action_id, tool=execution.tool_name, record_id=str(record_id), verified_at=now,
+            reversible=True, reverse_tool=reverse_tool,
+            expires_at=datetime.fromtimestamp(now.timestamp() + UNDO_WINDOW_SECONDS, tz=timezone.utc),
+        ))
+    state.recent_actions = state.recent_actions[-10:]
+    return state

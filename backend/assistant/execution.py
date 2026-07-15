@@ -302,6 +302,27 @@ def verify_tool_result(tool_name: str, result: dict[str, Any], context: Assistan
             current = get_recipe(str(expected.get("id") or ""))
             if current and current.get("id") == expected.get("id") and current.get("title") == expected.get("title"):
                 return verified("Recipe was reread by ID and matched.")
+        elif tool_name.startswith("remove_"):
+            record_id = str(result.get("deleted_record_id") or "")
+            record_type = result.get("record_type")
+            missing = False
+            if record_type == "shopping_item":
+                from backend.services.shopping_service import get_shopping_list, list_shopping_lists
+                missing = not any(any(item.get("id") == record_id for item in (get_shopping_list(row["id"]) or {}).get("items") or []) for row in list_shopping_lists(context.user_id))
+            elif record_type == "shopping_list":
+                from backend.services.shopping_service import get_shopping_list
+                missing = get_shopping_list(record_id) is None
+            elif record_type == "meal":
+                from backend.services.meal_planner_service import get_meal_plan_entry
+                missing = get_meal_plan_entry(record_id) is None
+            elif record_type == "food_vault_item":
+                from backend.services.food_vault_service import get_food_vault_item
+                missing = get_food_vault_item(record_id) is None
+            elif record_type == "recipe":
+                from backend.services.recipe_service import get_recipe
+                missing = get_recipe(record_id) is None
+            if record_id and missing:
+                return verified("The exact record ID was reread and confirmed removed.")
         elif tool_name in {"complete_forge_project", "complete_forge_task", "capture_forge_spark"}:
             from backend.services.forge_service import list_forge_projects, list_forge_sparks, list_forge_tasks
             key = "project" if tool_name == "complete_forge_project" else "task" if tool_name == "complete_forge_task" else "spark"

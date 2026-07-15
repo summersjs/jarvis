@@ -24,8 +24,8 @@ from backend.assistant.meal_confirmation import (
     resolve_meal_claim,
     response_kind,
 )
-from backend.assistant.context_resolver import ResolverFailure, direct_resolution, needs_model_resolution, resolve_context, safe_read_followup_resolution
-from backend.assistant.conversation_state import CONVERSATION_STATE_STORE, merge_conversation_state, record_verified_tool_results
+from backend.assistant.context_resolver import ResolverFailure, deterministic_sensitive_resolution, direct_resolution, needs_model_resolution, resolve_context, safe_read_followup_resolution
+from backend.assistant.conversation_state import CONVERSATION_STATE_STORE, merge_conversation_state, record_reversible_actions, record_verified_tool_results
 from backend.assistant.planner import build_tool_plan, validate_tool_plan
 from backend.assistant.tools.registry import AssistantToolContext, select_tools
 from backend.prompts.jarvis import JARVIS_SYSTEM_PROMPT
@@ -111,7 +111,8 @@ def chat_with_jarvis(messages: list[dict], model: str | None = None, context: As
         prior_state = CONVERSATION_STATE_STORE.get(context.conversation_id)
         try:
             resolution = (
-                resolve_context(latest_user_text, prior_state, selected_model, lambda path, payload: _request_json(path, payload, timeout=OLLAMA_TIMEOUT_SECONDS))
+                deterministic_sensitive_resolution(latest_user_text, prior_state)
+                or resolve_context(latest_user_text, prior_state, selected_model, lambda path, payload: _request_json(path, payload, timeout=OLLAMA_TIMEOUT_SECONDS))
                 if needs_model_resolution(prior_state, latest_user_text)
                 else direct_resolution(latest_user_text)
             )
@@ -224,13 +225,24 @@ def chat_with_jarvis(messages: list[dict], model: str | None = None, context: As
             None,
         )
         if needs_input:
+            if any(item.get("tool") == "find_food_vault_matches" for item in tool_results):
+                candidate_state.entities.product = str(needs_input.get("query") or candidate_state.entities.product or "") or None
             candidate_state.pending_clarification = PendingClarification(
                 question=str(needs_input.get("question") or "Which option should I use?"),
                 options=[{str(key): str(value) for key, value in option.items()} for option in (needs_input.get("options") or [])[:12] if isinstance(option, dict)],
             )
             CONVERSATION_STATE_STORE.save(candidate_state)
         elif resolution.operation_type != "write" or verified_write:
+            if verified_write:
+                candidate_state.pending_clarification = None
             record_verified_tool_results(candidate_state, tool_results)
+            record_reversible_actions(candidate_state, executions)
+            reversed_ids = {
+                str((item.result or {}).get("deleted_record_id")) for item in executions
+                if item.execution_status == "succeeded" and str(item.tool_name or "").startswith("remove_")
+            }
+            if reversed_ids:
+                candidate_state.recent_actions = [action for action in candidate_state.recent_actions if str(action.record_id) not in reversed_ids]
             if verified_write:
                 candidate_state.last_successful_tool = executions[-1].tool_name
             CONVERSATION_STATE_STORE.save(candidate_state)
@@ -255,6 +267,9 @@ def chat_with_jarvis(messages: list[dict], model: str | None = None, context: As
     commerce_reply = build_live_price_reply(latest_user_text, tool_results)
     if commerce_reply:
         return build_service_result(commerce_reply, selected_model, tool_results, executions, manifest, context, execution_trace, "verified_live_price")
+    food_vault_reply = build_food_vault_followup_reply(tool_results)
+    if food_vault_reply:
+        return build_service_result(food_vault_reply, selected_model, tool_results, executions, manifest, context, execution_trace, "verified_food_vault_lookup")
 
     safe_messages = [
         {"role": "system", "content": JARVIS_SYSTEM_PROMPT},
@@ -541,6 +556,16 @@ def build_live_price_reply(user_text: str, tool_results: list[dict]) -> str:
     return intro + "; ".join(lines) + f". Verified via {provider_text}."
 
 
+def build_food_vault_followup_reply(tool_results: list[dict]) -> str:
+    item = next((result for result in tool_results if result.get("tool") == "find_food_vault_matches"), None)
+    if not item:
+        return ""
+    result = item.get("result") or {}
+    if not item.get("success") or not result.get("verified"):
+        return "I couldn't verify the Food Vault right now, so I did not create or schedule anything."
+    return str(result.get("question") or "Did you mean an existing Food Vault item, or should I create a new one?")
+
+
 def format_write_confirmation(tool_name: str | None, result: dict, request_id: str = "") -> str:
     if tool_name == "log_goal_progress":
         goal = result.get("goal") or {}
@@ -615,6 +640,9 @@ def format_write_confirmation(tool_name: str | None, result: dict, request_id: s
     if tool_name == "add_recipe":
         recipe = result.get("recipe") or {}
         return f"Done. I added the recipe {recipe.get('title') or 'you requested'} and verified it."
+
+    if str(tool_name or "").startswith("remove_"):
+        return "Undone. I removed the exact record and verified that it is gone."
 
     if tool_name == "complete_meal":
         meal = result.get("meal") or {}

@@ -23,6 +23,12 @@ class ConversationEntities(BaseModel):
     health_event_id: str | None = Field(default=None, max_length=120)
     shopping_list_id: str | None = Field(default=None, max_length=120)
     shopping_list_item_id: str | None = Field(default=None, max_length=120)
+    food_vault_item_id: str | None = Field(default=None, max_length=120)
+    calories: float | None = Field(default=None, ge=0, le=10000)
+    protein_g: float | None = Field(default=None, ge=0, le=1000)
+    carbs_g: float | None = Field(default=None, ge=0, le=2000)
+    fat_g: float | None = Field(default=None, ge=0, le=1000)
+    serving_size: str | None = Field(default=None, max_length=100)
 
 
 class VerifiedToolResult(BaseModel):
@@ -102,4 +108,3 @@ class ContextResolutionMeta(BaseModel):
     changed: dict[str, str] = Field(default_factory=dict)
     refreshed_live_results: bool = False
     pending_clarification: str | None = None
-

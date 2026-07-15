@@ -4,7 +4,7 @@ from unittest.mock import patch
 from backend.assistant.execution import capability_manifest
 from backend.assistant.tools.registry import extract_price_query, select_tools
 from backend.services.live_price_service import _extract_retail_size, _nearest_kroger_location, _preferred_search_query, _rank_preferred_offers, search_live_prices
-from backend.services.ollama_service import build_live_price_reply
+from backend.services.ollama_service import build_live_price_reply, resolve_live_price_followup
 
 
 class LivePriceGateTests(unittest.TestCase):
@@ -12,6 +12,10 @@ class LivePriceGateTests(unittest.TestCase):
         calls = select_tools("What are Red Bull prices near me?")
         self.assertEqual(calls[0]["name"], "search_live_prices")
         self.assertEqual(calls[0]["input"]["query"], "Red Bull")
+
+    def test_cheaper_question_must_select_evidence_tool(self):
+        calls = select_tools("Is Kroger or Walmart cheaper?")
+        self.assertEqual(calls[0]["name"], "search_live_prices")
 
     def test_retailer_name_is_not_sent_as_part_of_product_term(self):
         calls = select_tools("What are Red Bull prices at Kroger near me?")
@@ -58,8 +62,23 @@ class LivePriceGateTests(unittest.TestCase):
                  "evidence": {"provider": "kroger", "classification": "official_retailer_api"}},
             ]},
         }])
-        self.assertIn("across Kroger and Walmart", reply)
+        self.assertIn("Walmart is cheaper", reply)
+        self.assertIn("Walmart $2.34, Kroger $2.50", reply)
         self.assertIn("Verified via Kroger and SearchAPI", reply)
+
+    def test_walmart_request_is_scoped_to_walmart(self):
+        call = select_tools("How much is Red Bull at Walmart?")[0]
+        self.assertEqual(call["input"]["query"], "Red Bull")
+        self.assertEqual(call["input"]["retailer"], "walmart")
+
+    def test_price_followup_reuses_product_but_keeps_new_retailer(self):
+        messages = [
+            {"role": "user", "content": "What is the price of Red Bull?"},
+            {"role": "assistant", "content": "Red Bull prices from Kroger and Walmart."},
+            {"role": "user", "content": "How much is it at Walmart?"},
+        ]
+        calls = resolve_live_price_followup(messages, messages[-1]["content"], select_tools(messages[-1]["content"]))
+        self.assertEqual(calls[0]["input"], {"query": "Red Bull", "retailer": "walmart"})
 
     def test_capability_manifest_declares_live_evidence_requirement(self):
         manifest = capability_manifest()

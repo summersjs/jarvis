@@ -28,7 +28,7 @@ def _evidence(provider: str, classification: str, source_url: str, *, store: dic
     }
 
 
-def search_live_prices(query: str, location: str | None = None, user_id: str = "john") -> dict[str, Any]:
+def search_live_prices(query: str, location: str | None = None, user_id: str = "john", retailer: str | None = None) -> dict[str, Any]:
     query = " ".join(str(query or "").split())[:160]
     location = " ".join(str(location or os.getenv("JARVIS_SHOPPING_LOCATION", "")).split())[:160] or None
     if not query:
@@ -42,7 +42,15 @@ def search_live_prices(query: str, location: str | None = None, user_id: str = "
         providers.append({"provider": "google_places", "configured": bool(os.getenv("GOOGLE_PLACES_API_KEY")), "stores_found": len(stores)})
 
     offers: list[dict] = []
-    for search in (_kroger_prices, _searchapi_walmart, _serpapi_walmart, _instacart_prices):
+    retailer = str(retailer or "").strip().lower() or None
+    searches = (_kroger_prices, _searchapi_walmart, _serpapi_walmart, _instacart_prices)
+    if retailer == "kroger":
+        searches = (_kroger_prices,)
+    elif retailer == "walmart":
+        searches = (_searchapi_walmart, _serpapi_walmart)
+    elif retailer == "instacart":
+        searches = (_instacart_prices,)
+    for search in searches:
         try:
             result = search(provider_query, location)
         except Exception as exc:
@@ -56,6 +64,7 @@ def search_live_prices(query: str, location: str | None = None, user_id: str = "
         "query": query,
         "provider_query": provider_query,
         "preference": preference,
+        "retailer_filter": retailer,
         "location": location,
         "offers": offers[:12],
         "validated_stores": stores[:10],
@@ -194,7 +203,11 @@ def _searchapi_walmart(query: str, _location: str | None) -> dict:
         params["store_id"] = os.environ["WALMART_STORE_ID"]
     url = "https://www.searchapi.io/api/v1/search?" + urllib.parse.urlencode(params)
     data = _json_request(url)
-    return {"provider": "searchapi_walmart", "configured": True, "offers": _walmart_offers(data, "searchapi", url)}
+    offers = _walmart_offers(data, "searchapi", url)
+    if params.get("store_id"):
+        for offer in offers:
+            offer["evidence"]["store"] = {"store_id": str(params["store_id"])}
+    return {"provider": "searchapi_walmart", "configured": True, "store_id": params.get("store_id"), "offers": offers}
 
 
 def _serpapi_walmart(query: str, _location: str | None) -> dict:

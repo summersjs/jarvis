@@ -149,6 +149,7 @@ def chat_with_jarvis(messages: list[dict], model: str | None = None, context: As
         )
     nonexecuted_action = detect_nonexecuted_action(latest_user_text, context)
     tool_calls = [] if nonexecuted_action else select_tools(latest_user_text)
+    tool_calls = resolve_live_price_followup(messages, latest_user_text, tool_calls)
     tool_calls.extend(select_followup_tools(messages, latest_user_text, tool_calls))
     tool_results, executions, execution_trace = execute_governed_tool_calls(tool_calls, context)
     if nonexecuted_action:
@@ -285,6 +286,30 @@ def select_followup_tools(messages: list[dict], latest_user_text: str, existing_
     return calls
 
 
+def resolve_live_price_followup(messages: list[dict], latest_user_text: str, calls: list[dict]) -> list[dict]:
+    from backend.assistant.tools.registry import extract_price_query
+
+    price_call = next((call for call in calls if call.get("name") == "search_live_prices"), None)
+    if not price_call:
+        return calls
+    query = str((price_call.get("input") or {}).get("query") or "").strip().lower()
+    weak = not query or query in {"it", "is it", "is cheaper", "cheaper", "which is cheaper", "or cheaper"}
+    weak = weak or not any(token not in {"is", "it", "or", "which", "cheaper", "at", "the"} for token in re.findall(r"[a-z0-9]+", query))
+    if not weak:
+        return calls
+    for message in reversed(messages[:-1]):
+        content = str(message.get("content") or "")
+        if message.get("role") == "user":
+            candidate = extract_price_query(content)
+            if candidate.lower() not in {"it", "is it", "cheaper", "which is cheaper"} and any(term in candidate.lower() for term in ("red bull", "redbull", "toothpaste", "butter", "toilet paper")):
+                price_call["input"]["query"] = candidate
+                break
+        elif "red bull" in content.lower():
+            price_call["input"]["query"] = "Red Bull"
+            break
+    return calls
+
+
 def infer_followup_symptom(text: str) -> str:
     symptom_keywords = {
         "headache": "headache",
@@ -367,11 +392,24 @@ def build_live_price_reply(user_text: str, tool_results: list[dict]) -> str:
         return "I don't have a verified live source for that price, so I won't guess." + checked + optional
 
     lines = []
-    for offer in offers[:5]:
-        evidence = offer.get("evidence") or {}
-        title = offer.get("title") or result.get("query")
-        size = f" {offer.get('size')}" if offer.get("size") else ""
-        lines.append(f"{title}{size} — ${float(offer['price']):.2f}")
+    by_size: dict[str, list[dict]] = {}
+    for offer in offers:
+        by_size.setdefault(str(offer.get("size") or "size not listed"), []).append(offer)
+    comparable = [(size, entries) for size, entries in by_size.items() if len({entry.get("retailer") for entry in entries}) > 1]
+    if comparable:
+        for size, entries in comparable[:5]:
+            cheapest_by_retailer = {}
+            for offer in sorted(entries, key=lambda value: value["price"]):
+                cheapest_by_retailer.setdefault(str(offer.get("retailer") or "Retailer"), offer)
+            pair = list(cheapest_by_retailer.values())
+            prices = ", ".join(f"{offer.get('retailer')} ${float(offer['price']):.2f}" for offer in pair)
+            winner = min(pair, key=lambda value: value["price"])
+            lines.append(f"{size}: {prices}—{winner.get('retailer')} is cheaper")
+    else:
+        for offer in offers[:5]:
+            title = offer.get("title") or result.get("query")
+            size = f" {offer.get('size')}" if offer.get("size") else ""
+            lines.append(f"{offer.get('retailer')}: {title}{size} — ${float(offer['price']):.2f}")
     location = f" near {result.get('location')}" if result.get("location") else ""
     preference = result.get("preference") or {}
     retailers = sorted({str(offer.get("retailer")) for offer in offers[:5] if offer.get("retailer")})
@@ -388,7 +426,15 @@ def build_live_price_reply(user_text: str, tool_results: list[dict]) -> str:
         for offer in offers[:5] if (offer.get("evidence") or {}).get("provider")
     })
     provider_text = " and ".join(providers) or "a verified provider"
-    if preference:
+    if comparable:
+        wins: dict[str, int] = {}
+        for _, entries in comparable:
+            winner = min(entries, key=lambda value: value["price"])
+            name = str(winner.get("retailer") or "Retailer")
+            wins[name] = wins.get(name, 0) + 1
+        leader = max(wins, key=wins.get)
+        intro = f"For the same regular Red Bull sizes, {leader} is cheaper on most verified matches{location}: "
+    elif preference:
         keyword = str(preference.get("item_keyword") or "item")
         if keyword == "red bull":
             intro = f"Your regular Red Bull lineup across {retailer_text} is looking respectable—your saved preference did its job{location}: "

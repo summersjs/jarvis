@@ -129,7 +129,7 @@ def select_read_tools(user_text: str) -> list[str]:
 
 
 def select_tools(user_text: str) -> list[dict[str, Any]]:
-    calls = [{"name": name, "input": {"query": extract_price_query(user_text)}} if name == "search_live_prices" else {"name": name, "input": {}} for name in select_read_tools(user_text)]
+    calls = [{"name": name, "input": {"query": extract_price_query(user_text), "retailer": extract_retailer(user_text)}} if name == "search_live_prices" else {"name": name, "input": {}} for name in select_read_tools(user_text)]
     lower = user_text.lower()
     wants_tomorrow_schedule = any(phrase in lower for phrase in ["tomorrow", "tomorrow's"]) and any(word in lower for word in ["calendar", "schedule", "going on", "have going", "events"])
     if wants_tomorrow_schedule:
@@ -150,7 +150,7 @@ def select_tools(user_text: str) -> list[dict[str, Any]]:
 
 def is_live_commerce_request(text: str) -> bool:
     lower = text.lower()
-    commerce = any(word in lower for word in ("price", "prices", "cost", "cheapest", "how much", "availability", "in stock", "nearby store", "stores near"))
+    commerce = any(word in lower for word in ("price", "prices", "cost", "cheapest", "cheaper", "better deal", "compare", "how much", "availability", "in stock", "nearby store", "stores near"))
     return commerce and not any(phrase in lower for phrase in ("estimated price", "my food vault", "i paid", "did i pay"))
 
 
@@ -161,6 +161,12 @@ def extract_price_query(text: str) -> str:
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" ?.,")
     cleaned = re.sub(r"(?i)\bredbull\b", "Red Bull", cleaned)
     return cleaned or text.strip()
+
+
+def extract_retailer(text: str) -> str | None:
+    lower = text.lower()
+    named = [name for name in ("kroger", "walmart", "instacart") if name in lower]
+    return named[0] if len(named) == 1 else None
 
 
 def select_write_tools(user_text: str) -> list[dict[str, Any]]:
@@ -287,7 +293,10 @@ def get_system_status_tool(_context: AssistantToolContext, _input: dict[str, Any
 
 
 def search_live_prices_tool(_context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
-    return search_live_prices(str(input_data.get("query") or ""), str(input_data.get("location") or "") or None, _context.user_id)
+    return search_live_prices(
+        str(input_data.get("query") or ""), str(input_data.get("location") or "") or None,
+        _context.user_id, str(input_data.get("retailer") or "") or None,
+    )
 
 
 def get_daily_debrief_tool(context: AssistantToolContext, _input: dict[str, Any]) -> dict[str, Any]:

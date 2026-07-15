@@ -1,4 +1,6 @@
 import os
+import re
+import logging
 import threading
 import time
 import uuid
@@ -12,9 +14,11 @@ from backend.core.security import verify_api_key
 from backend.prompts.jarvis import JARVIS_PROMPT_FILE, JARVIS_PROMPT_VERSION
 from backend.schemas.assistant import AssistantChatRequest, AssistantSpeechRequest
 from backend.services.ollama_service import OllamaServiceError, chat_with_jarvis, get_ollama_status
+from backend.assistant.conversation_state import CONVERSATION_STATE_STORE
 from backend.services.tts_service import get_tts_status, synthesize_speech
 
 router = APIRouter(dependencies=[Depends(verify_api_key)])
+logger = logging.getLogger("jarvis.context")
 _response_cache: dict[str, tuple[float, dict]] = {}
 _inflight_requests: dict[str, threading.Event] = {}
 _cache_lock = threading.Lock()
@@ -48,6 +52,15 @@ def assistant_status():
 @router.get("/assistant/tools/status")
 def assistant_tools_status():
     return tool_status()
+
+
+@router.post("/assistant/context/{conversation_id}/reset")
+def reset_assistant_context(conversation_id: str):
+    if not re.fullmatch(r"[A-Za-z0-9_-]{8,100}", conversation_id):
+        raise HTTPException(status_code=422, detail="Invalid conversation ID.")
+    cleared = CONVERSATION_STATE_STORE.clear(conversation_id)
+    logger.info("context_reset conversation_id=%s success=true cleared=%s", conversation_id, cleared)
+    return {"cleared": cleared, "conversation_id": conversation_id, "chat_history_deleted": False}
 
 
 @router.post("/assistant/chat")

@@ -23,10 +23,13 @@ from backend.assistant.meal_confirmation import (
     resolve_meal_claim,
     response_kind,
 )
+from backend.assistant.context_resolver import ResolverFailure, direct_resolution, needs_model_resolution, resolve_context
+from backend.assistant.conversation_state import CONVERSATION_STATE_STORE, merge_conversation_state, record_verified_tool_results
 from backend.assistant.tools.registry import AssistantToolContext, select_tools
 from backend.prompts.jarvis import JARVIS_SYSTEM_PROMPT
 from backend.prompts.user_profile import JOHN_USER_PROFILE
 from backend.schemas.assistant import ActionVerification, AssistantActionExecution
+from backend.schemas.conversation import PendingClarification
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:8b")
@@ -91,6 +94,39 @@ def chat_with_jarvis(messages: list[dict], model: str | None = None, context: As
         (item.get("content", "") for item in reversed(messages) if item.get("role") == "user" and item.get("content")),
         "",
     )
+    candidate_state = None
+    if latest_user_text.strip().lower() in {"/new", "/reset-context", "reset context"}:
+        CONVERSATION_STATE_STORE.clear(context.conversation_id)
+        return build_service_result(
+            "Context reset. Your chat history is still here, but I won't carry entities or references into the next request.",
+            selected_model, [], [], capability_manifest(), context, [{"event": "context_reset", "status": "succeeded"}], "context_reset",
+        )
+    if context.conversation_id != "local-jarvis":
+        prior_state = CONVERSATION_STATE_STORE.get(context.conversation_id)
+        try:
+            resolution = (
+                resolve_context(latest_user_text, prior_state, selected_model, lambda path, payload: _request_json(path, payload, timeout=OLLAMA_TIMEOUT_SECONDS))
+                if needs_model_resolution(prior_state, latest_user_text)
+                else direct_resolution(latest_user_text)
+            )
+        except (ResolverFailure, urllib.error.URLError, TimeoutError):
+            return build_service_result(
+                "I couldn't safely resolve what this refers to, so I did not execute anything. Please name the item or record you want me to use.",
+                selected_model, [], [], capability_manifest(), context, [{"event": "context_resolution", "status": "failed", "error_code": "RESOLVER_FAILED"}], "resolver_clarification",
+            )
+        candidate_state, resolution_meta = merge_conversation_state(prior_state.model_copy(deep=True), resolution)
+        context = replace(context, resolution_meta=resolution_meta.model_dump())
+        if resolution.needs_clarification:
+            CONVERSATION_STATE_STORE.save(candidate_state)
+            return build_service_result(
+                resolution.clarification_question or "I need one more detail before I can safely continue.",
+                selected_model, [], [], capability_manifest(), context, [{"event": "context_resolution", "status": "clarification_required"}], "context_clarification",
+            )
+        useful_state = resolution.intent != "direct_request" or bool(candidate_state.entities.model_dump(exclude_none=True))
+        if not useful_state:
+            candidate_state = None
+        if resolution.operation_type != "write" and candidate_state is not None:
+            CONVERSATION_STATE_STORE.save(candidate_state)
     manifest = capability_manifest()
     pending_meal = PENDING_MEAL_STORE.get(context.conversation_id)
     pending_response = response_kind(latest_user_text) if pending_meal else None
@@ -152,6 +188,26 @@ def chat_with_jarvis(messages: list[dict], model: str | None = None, context: As
     tool_calls = resolve_live_price_followup(messages, latest_user_text, tool_calls)
     tool_calls.extend(select_followup_tools(messages, latest_user_text, tool_calls))
     tool_results, executions, execution_trace = execute_governed_tool_calls(tool_calls, context)
+    if candidate_state is not None:
+        verified_write = any(item.execution_status == "succeeded" and item.verification and item.verification.status == "verified" for item in executions)
+        needs_input = next(
+            (
+                item.get("result") for item in tool_results
+                if isinstance(item.get("result"), dict) and item["result"].get("needs_input")
+            ),
+            None,
+        )
+        if needs_input:
+            candidate_state.pending_clarification = PendingClarification(
+                question=str(needs_input.get("question") or "Which option should I use?"),
+                options=[{str(key): str(value) for key, value in option.items()} for option in (needs_input.get("options") or [])[:12] if isinstance(option, dict)],
+            )
+            CONVERSATION_STATE_STORE.save(candidate_state)
+        elif resolution.operation_type != "write" or verified_write:
+            record_verified_tool_results(candidate_state, tool_results)
+            if verified_write:
+                candidate_state.last_successful_tool = executions[-1].tool_name
+            CONVERSATION_STATE_STORE.save(candidate_state)
     if nonexecuted_action:
         executions.append(nonexecuted_action)
         record_nonexecuted_action(nonexecuted_action)
@@ -569,6 +625,8 @@ def build_service_result(content, selected_model, tool_results, executions, mani
         "actions": [item.model_dump() for item in executions],
         "capabilities": manifest.model_dump(),
     }
+    if context.resolution_meta:
+        result["contextResolution"] = context.resolution_meta
     if development_trace_enabled():
         result["executionTrace"] = {
             "requestId": context.request_id,

@@ -52,6 +52,7 @@ class AssistantToolContext:
     source: str = "jarvis-chat"
     timezone: str = "America/New_York"
     confirmed_action_id: str | None = None
+    resolution_meta: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -478,9 +479,16 @@ def add_shopping_item_tool(context: AssistantToolContext, input_data: dict[str, 
     item_name = clean_sentence(str(input_data.get("item_name") or ""))
     if not item_name:
         return {"updated": False, "reason": "No item name supplied."}
-    shopping_list = find_default_shopping_list(context.user_id)
-    if not shopping_list:
-        return {"updated": False, "reason": "No shopping list found."}
+    lists = list_shopping_lists(context.user_id)
+    requested_list_id = str(input_data.get("shopping_list_id") or "").strip()
+    shopping_list = next((item for item in lists if str(item.get("id")) == requested_list_id), None) if requested_list_id else None
+    if requested_list_id and not shopping_list:
+        return {"updated": False, "needs_input": True, "question": "I couldn't verify that shopping list. Which existing list should I use?", "options": summarize_shopping_list_options(lists)}
+    if not requested_list_id:
+        if not lists:
+            return {"updated": False, "needs_input": True, "question": f"You don't have a shopping list yet. What should I call the new list before I add {item_name}?", "options": [{"action": "create", "title": "Create a new shopping list"}]}
+        return {"updated": False, "needs_input": True, "question": f"Which shopping list should I add {item_name} to?", "options": summarize_shopping_list_options(lists)}
+    shopping_list = get_shopping_list(shopping_list["id"]) or shopping_list
     item = add_shopping_list_item(
         ShoppingListItemCreate(
             shopping_list_id=shopping_list["id"],
@@ -491,6 +499,10 @@ def add_shopping_item_tool(context: AssistantToolContext, input_data: dict[str, 
         )
     )
     return {"updated": True, "shopping_list": {"id": shopping_list.get("id"), "title": shopping_list.get("title")}, "item": summarize_shopping_item(item)}
+
+
+def summarize_shopping_list_options(lists: list[dict]) -> list[dict[str, str]]:
+    return [{"id": str(item.get("id")), "title": str(item.get("title") or "Untitled list")} for item in lists[:8] if item.get("id")]
 
 
 def check_shopping_item_tool(context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:

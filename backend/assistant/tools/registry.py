@@ -33,6 +33,7 @@ from backend.services.shopping_service import (
     update_shopping_list_item,
 )
 from backend.services.workout_service import get_next_workout_logic, get_todays_workout_summary
+from backend.services.live_price_service import search_live_prices
 
 
 READ_TOOLS_ENABLED = os.getenv("JARVIS_TOOLS_ENABLED", "true").lower() == "true"
@@ -61,6 +62,7 @@ class AssistantToolDefinition:
     access: str
     requires_confirmation: bool
     execute: Callable[[AssistantToolContext, dict[str, Any]], dict[str, Any]]
+    evidence_class: str = "internal_record"
 
 
 def tool_status() -> dict[str, Any]:
@@ -77,6 +79,7 @@ def tool_status() -> dict[str, Any]:
                 "riskLevel": tool.risk_level,
                 "access": tool.access,
                 "requiresConfirmation": tool.requires_confirmation,
+                "evidenceClass": tool.evidence_class,
             }
             for tool in TOOL_REGISTRY.values()
         ],
@@ -104,6 +107,8 @@ def select_read_tools(user_text: str) -> list[str]:
     ]
     if any(phrase in text for phrase in status_phrases):
         selected.append("get_system_status")
+    if is_live_commerce_request(text):
+        selected.append("search_live_prices")
     if "morning" in text and "brief" in text:
         selected.append("get_morning_brief")
     if "daily debrief" in text or "evening debrief" in text or ("debrief" in text and "daily" in text):
@@ -124,7 +129,7 @@ def select_read_tools(user_text: str) -> list[str]:
 
 
 def select_tools(user_text: str) -> list[dict[str, Any]]:
-    calls = [{"name": name, "input": {}} for name in select_read_tools(user_text)]
+    calls = [{"name": name, "input": {"query": extract_price_query(user_text)}} if name == "search_live_prices" else {"name": name, "input": {}} for name in select_read_tools(user_text)]
     lower = user_text.lower()
     wants_tomorrow_schedule = any(phrase in lower for phrase in ["tomorrow", "tomorrow's"]) and any(word in lower for word in ["calendar", "schedule", "going on", "have going", "events"])
     if wants_tomorrow_schedule:
@@ -141,6 +146,19 @@ def select_tools(user_text: str) -> list[dict[str, Any]]:
         seen.add(key)
         deduped.append(call)
     return deduped[:MAX_TOOL_CALLS]
+
+
+def is_live_commerce_request(text: str) -> bool:
+    lower = text.lower()
+    commerce = any(word in lower for word in ("price", "prices", "cost", "cheapest", "how much", "availability", "in stock", "nearby store", "stores near"))
+    return commerce and not any(phrase in lower for phrase in ("estimated price", "my food vault", "i paid", "did i pay"))
+
+
+def extract_price_query(text: str) -> str:
+    cleaned = re.sub(r"(?i)\b(?:what(?:'s| is| are)?|how much(?: does| is| are)?|find|check|compare|show me|tell me)\b", " ", text)
+    cleaned = re.sub(r"(?i)\b(?:current|live|nearby|local|prices?|cost|costs|availability|in stock|at stores?|near me|around me|please)\b", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ?.,")
+    return cleaned or text.strip()
 
 
 def select_write_tools(user_text: str) -> list[dict[str, Any]]:
@@ -264,6 +282,10 @@ def get_system_status_tool(_context: AssistantToolContext, _input: dict[str, Any
         "red_checks": red,
         "checks": checks,
     }
+
+
+def search_live_prices_tool(_context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
+    return search_live_prices(str(input_data.get("query") or ""), str(input_data.get("location") or "") or None)
 
 
 def get_daily_debrief_tool(context: AssistantToolContext, _input: dict[str, Any]) -> dict[str, Any]:
@@ -946,6 +968,7 @@ def summarize_forge_task(task: dict | None) -> dict | None:
 
 
 TOOL_REGISTRY: dict[str, AssistantToolDefinition] = {
+    "search_live_prices": AssistantToolDefinition("search_live_prices", "Search configured live retail providers for current prices; refuses unsourced price claims.", 1, "read", False, search_live_prices_tool, "verified_provider_result"),
     "get_system_status": AssistantToolDefinition("get_system_status", "Run the live Jarvis ping/health checks and report every red (offline) service.", 1, "read", False, get_system_status_tool),
     "get_morning_brief": AssistantToolDefinition("get_morning_brief", "Get today's sanitized morning brief.", 1, "read", False, get_morning_brief_tool),
     "get_daily_debrief": AssistantToolDefinition("get_daily_debrief", "Get today's sanitized daily debrief summary.", 1, "read", False, get_daily_debrief_tool),

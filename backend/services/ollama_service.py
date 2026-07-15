@@ -169,6 +169,9 @@ def chat_with_jarvis(messages: list[dict], model: str | None = None, context: As
     status_reply = build_system_status_reply(tool_results)
     if status_reply:
         return build_service_result(status_reply, selected_model, tool_results, executions, manifest, context, execution_trace, "system_status")
+    commerce_reply = build_live_price_reply(latest_user_text, tool_results)
+    if commerce_reply:
+        return build_service_result(commerce_reply, selected_model, tool_results, executions, manifest, context, execution_trace, "verified_live_price")
 
     safe_messages = [
         {"role": "system", "content": JARVIS_SYSTEM_PROMPT},
@@ -345,6 +348,30 @@ def build_system_status_reply(tool_results: list[dict]) -> str:
         detail = check.get("detail") or "Offline"
         details.append(f"{label}: {detail}")
     return f"I ran the live ping. {len(red)} of {len(checks)} checks are red: " + "; ".join(details)
+
+
+def build_live_price_reply(user_text: str, tool_results: list[dict]) -> str:
+    from backend.assistant.tools.registry import is_live_commerce_request
+
+    if not is_live_commerce_request(user_text):
+        return ""
+    item = next((result for result in tool_results if result.get("tool") == "search_live_prices"), None)
+    result = (item or {}).get("result") or {}
+    offers = result.get("offers") or []
+    if not item or not item.get("success") or not result.get("verified") or not offers:
+        providers = result.get("providers") or []
+        missing = [provider.get("provider") for provider in providers if not provider.get("configured")]
+        suffix = f" Missing provider credentials: {', '.join(filter(None, missing))}." if missing else ""
+        return "I don't have a verified live source for that price, so I won't guess." + suffix
+
+    lines = []
+    for offer in offers[:5]:
+        evidence = offer.get("evidence") or {}
+        title = offer.get("title") or result.get("query")
+        size = f" {offer.get('size')}" if offer.get("size") else ""
+        lines.append(f"{offer.get('retailer')}: {title}{size} — ${float(offer['price']):.2f} [{evidence.get('provider')}]")
+    location = f" near {result.get('location')}" if result.get("location") else ""
+    return f"Verified live results{location}: " + "; ".join(lines)
 
 
 def format_write_confirmation(tool_name: str | None, result: dict, request_id: str = "") -> str:

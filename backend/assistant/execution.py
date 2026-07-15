@@ -74,6 +74,11 @@ def capability_manifest() -> AssistantCapabilityManifest:
     return AssistantCapabilityManifest(
         available_tools=sorted(available),
         unavailable_capabilities=list(UNAVAILABLE_CAPABILITIES),
+        evidence_requirements={
+            "live_price": "verified_provider_result",
+            "availability": "verified_provider_result",
+            "nearby_store": "place_registry_result",
+        },
     )
 
 
@@ -82,6 +87,7 @@ def capability_manifest_prompt(manifest: AssistantCapabilityManifest) -> str:
         "Server-authoritative capability manifest for this request:",
         json.dumps(manifest.model_dump(), sort_keys=True),
         "Only available_tools can be executed. Unavailable capabilities do not exist for you, even if you know their setup steps.",
+        "Hard live-fact gate: no verified provider source means no factual current price, availability, or nearby-store answer.",
     ])
 
 

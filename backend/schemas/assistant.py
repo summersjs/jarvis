@@ -33,6 +33,7 @@ class AssistantChatRequest(BaseModel):
 class AssistantCapabilityManifest(BaseModel):
     available_tools: list[str]
     unavailable_capabilities: list[str]
+    evidence_requirements: dict[str, str] = Field(default_factory=dict)
 
 
 class ActionVerification(BaseModel):

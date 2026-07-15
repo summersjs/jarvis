@@ -89,7 +89,10 @@ def _resolve_preference(user_id: str, query: str) -> dict | None:
 def _preferred_search_query(query: str, preference: dict | None) -> str:
     if not preference:
         return query
-    terms = [preference.get("preferred_brand") or query, preference.get("preferred_product_name")]
+    product_name = preference.get("preferred_product_name")
+    if str(preference.get("item_keyword") or "").lower() == "red bull" and str(product_name or "").lower() == "original":
+        product_name = None
+    terms = [preference.get("preferred_brand") or query, product_name]
     if preference.get("preferred_size") and not preference.get("all_sizes"):
         terms.extend([preference.get("preferred_size"), preference.get("preferred_unit")])
     return " ".join(str(term).strip() for term in terms if term).strip()
@@ -102,11 +105,13 @@ def _rank_preferred_offers(offers: list[dict], preference: dict | None, query: s
         product = str(preference.get("preferred_product_name") or "").lower()
         if brand:
             verified = [offer for offer in verified if brand in str(offer.get("title") or "").lower()]
-        if product:
+        original_red_bull = str(preference.get("item_keyword") or "").lower() == "red bull" and product == "original"
+        if product and not original_red_bull:
             verified = [offer for offer in verified if product in str(offer.get("title") or "").lower()]
         notes = str(preference.get("notes") or "").lower()
         if "regular" in notes or "original flavor" in notes:
-            verified = [offer for offer in verified if not any(term in str(offer.get("title") or "").lower() for term in ("sugar free", "sugar-free", "zero"))]
+            excluded = ("sugar free", "sugar-free", "sugarfree", "zero", "edition", "watermelon", "peach", "coconut", "berry", "lime", "strawberry", "apricot", "dragon fruit")
+            verified = [offer for offer in verified if not any(term in str(offer.get("title") or "").lower() for term in excluded)]
     elif query:
         required = [token for token in re_words(query) if len(token) > 2]
         if required:
@@ -116,7 +121,8 @@ def _rank_preferred_offers(offers: list[dict], preference: dict | None, query: s
         cheapest_by_size = {}
         for offer in verified:
             size = str(offer.get("size") or "size not listed").strip().lower()
-            cheapest_by_size.setdefault(size, offer)
+            retailer = str(offer.get("retailer") or "retailer").strip().lower()
+            cheapest_by_size.setdefault((retailer, size), offer)
         return list(cheapest_by_size.values())[:12]
     return verified[:12] if preference else verified[:1]
 
@@ -180,7 +186,7 @@ def _nearest_kroger_location(base_url: str, token: str, zip_code: str | None) ->
 
 
 def _searchapi_walmart(query: str, _location: str | None) -> dict:
-    key = os.getenv("SEARCHAPI_API_KEY")
+    key = os.getenv("SEARCHAPI_API_KEY") or os.getenv("SEARCH_API_KEY")
     if not key:
         return {"provider": "searchapi_walmart", "configured": False, "offers": []}
     params = {"engine": "walmart_search", "q": query, "api_key": key}
@@ -202,6 +208,7 @@ def _serpapi_walmart(query: str, _location: str | None) -> dict:
 
 def _walmart_offers(data: dict, provider: str, source_url: str) -> list[dict]:
     offers = []
+    seen = set()
     for item in data.get("organic_results") or []:
         raw = item.get("primary_offer") or item
         price = raw.get("offer_price") or raw.get("price") or item.get("price")
@@ -209,8 +216,24 @@ def _walmart_offers(data: dict, provider: str, source_url: str) -> list[dict]:
             try: price = float(price.replace("$", "").replace(",", ""))
             except ValueError: price = None
         if isinstance(price, (int, float)):
-            offers.append({"retailer": "Walmart", "title": item.get("title"), "price": float(price), "availability": item.get("availability") or "listed", "url": item.get("link") or item.get("product_page_url"), "evidence": _evidence(provider, "retailer_web_result", item.get("link") or source_url)})
+            title = str(item.get("title") or "")
+            link = item.get("link") or item.get("product_page_url")
+            identity = (link or title, float(price))
+            if identity in seen:
+                continue
+            seen.add(identity)
+            offers.append({"retailer": "Walmart", "title": title, "size": _extract_retail_size(title), "price": float(price), "availability": item.get("availability") or "listed", "url": link, "evidence": _evidence(provider, "retailer_web_result", link or source_url)})
     return offers
+
+
+def _extract_retail_size(title: str) -> str | None:
+    import re
+    size_match = re.search(r"(\d+(?:\.\d+)?)\s*fl\.?\s*oz\.?", title, re.IGNORECASE)
+    if not size_match:
+        return None
+    unit_size = f"{size_match.group(1)} fl oz"
+    pack_match = re.search(r"(?:pack of|\b)(\d+)\s*(?:cans?|ct|count|pk)\b", title, re.IGNORECASE)
+    return f"{pack_match.group(1)} pk / {unit_size}" if pack_match and int(pack_match.group(1)) > 1 else unit_size
 
 
 def _instacart_prices(_query: str, _location: str | None) -> dict:

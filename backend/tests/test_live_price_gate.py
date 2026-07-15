@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from backend.assistant.execution import capability_manifest
 from backend.assistant.tools.registry import extract_price_query, select_tools
-from backend.services.live_price_service import _nearest_kroger_location, _preferred_search_query, _rank_preferred_offers, search_live_prices
+from backend.services.live_price_service import _extract_retail_size, _nearest_kroger_location, _preferred_search_query, _rank_preferred_offers, search_live_prices
 from backend.services.ollama_service import build_live_price_reply
 
 
@@ -48,6 +48,19 @@ class LivePriceGateTests(unittest.TestCase):
         self.assertIn("$8.99", reply)
         self.assertIn("Verified via Kroger", reply)
 
+    def test_mixed_retailers_and_providers_are_all_attributed(self):
+        reply = build_live_price_reply("Red Bull price", [{
+            "tool": "search_live_prices", "success": True,
+            "result": {"verified": True, "preference": {"item_keyword": "red bull"}, "offers": [
+                {"retailer": "Walmart", "title": "Red Bull", "size": "8.4 fl oz", "price": 2.34,
+                 "evidence": {"provider": "searchapi", "classification": "retailer_web_result"}},
+                {"retailer": "Kroger", "title": "Red Bull", "size": "8.4 fl oz", "price": 2.50,
+                 "evidence": {"provider": "kroger", "classification": "official_retailer_api"}},
+            ]},
+        }])
+        self.assertIn("across Kroger and Walmart", reply)
+        self.assertIn("Verified via Kroger and SearchAPI", reply)
+
     def test_capability_manifest_declares_live_evidence_requirement(self):
         manifest = capability_manifest()
         self.assertEqual(manifest.evidence_requirements["live_price"], "verified_provider_result")
@@ -60,7 +73,7 @@ class LivePriceGateTests(unittest.TestCase):
         self.assertIn("filter.zipCode.near=22980", request.call_args.args[0])
 
     def test_red_bull_preference_keeps_original_and_cheapest_per_size(self):
-        preference = {"preferred_brand": "Red Bull", "preferred_product_name": "Original", "all_sizes": True, "notes": "Regular/original flavor only"}
+        preference = {"item_keyword": "red bull", "preferred_brand": "Red Bull", "preferred_product_name": "Original", "all_sizes": True, "notes": "Regular/original flavor only"}
         offers = [
             {"title": "Red Bull Original", "size": "8.4 fl oz", "price": 2.79, "evidence": {"provider": "kroger"}},
             {"title": "Red Bull Original", "size": "8.4 fl oz", "price": 2.49, "evidence": {"provider": "kroger"}},
@@ -70,7 +83,7 @@ class LivePriceGateTests(unittest.TestCase):
         ]
         ranked = _rank_preferred_offers(offers, preference)
         self.assertEqual([(item["size"], item["price"]) for item in ranked], [("8.4 fl oz", 2.49), ("12 fl oz", 3.00)])
-        self.assertEqual(_preferred_search_query("Red Bull", preference), "Red Bull Original")
+        self.assertEqual(_preferred_search_query("Red Bull", preference), "Red Bull")
 
     def test_generic_butter_returns_only_cheapest_verified_offer(self):
         offers = [
@@ -84,6 +97,28 @@ class LivePriceGateTests(unittest.TestCase):
     def test_colgate_preference_builds_specific_search(self):
         preference = {"preferred_brand": "Colgate", "preferred_product_name": "Total Whitening", "preferred_size": "20", "preferred_unit": "oz", "all_sizes": False}
         self.assertEqual(_preferred_search_query("toothpaste", preference), "Colgate Total Whitening 20 oz")
+
+    @patch("backend.services.live_price_service._json_request")
+    @patch.dict("os.environ", {"SEARCH_API_KEY": "alias-key"}, clear=True)
+    def test_searchapi_local_key_alias_is_supported(self, request):
+        request.return_value = {"organic_results": [{"title": "Red Bull Original", "price": 2.98, "link": "https://www.walmart.com/ip/1"}]}
+        from backend.services.live_price_service import _searchapi_walmart
+        result = _searchapi_walmart("Red Bull", None)
+        self.assertTrue(result["configured"])
+        self.assertEqual(result["offers"][0]["price"], 2.98)
+        self.assertIn("api_key=alias-key", request.call_args.args[0])
+
+    def test_walmart_title_size_and_pack_are_normalized(self):
+        self.assertEqual(_extract_retail_size("Red Bull 8.4 fl. oz., Pack of 12 Cans"), "12 pk / 8.4 fl oz")
+        self.assertEqual(_extract_retail_size("Red Bull 12 fl. oz. Can"), "12 fl oz")
+
+    def test_all_sizes_are_preserved_per_retailer(self):
+        preference = {"preferred_brand": "Red Bull", "preferred_product_name": "", "all_sizes": True}
+        offers = [
+            {"retailer": "Kroger", "title": "Red Bull", "size": "12 fl oz", "price": 3.00, "evidence": {"provider": "kroger"}},
+            {"retailer": "Walmart", "title": "Red Bull", "size": "12 fl oz", "price": 2.94, "evidence": {"provider": "searchapi"}},
+        ]
+        self.assertEqual(len(_rank_preferred_offers(offers, preference, "Red Bull")), 2)
 
 
 if __name__ == "__main__":

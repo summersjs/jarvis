@@ -374,19 +374,31 @@ def build_live_price_reply(user_text: str, tool_results: list[dict]) -> str:
         lines.append(f"{title}{size} — ${float(offer['price']):.2f}")
     location = f" near {result.get('location')}" if result.get("location") else ""
     preference = result.get("preference") or {}
-    retailer = offers[0].get("retailer") or "the retailer"
-    provider = ((offers[0].get("evidence") or {}).get("provider") or "provider").replace("_", " ").title()
+    retailers = sorted({str(offer.get("retailer")) for offer in offers[:5] if offer.get("retailer")})
+    retailer_text = " and ".join(retailers) if retailers else "the retailers"
+    provider_names = {
+        "searchapi": "SearchAPI",
+        "searchapi_walmart": "SearchAPI",
+        "serpapi": "SerpApi",
+        "serpapi_walmart": "SerpApi",
+        "kroger": "Kroger",
+    }
+    providers = sorted({
+        provider_names.get(str((offer.get("evidence") or {}).get("provider")), str((offer.get("evidence") or {}).get("provider")).replace("_", " ").title())
+        for offer in offers[:5] if (offer.get("evidence") or {}).get("provider")
+    })
+    provider_text = " and ".join(providers) or "a verified provider"
     if preference:
         keyword = str(preference.get("item_keyword") or "item")
         if keyword == "red bull":
-            intro = f"Your regular Red Bull lineup at {retailer} is looking respectable—your saved preference did its job{location}: "
+            intro = f"Your regular Red Bull lineup across {retailer_text} is looking respectable—your saved preference did its job{location}: "
         elif keyword == "toothpaste":
             intro = f"Colgate it is—your saved toothpaste preference kept the off-brand chaos out{location}: "
         else:
             intro = f"I used your saved {keyword} preference—because apparently we have standards{location}: "
     else:
         intro = f"No brand loyalty oath on file, so cheapest verified match wins{location}: "
-    return intro + "; ".join(lines) + f". Verified via {provider}."
+    return intro + "; ".join(lines) + f". Verified via {provider_text}."
 
 
 def format_write_confirmation(tool_name: str | None, result: dict, request_id: str = "") -> str:

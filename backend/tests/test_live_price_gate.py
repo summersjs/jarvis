@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from backend.assistant.execution import capability_manifest
 from backend.assistant.tools.registry import extract_price_query, select_tools
-from backend.services.live_price_service import search_live_prices
+from backend.services.live_price_service import _nearest_kroger_location, search_live_prices
 from backend.services.ollama_service import build_live_price_reply
 
 
@@ -11,6 +11,10 @@ class LivePriceGateTests(unittest.TestCase):
     def test_red_bull_price_request_selects_evidence_tool(self):
         calls = select_tools("What are Red Bull prices near me?")
         self.assertEqual(calls[0]["name"], "search_live_prices")
+        self.assertEqual(calls[0]["input"]["query"], "Red Bull")
+
+    def test_retailer_name_is_not_sent_as_part_of_product_term(self):
+        calls = select_tools("What are Red Bull prices at Kroger near me?")
         self.assertEqual(calls[0]["input"]["query"], "Red Bull")
 
     @patch.dict("os.environ", {}, clear=True)
@@ -42,6 +46,12 @@ class LivePriceGateTests(unittest.TestCase):
         manifest = capability_manifest()
         self.assertEqual(manifest.evidence_requirements["live_price"], "verified_provider_result")
         self.assertIn("search_live_prices", manifest.available_tools)
+
+    @patch("backend.services.live_price_service._json_request")
+    def test_kroger_location_can_be_resolved_from_zip(self, request):
+        request.return_value = {"data": [{"locationId": "02900513"}]}
+        self.assertEqual(_nearest_kroger_location("https://api.kroger.test/v1", "token", "22980"), "02900513")
+        self.assertIn("filter.zipCode.near=22980", request.call_args.args[0])
 
 
 if __name__ == "__main__":

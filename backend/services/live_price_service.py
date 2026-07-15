@@ -77,17 +77,22 @@ def _google_places(location: str | None) -> list[dict]:
 
 
 def _kroger_prices(query: str, _location: str | None) -> dict:
-    client_id, secret, location_id = os.getenv("KROGER_CLIENT_ID"), os.getenv("KROGER_CLIENT_SECRET"), os.getenv("KROGER_LOCATION_ID")
-    if not all((client_id, secret, location_id)):
+    client_id, secret = os.getenv("KROGER_CLIENT_ID"), os.getenv("KROGER_CLIENT_SECRET")
+    if not all((client_id, secret)):
         return {"provider": "kroger", "configured": False, "offers": []}
-    token_req = urllib.request.Request("https://api.kroger.com/v1/connect/oauth2/token", data=urllib.parse.urlencode({"grant_type": "client_credentials", "scope": "product.compact"}).encode(), headers={
+    token_url = os.getenv("KROGER_TOKEN_URL", "https://api.kroger.com/v1/connect/oauth2/token")
+    base_url = os.getenv("KROGER_BASE_URL", "https://api.kroger.com/v1").rstrip("/")
+    token_req = urllib.request.Request(token_url, data=urllib.parse.urlencode({"grant_type": "client_credentials", "scope": "product.compact"}).encode(), headers={
         "Authorization": "Basic " + base64.b64encode(f"{client_id}:{secret}".encode()).decode(),
         "Content-Type": "application/x-www-form-urlencoded",
     }, method="POST")
     with urllib.request.urlopen(token_req, timeout=12) as response:
         token = json.loads(response.read().decode())["access_token"]
+    location_id = os.getenv("KROGER_LOCATION_ID") or _nearest_kroger_location(base_url, token, os.getenv("KROGER_DEFAULT_ZIP"))
+    if not location_id:
+        return {"provider": "kroger", "configured": True, "error": "location_required", "offers": []}
     params = urllib.parse.urlencode({"filter.term": query, "filter.locationId": location_id, "filter.limit": 10})
-    url = f"https://api.kroger.com/v1/products?{params}"
+    url = f"{base_url}/products?{params}"
     data = _json_request(url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
     offers = []
     for product in data.get("data") or []:
@@ -96,6 +101,15 @@ def _kroger_prices(query: str, _location: str | None) -> dict:
             if isinstance(price, (int, float)):
                 offers.append({"retailer": "Kroger", "title": product.get("description"), "size": item.get("size"), "price": float(price), "availability": "listed", "evidence": _evidence("kroger", "official_retailer_api", url, store={"location_id": location_id})})
     return {"provider": "kroger", "configured": True, "offers": offers}
+
+
+def _nearest_kroger_location(base_url: str, token: str, zip_code: str | None) -> str | None:
+    if not zip_code:
+        return None
+    params = urllib.parse.urlencode({"filter.zipCode.near": zip_code.strip(), "filter.limit": 1})
+    data = _json_request(f"{base_url}/locations?{params}", headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
+    locations = data.get("data") or []
+    return str(locations[0].get("locationId")) if locations and locations[0].get("locationId") else None
 
 
 def _searchapi_walmart(query: str, _location: str | None) -> dict:

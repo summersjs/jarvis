@@ -110,9 +110,9 @@ def chat_with_jarvis(messages: list[dict], model: str | None = None, context: As
     if context.conversation_id != "local-jarvis":
         prior_state = CONVERSATION_STATE_STORE.get(context.conversation_id)
         try:
-            resolution = (
-                deterministic_sensitive_resolution(latest_user_text, prior_state)
-                or resolve_context(latest_user_text, prior_state, selected_model, lambda path, payload: _request_json(path, payload, timeout=OLLAMA_TIMEOUT_SECONDS))
+            deterministic = deterministic_sensitive_resolution(latest_user_text, prior_state)
+            resolution = deterministic or (
+                resolve_context(latest_user_text, prior_state, selected_model, lambda path, payload: _request_json(path, payload, timeout=OLLAMA_TIMEOUT_SECONDS))
                 if needs_model_resolution(prior_state, latest_user_text)
                 else direct_resolution(latest_user_text)
             )

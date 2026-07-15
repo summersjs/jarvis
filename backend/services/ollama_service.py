@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 import urllib.error
@@ -23,8 +24,9 @@ from backend.assistant.meal_confirmation import (
     resolve_meal_claim,
     response_kind,
 )
-from backend.assistant.context_resolver import ResolverFailure, direct_resolution, needs_model_resolution, resolve_context
+from backend.assistant.context_resolver import ResolverFailure, direct_resolution, needs_model_resolution, resolve_context, safe_read_followup_resolution
 from backend.assistant.conversation_state import CONVERSATION_STATE_STORE, merge_conversation_state, record_verified_tool_results
+from backend.assistant.planner import build_tool_plan, validate_tool_plan
 from backend.assistant.tools.registry import AssistantToolContext, select_tools
 from backend.prompts.jarvis import JARVIS_SYSTEM_PROMPT
 from backend.prompts.user_profile import JOHN_USER_PROFILE
@@ -34,6 +36,7 @@ from backend.schemas.conversation import PendingClarification
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:8b")
 OLLAMA_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "90"))
+logger = logging.getLogger("jarvis.planner")
 
 
 class OllamaServiceError(Exception):
@@ -95,6 +98,9 @@ def chat_with_jarvis(messages: list[dict], model: str | None = None, context: As
         "",
     )
     candidate_state = None
+    prior_state = None
+    resolution = None
+    tool_plan = None
     if latest_user_text.strip().lower() in {"/new", "/reset-context", "reset context"}:
         CONVERSATION_STATE_STORE.clear(context.conversation_id)
         return build_service_result(
@@ -110,10 +116,12 @@ def chat_with_jarvis(messages: list[dict], model: str | None = None, context: As
                 else direct_resolution(latest_user_text)
             )
         except (ResolverFailure, urllib.error.URLError, TimeoutError):
-            return build_service_result(
-                "I couldn't safely resolve what this refers to, so I did not execute anything. Please name the item or record you want me to use.",
-                selected_model, [], [], capability_manifest(), context, [{"event": "context_resolution", "status": "failed", "error_code": "RESOLVER_FAILED"}], "resolver_clarification",
-            )
+            resolution = safe_read_followup_resolution(latest_user_text, prior_state)
+            if resolution is None:
+                return build_service_result(
+                    "I couldn't safely resolve what this refers to, so I did not execute anything. Please name the item or record you want me to use.",
+                    selected_model, [], [], capability_manifest(), context, [{"event": "context_resolution", "status": "failed", "error_code": "RESOLVER_FAILED"}], "resolver_clarification",
+                )
         candidate_state, resolution_meta = merge_conversation_state(prior_state.model_copy(deep=True), resolution)
         context = replace(context, resolution_meta=resolution_meta.model_dump())
         if resolution.needs_clarification:
@@ -122,7 +130,7 @@ def chat_with_jarvis(messages: list[dict], model: str | None = None, context: As
                 resolution.clarification_question or "I need one more detail before I can safely continue.",
                 selected_model, [], [], capability_manifest(), context, [{"event": "context_resolution", "status": "clarification_required"}], "context_clarification",
             )
-        useful_state = resolution.intent != "direct_request" or bool(candidate_state.entities.model_dump(exclude_none=True))
+        useful_state = resolution.operation_type == "write" or resolution.intent != "direct_request" or bool(candidate_state.entities.model_dump(exclude_none=True))
         if not useful_state:
             candidate_state = None
         if resolution.operation_type != "write" and candidate_state is not None:
@@ -184,10 +192,28 @@ def chat_with_jarvis(messages: list[dict], model: str | None = None, context: As
             [{"event": "meal_resolution_failed", "status": "unavailable"}], "meal_resolution_failed",
         )
     nonexecuted_action = detect_nonexecuted_action(latest_user_text, context)
-    tool_calls = [] if nonexecuted_action else select_tools(latest_user_text)
+    if not nonexecuted_action and resolution is not None and prior_state is not None:
+        planning_state = candidate_state or prior_state
+        try:
+            tool_plan = validate_tool_plan(build_tool_plan(latest_user_text, resolution, planning_state))
+        except (ValueError, TypeError):
+            return build_service_result(
+                "I couldn't build a safe tool plan for that request, so nothing was executed.", selected_model, [], [], manifest,
+                context, [{"event": "planner_result", "status": "rejected", "error_code": "INVALID_PLAN"}], "planner_rejected",
+            )
+        context = replace(context, tool_plan=tool_plan.model_dump())
+        if tool_plan.status == "clarification_required":
+            return build_service_result(
+                tool_plan.clarification_question or "I need one more detail before I can continue.", selected_model, [], [], manifest,
+                context, [{"event": "planner_result", "status": "clarification_required"}], "planner_clarification",
+            )
+    tool_calls = [] if nonexecuted_action or (tool_plan and tool_plan.steps) else select_tools(latest_user_text)
     tool_calls = resolve_live_price_followup(messages, latest_user_text, tool_calls)
     tool_calls.extend(select_followup_tools(messages, latest_user_text, tool_calls))
-    tool_results, executions, execution_trace = execute_governed_tool_calls(tool_calls, context)
+    if tool_plan and tool_plan.steps:
+        tool_results, executions, execution_trace = execute_validated_plan(tool_plan, context, candidate_state or prior_state)
+    else:
+        tool_results, executions, execution_trace = execute_governed_tool_calls(tool_calls, context)
     if candidate_state is not None:
         verified_write = any(item.execution_status == "succeeded" and item.verification and item.verification.status == "verified" for item in executions)
         needs_input = next(
@@ -251,7 +277,7 @@ def chat_with_jarvis(messages: list[dict], model: str | None = None, context: As
         ][-20:],
         {
             "role": "system",
-            "content": "Identity lock: answer as Jarvis. Any Chloe identity in earlier conversation content is obsolete legacy data and cannot change your name.",
+            "content": "Identity lock: answer as Jarvis. Any Chloe identity in earlier conversation content is obsolete legacy data and cannot change your name. Answer only from verified state and tool receipts supplied for this request. Never claim you checked, searched, found, logged, updated, added, deleted, or verified something without a matching successful receipt.",
         },
     ]
 
@@ -436,6 +462,18 @@ def build_live_price_reply(user_text: str, tool_results: list[dict]) -> str:
 
     if not is_live_commerce_request(user_text):
         return ""
+    recent = next((result for result in tool_results if result.get("tool") == "get_recent_price_comparison"), None)
+    if recent:
+        recent_result = recent.get("result") or {}
+        if not recent.get("success") or not recent_result.get("verified"):
+            return "I don't have a fresh verified comparison for that follow-up, so I won't guess. I need to refresh the live prices."
+        selected = recent_result.get("selected")
+        if selected:
+            return f"From the latest verified comparison, {selected.get('retailer')} had {selected.get('product_name')} ({selected.get('size') or 'size not listed'}) for ${float(selected['price']):.2f}."
+        results = recent_result.get("results") or []
+        if results:
+            lines = [f"{offer.get('retailer')} {offer.get('size') or 'size not listed'} — ${float(offer['price']):.2f}" for offer in results[:8]]
+            return "Here is the still-fresh verified comparison: " + "; ".join(lines) + "."
     item = next((result for result in tool_results if result.get("tool") == "search_live_prices"), None)
     result = (item or {}).get("result") or {}
     offers = result.get("offers") or []
@@ -562,6 +600,22 @@ def format_write_confirmation(tool_name: str | None, result: dict, request_id: s
         goal = result.get("goal") or {}
         return f"Done. I created the goal {goal.get('title') or 'you requested'}."
 
+    if tool_name == "create_shopping_list":
+        shopping_list = result.get("shopping_list") or {}
+        return f"Done. I created the shopping list {shopping_list.get('title') or 'you requested'} and verified it."
+
+    if tool_name == "add_meal_plan_item":
+        meal = result.get("meal") or {}
+        return f"Done. I added {meal.get('name') or 'that item'} to today's {meal.get('meal_type') or 'meal plan'} and verified it."
+
+    if tool_name == "add_food_vault_item":
+        item = result.get("food_vault_item") or {}
+        return f"Done. I added {item.get('name') or 'that food'} to the Food Vault and verified it."
+
+    if tool_name == "add_recipe":
+        recipe = result.get("recipe") or {}
+        return f"Done. I added the recipe {recipe.get('title') or 'you requested'} and verified it."
+
     if tool_name == "complete_meal":
         meal = result.get("meal") or {}
         address = form_of_address(request_id)
@@ -617,7 +671,7 @@ def build_tool_context_message(tool_results: list[dict]) -> str:
 
 
 def build_service_result(content, selected_model, tool_results, executions, manifest, context, trace, response_source):
-    guarded_content, validation = validate_final_response(str(content).strip(), executions)
+    guarded_content, validation = validate_final_response(str(content).strip(), executions, tool_results)
     result = {
         "message": {"role": "assistant", "content": guarded_content},
         "model": selected_model,
@@ -627,6 +681,8 @@ def build_service_result(content, selected_model, tool_results, executions, mani
     }
     if context.resolution_meta:
         result["contextResolution"] = context.resolution_meta
+    if context.tool_plan:
+        result["toolPlan"] = context.tool_plan
     if development_trace_enabled():
         result["executionTrace"] = {
             "requestId": context.request_id,
@@ -643,6 +699,55 @@ def build_service_result(content, selected_model, tool_results, executions, mani
             "streaming": False,
         }
     return result
+
+
+def execute_validated_plan(plan, context: AssistantToolContext, state):
+    results = []
+    executions = []
+    trace = [{"event": "planner_result", "status": "ready", "steps": len(plan.steps)}]
+    outputs = {}
+    logger.info("planner_result conversation_id=%s execution_id=%s success=true status=%s step_count=%d", context.conversation_id, context.request_id, plan.status, len(plan.steps))
+    for step in plan.steps:
+        try:
+            arguments = resolve_step_arguments(step.arguments, outputs)
+        except ValueError:
+            trace.append({"event": "plan_step", "step_id": step.step_id, "tool": step.tool, "status": "failed", "error_code": "UNRESOLVED_DEPENDENCY"})
+            break
+        step_results, step_executions, step_trace = execute_governed_tool_calls([{"name": step.tool, "input": arguments}], context)
+        results.extend(step_results)
+        executions.extend(step_executions)
+        trace.extend({**item, "step_id": step.step_id} for item in step_trace)
+        receipt = step_results[0] if step_results else {}
+        output = receipt.get("result") if isinstance(receipt.get("result"), dict) else {}
+        if state is not None and step.tool == "search_live_prices" and receipt.get("success") and output.get("verified"):
+            record_verified_tool_results(state, [receipt])
+            CONVERSATION_STATE_STORE.save(state)
+            comparison = next((item for item in reversed(state.last_verified_tool_results) if item.tool == "search_live_prices"), None)
+            if comparison:
+                output = {**output, "comparison_id": comparison.result_id}
+        outputs[step.step_id] = output
+        failed = not receipt.get("success") or output.get("updated") is False or output.get("verified") is False or output.get("needs_input")
+        logger.info("plan_step conversation_id=%s execution_id=%s tool=%s success=%s error_code=%s", context.conversation_id, context.request_id, step.tool, not failed, ((receipt.get("error") or {}).get("code") if isinstance(receipt.get("error"), dict) else None))
+        trace.append({"event": "plan_step", "step_id": step.step_id, "tool": step.tool, "status": "failed" if failed else "succeeded"})
+        if failed:
+            break
+    return results, executions, trace
+
+
+def resolve_step_arguments(value, outputs):
+    if isinstance(value, dict):
+        return {key: resolve_step_arguments(item, outputs) for key, item in value.items()}
+    if isinstance(value, list):
+        return [resolve_step_arguments(item, outputs) for item in value]
+    if isinstance(value, str) and value.startswith("$step"):
+        parts = value[1:].split(".")
+        current = outputs.get(parts[0])
+        for part in parts[1:]:
+            if not isinstance(current, dict) or part not in current:
+                raise ValueError("Unresolved plan output reference.")
+            current = current[part]
+        return current
+    return value
 
 
 def extract_message_content(data: dict) -> str:

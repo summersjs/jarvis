@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from pydantic import ValidationError
 
-from backend.assistant.context_resolver import ResolverFailure, direct_resolution, parse_resolver_json, resolve_context
+from backend.assistant.context_resolver import ResolverFailure, direct_resolution, parse_resolver_json, resolve_context, safe_read_followup_resolution
 from backend.assistant.conversation_state import ConversationStateStore, merge_conversation_state, record_verified_tool_results
 from backend.assistant.tools.registry import AssistantToolContext, add_shopping_item_tool
 from backend.schemas.conversation import ContextResolution, ConversationState
@@ -125,6 +125,13 @@ class ConversationContextTests(unittest.TestCase):
         self.assertEqual(result.entity_updates.product, "Red Bull")
         self.assertEqual(result.entity_updates.size, "20 oz")
         self.assertEqual(result.operation_type, "live_external")
+
+    def test_safe_read_fallback_handles_price_comparison_but_not_writes(self):
+        state = ConversationState.model_validate({"conversation_id": "conversation-8", "active_intent": "compare_local_prices", "entities": {"product": "Red Bull", "size": "20 oz"}})
+        fallback = safe_read_followup_resolution("Which one is cheaper?", state)
+        self.assertEqual(fallback.intent, "compare_local_prices")
+        self.assertTrue(fallback.inherit_context)
+        self.assertIsNone(safe_read_followup_resolution("Add two of the cheapest one", state))
 
 
 if __name__ == "__main__":

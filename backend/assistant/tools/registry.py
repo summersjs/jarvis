@@ -14,7 +14,9 @@ from backend.schemas.forge import ForgeProjectUpdate, ForgeSparkCreate, ForgeTas
 from backend.schemas.goal import GoalCreate, GoalLogCreate
 from backend.schemas.health import HealthDailyCheckinUpsert, HealthEventCreate
 from backend.schemas.meal_planner import MealPlanEntryCreate, MealPlanEntryUpdate
-from backend.schemas.shopping import ShoppingListItemCreate, ShoppingListItemUpdate
+from backend.schemas.shopping import ShoppingListCreate, ShoppingListItemCreate, ShoppingListItemUpdate
+from backend.schemas.food_vault import FoodVaultItemCreate
+from backend.schemas.recipe import RecipeCreate
 from backend.services.forge_service import (
     create_forge_spark,
     is_project_active,
@@ -26,8 +28,11 @@ from backend.services.forge_service import (
 from backend.services.goal_service import create_goal, create_goal_log, get_goal, list_goals
 from backend.services.health_service import build_health_dashboard, create_health_event, upsert_daily_checkin
 from backend.services.meal_planner_service import create_meal_plan_entry, list_meal_plan_entries, update_meal_plan_entry
+from backend.services.food_vault_service import create_food_vault_item
+from backend.services.recipe_service import create_recipe
 from backend.services.shopping_service import (
     add_shopping_list_item,
+    create_shopping_list,
     get_shopping_list,
     list_shopping_lists,
     update_shopping_list_item,
@@ -53,6 +58,7 @@ class AssistantToolContext:
     timezone: str = "America/New_York"
     confirmed_action_id: str | None = None
     resolution_meta: dict[str, Any] | None = None
+    tool_plan: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -152,6 +158,7 @@ def select_tools(user_text: str) -> list[dict[str, Any]]:
 def is_live_commerce_request(text: str) -> bool:
     lower = text.lower()
     commerce = any(word in lower for word in ("price", "prices", "cost", "cheapest", "cheaper", "better deal", "compare", "how much", "availability", "in stock", "nearby store", "stores near"))
+    commerce = commerce or bool(re.search(r"\bwhat did\s+(?:kroger|walmart)\s+have\b", lower))
     return commerce and not any(phrase in lower for phrase in ("estimated price", "my food vault", "i paid", "did i pay"))
 
 
@@ -477,6 +484,15 @@ def log_goal_progress_tool(context: AssistantToolContext, input_data: dict[str, 
 
 def add_shopping_item_tool(context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
     item_name = clean_sentence(str(input_data.get("item_name") or ""))
+    source_result_id = str(input_data.get("source_result_id") or "").strip()
+    if source_result_id:
+        from backend.assistant.conversation_state import CONVERSATION_STATE_STORE
+        from backend.assistant.planner import latest_price_comparison
+        comparison = latest_price_comparison(CONVERSATION_STATE_STORE.get(context.conversation_id))
+        source = next((item for item in ((comparison.data.get("results") or []) if comparison else []) if item.get("result_id") == source_result_id and item.get("verified")), None)
+        if not source:
+            return {"updated": False, "reason": "The referenced verified price result is missing or expired."}
+        item_name = clean_sentence(str(source.get("product_name") or ""))
     if not item_name:
         return {"updated": False, "reason": "No item name supplied."}
     lists = list_shopping_lists(context.user_id)
@@ -503,6 +519,94 @@ def add_shopping_item_tool(context: AssistantToolContext, input_data: dict[str, 
 
 def summarize_shopping_list_options(lists: list[dict]) -> list[dict[str, str]]:
     return [{"id": str(item.get("id")), "title": str(item.get("title") or "Untitled list")} for item in lists[:8] if item.get("id")]
+
+
+def create_shopping_list_tool(context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
+    title = clean_sentence(str(input_data.get("title") or ""))
+    if not title:
+        return {"updated": False, "needs_input": True, "question": "What should I call the new shopping list?"}
+    shopping_list = create_shopping_list(ShoppingListCreate(user_id=context.user_id, title=title))
+    return {"updated": bool(shopping_list), "shopping_list": {"id": shopping_list.get("id"), "title": shopping_list.get("title")}}
+
+
+def add_meal_plan_item_tool(context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
+    meal_date = str(input_data.get("meal_date") or date.today().isoformat())
+    meal_type = normalize_meal_type(str(input_data.get("meal_type") or "snack"))
+    name = clean_sentence(str(input_data.get("custom_meal_name") or ""))
+    recipe_id = str(input_data.get("recipe_id") or "").strip() or None
+    if not name and not recipe_id:
+        return {"updated": False, "needs_input": True, "question": "What food or recipe should I add to the meal plan?"}
+    meal = create_meal_plan_entry(MealPlanEntryCreate(
+        user_id=context.user_id, meal_date=meal_date, meal_type=meal_type,
+        custom_meal_name=name or None, recipe_id=recipe_id, notes=input_data.get("notes"),
+    ))
+    return {"updated": bool(meal), "meal": summarize_meal(meal)}
+
+
+def add_food_vault_item_tool(context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
+    name = clean_sentence(str(input_data.get("name") or ""))
+    if not name:
+        return {"updated": False, "needs_input": True, "question": "What food should I add to the Food Vault?"}
+    item = create_food_vault_item(FoodVaultItemCreate(
+        user_id=context.user_id, name=name, brand=input_data.get("brand"), serving_size=input_data.get("serving_size"),
+        current_quantity=input_data.get("current_quantity", 0), shopping_category=input_data.get("shopping_category"), notes=input_data.get("notes"),
+    ))
+    return {"updated": bool(item), "food_vault_item": summarize_food_vault_item(item)}
+
+
+def add_recipe_tool(context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
+    title = clean_sentence(str(input_data.get("title") or ""))
+    if not title:
+        return {"updated": False, "needs_input": True, "question": "What should I call the recipe?"}
+    recipe = create_recipe(RecipeCreate(
+        user_id=context.user_id, title=title, source_type="manual", source_url=input_data.get("source_url"),
+        description=input_data.get("description"), instructions=input_data.get("instructions"), servings=input_data.get("servings"),
+        ingredients=input_data.get("ingredients") or [],
+    ))
+    return {"updated": bool(recipe), "recipe": summarize_recipe(recipe)}
+
+
+def get_recent_price_comparison_tool(context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
+    from backend.assistant.conversation_state import CONVERSATION_STATE_STORE
+    from backend.assistant.planner import latest_price_comparison
+
+    state = CONVERSATION_STATE_STORE.get(context.conversation_id)
+    comparison = latest_price_comparison(state)
+    requested_id = str(input_data.get("comparison_id") or "")
+    if not comparison or (requested_id and requested_id != comparison.result_id):
+        return {"verified": False, "stale": True, "reason": "The verified price comparison is missing or expired."}
+    results = [item for item in comparison.data.get("results") or [] if item.get("verified")]
+    selection = str(input_data.get("selection") or "").lower()
+    requested_size = str(input_data.get("size") or "").lower()
+    if requested_size:
+        size_number = re.search(r"\d+(?:\.\d+)?", requested_size)
+        if size_number:
+            results = [item for item in results if size_number.group() in str(item.get("size") or "")]
+    if selection in {"list_walmart", "list_kroger"}:
+        retailer = selection.removeprefix("list_")
+        matches = [item for item in results if str(item.get("retailer") or "").lower() == retailer]
+        return {"verified": bool(matches), "comparison_id": comparison.result_id, "results": matches, "selected": None, "verified_at": comparison.verified_at.isoformat(), "expires_at": comparison.expires_at.isoformat() if comparison.expires_at else None}
+    if selection in {"walmart", "kroger"}:
+        matches = [item for item in results if str(item.get("retailer") or "").lower() == selection]
+        if not matches:
+            return {"verified": False, "reason": f"No verified {selection.title()} result exists in that comparison."}
+        if len(matches) != 1:
+            return {"verified": False, "ambiguous": True, "reason": f"There are multiple verified {selection.title()} sizes. Which size do you mean?"}
+        selected = matches[0]
+    elif selection == "cheapest":
+        if not results:
+            return {"verified": False, "reason": "No verified results exist."}
+        sizes = {str(item.get("size") or "size not listed").lower() for item in results}
+        if len(sizes) != 1:
+            return {"verified": False, "ambiguous": True, "reason": "The verified results have different sizes. Which size should I compare?"}
+        low = min(item["price"] for item in results)
+        matches = [item for item in results if item["price"] == low]
+        if len(matches) != 1:
+            return {"verified": False, "ambiguous": True, "reason": "The cheapest verified result is tied."}
+        selected = matches[0]
+    else:
+        selected = None
+    return {"verified": True, "comparison_id": comparison.result_id, "results": results, "selected": selected, "verified_at": comparison.verified_at.isoformat(), "expires_at": comparison.expires_at.isoformat() if comparison.expires_at else None}
 
 
 def check_shopping_item_tool(context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
@@ -978,6 +1082,18 @@ def summarize_shopping_item(item: dict | None) -> dict | None:
     return {"id": item.get("id"), "name": item.get("item_name"), "quantity": item.get("quantity"), "category": item.get("category"), "checked": item.get("is_checked")}
 
 
+def summarize_food_vault_item(item: dict | None) -> dict | None:
+    if not item:
+        return None
+    return {key: item.get(key) for key in ("id", "name", "brand", "serving_size", "current_quantity") if item.get(key) is not None}
+
+
+def summarize_recipe(recipe: dict | None) -> dict | None:
+    if not recipe:
+        return None
+    return {"id": recipe.get("id"), "title": recipe.get("title"), "servings": recipe.get("servings"), "ingredient_count": len(recipe.get("ingredients") or [])}
+
+
 def summarize_forge_project(project: dict | None) -> dict | None:
     if not project:
         return None
@@ -992,6 +1108,7 @@ def summarize_forge_task(task: dict | None) -> dict | None:
 
 TOOL_REGISTRY: dict[str, AssistantToolDefinition] = {
     "search_live_prices": AssistantToolDefinition("search_live_prices", "Search configured live retail providers for current prices; refuses unsourced price claims.", 1, "read", False, search_live_prices_tool, "verified_provider_result"),
+    "get_recent_price_comparison": AssistantToolDefinition("get_recent_price_comparison", "Read a fresh verified price comparison from bounded conversation state.", 1, "read", False, get_recent_price_comparison_tool, "verified_provider_result"),
     "get_system_status": AssistantToolDefinition("get_system_status", "Run the live Jarvis ping/health checks and report every red (offline) service.", 1, "read", False, get_system_status_tool),
     "get_morning_brief": AssistantToolDefinition("get_morning_brief", "Get today's sanitized morning brief.", 1, "read", False, get_morning_brief_tool),
     "get_daily_debrief": AssistantToolDefinition("get_daily_debrief", "Get today's sanitized daily debrief summary.", 1, "read", False, get_daily_debrief_tool),
@@ -1005,6 +1122,10 @@ TOOL_REGISTRY: dict[str, AssistantToolDefinition] = {
     "get_recent_health_summary": AssistantToolDefinition("get_recent_health_summary", "Get recent health dashboard summary.", 1, "read", False, get_recent_health_summary_tool),
     "log_goal_progress": AssistantToolDefinition("log_goal_progress", "Log progress against the best matching active goal.", 2, "write", False, log_goal_progress_tool),
     "add_shopping_item": AssistantToolDefinition("add_shopping_item", "Add an item to the current shopping list.", 2, "write", False, add_shopping_item_tool),
+    "create_shopping_list": AssistantToolDefinition("create_shopping_list", "Create a named shopping list.", 2, "write", False, create_shopping_list_tool),
+    "add_meal_plan_item": AssistantToolDefinition("add_meal_plan_item", "Add a food or recipe to a dated meal-plan slot; defaults an explicitly requested snack to today.", 2, "write", False, add_meal_plan_item_tool),
+    "add_food_vault_item": AssistantToolDefinition("add_food_vault_item", "Add a named food to the Food Vault without inventing nutrition data.", 2, "write", False, add_food_vault_item_tool),
+    "add_recipe": AssistantToolDefinition("add_recipe", "Create a recipe record from supplied recipe fields.", 2, "write", False, add_recipe_tool),
     "check_shopping_item": AssistantToolDefinition("check_shopping_item", "Check off an item on the current shopping list.", 2, "write", False, check_shopping_item_tool),
     "log_health_event": AssistantToolDefinition("log_health_event", "Log a health symptom/event.", 2, "write", False, log_health_event_tool),
     "upsert_health_checkin": AssistantToolDefinition("upsert_health_checkin", "Update today's health check-in values.", 2, "write", False, upsert_health_checkin_tool),

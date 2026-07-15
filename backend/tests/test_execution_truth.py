@@ -72,6 +72,16 @@ class ExecutionTruthTests(unittest.TestCase):
         self.assertEqual(content, "No verified change was made.")
         self.assertEqual(status, "rewritten_unsupported_completion")
 
+    def test_write_success_claim_without_receipt_is_rejected(self):
+        content, status = validate_final_response("I added that to your shopping list.", [])
+        self.assertIn("no verified write receipt", content)
+        self.assertEqual(status, "rewritten_unsupported_write_claim")
+
+    def test_read_claim_without_receipt_is_rejected(self):
+        content, status = validate_final_response("I searched Walmart and found it.", [])
+        self.assertIn("successful read receipt", content)
+        self.assertEqual(status, "rewritten_unsupported_read_claim")
+
     def test_verified_tool_can_produce_completion_claim(self):
         content, status = validate_final_response("Done. The change was verified.", [action("succeeded", verification="verified")])
         self.assertEqual(content, "Done. The change was verified.")

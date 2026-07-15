@@ -24,8 +24,10 @@ AUDIT_FILE = "assistant_action_log.json"
 UNAVAILABLE_CAPABILITIES = ["github_write", "vercel_admin", "email_send", "arbitrary_shell"]
 FINAL_STATUSES = {"succeeded", "failed", "verification_failed", "unavailable", "cancelled"}
 COMPLETION_PATTERN = re.compile(
-    r"(?i)\b(done|completed|deployed|enabled|updated|saved|sent|created|installed|restarted|fixed|configured|took care of|set (?:it|everything) up)\b"
+    r"(?i)\b(done|completed|deployed|enabled|updated|saved|sent|created|added|logged|deleted|removed|installed|restarted|fixed|configured|took care of|set (?:it|everything) up)\b"
 )
+WRITE_CLAIM_PATTERN = re.compile(r"(?i)\bI(?:'ve| have)?\s+(added|logged|updated|deleted|removed|created|saved|marked)\b")
+READ_CLAIM_PATTERN = re.compile(r"(?i)\bI(?:'ve| have)?\s+(checked|searched|found|looked up|verified)\b")
 VERIFIED_PATTERN = re.compile(r"(?i)\bverified\b")
 EXPLANATION_PATTERN = re.compile(r"(?i)\b(how (?:do|would|can)|show me|explain|what (?:are|is) the steps|walk me through)\b")
 
@@ -276,6 +278,30 @@ def verify_tool_result(tool_name: str, result: dict[str, Any], context: Assistan
             current = next((item for item in current_list.get("items") or [] if item.get("id") == expected.get("id")), None)
             if current and (tool_name != "check_shopping_item" or current.get("is_checked") is True):
                 return verified("Shopping item was reread and matched.")
+        elif tool_name == "create_shopping_list":
+            from backend.services.shopping_service import get_shopping_list
+            expected = result.get("shopping_list") or {}
+            current = get_shopping_list(str(expected.get("id") or ""))
+            if current and current.get("id") == expected.get("id") and current.get("title") == expected.get("title"):
+                return verified("Shopping list was reread by ID and matched.")
+        elif tool_name == "add_meal_plan_item":
+            from backend.services.meal_planner_service import get_meal_plan_entry
+            expected = result.get("meal") or {}
+            current = get_meal_plan_entry(str(expected.get("id") or ""))
+            if current and current.get("id") == expected.get("id") and current.get("meal_date") == expected.get("meal_date") and current.get("meal_type") == expected.get("meal_type"):
+                return verified("Meal-plan entry was reread by ID and matched.")
+        elif tool_name == "add_food_vault_item":
+            from backend.services.food_vault_service import get_food_vault_item
+            expected = result.get("food_vault_item") or {}
+            current = get_food_vault_item(str(expected.get("id") or ""))
+            if current and current.get("id") == expected.get("id") and current.get("name") == expected.get("name"):
+                return verified("Food Vault item was reread by ID and matched.")
+        elif tool_name == "add_recipe":
+            from backend.services.recipe_service import get_recipe
+            expected = result.get("recipe") or {}
+            current = get_recipe(str(expected.get("id") or ""))
+            if current and current.get("id") == expected.get("id") and current.get("title") == expected.get("title"):
+                return verified("Recipe was reread by ID and matched.")
         elif tool_name in {"complete_forge_project", "complete_forge_task", "capture_forge_spark"}:
             from backend.services.forge_service import list_forge_projects, list_forge_sparks, list_forge_tasks
             key = "project" if tool_name == "complete_forge_project" else "task" if tool_name == "complete_forge_task" else "spark"
@@ -308,8 +334,14 @@ def verify_tool_result(tool_name: str, result: dict[str, Any], context: Assistan
     return ActionVerification(status="unavailable", summary="No reliable reread verifier is available for this tool result.")
 
 
-def validate_final_response(content: str, executions: list[AssistantActionExecution]) -> tuple[str, str]:
+def validate_final_response(content: str, executions: list[AssistantActionExecution], tool_results: list[dict[str, Any]] | None = None) -> tuple[str, str]:
+    tool_results = tool_results or []
+    successful_read = any(item.get("success") and item.get("access") == "read" for item in tool_results)
     if not executions:
+        if WRITE_CLAIM_PATTERN.search(content):
+            return "I did not complete that change because there is no verified write receipt.", "rewritten_unsupported_write_claim"
+        if READ_CLAIM_PATTERN.search(content) and not successful_read:
+            return "I don't have a successful read receipt supporting that claim.", "rewritten_unsupported_read_claim"
         return content, "passed_no_action"
     completion_language = bool(COMPLETION_PATTERN.search(content))
     verified_language = bool(VERIFIED_PATTERN.search(content))
@@ -342,7 +374,7 @@ def safe_result_summary(result: dict[str, Any]) -> dict[str, Any] | None:
     for key in ("updated", "already_done"):
         if key in result and isinstance(result[key], bool):
             summary[key] = result[key]
-    for key in ("goal", "item", "event", "checkin", "meal", "drink", "project", "task", "spark"):
+    for key in ("goal", "item", "event", "checkin", "meal", "drink", "project", "task", "spark", "shopping_list", "food_vault_item", "recipe"):
         value = result.get(key)
         if isinstance(value, dict):
             summary[key] = {field: value.get(field) for field in ("id", "title", "name", "item_name", "status", "event_type", "checkin_date", "label") if value.get(field) is not None}

@@ -108,3 +108,4 @@ class ContextResolutionMeta(BaseModel):
     changed: dict[str, str] = Field(default_factory=dict)
     refreshed_live_results: bool = False
     pending_clarification: str | None = None
+    options: list[dict[str, str]] = Field(default_factory=list, max_length=12)

@@ -63,6 +63,7 @@ type ContextResolutionMeta = {
   changed?: Record<string, string>;
   refreshed_live_results?: boolean;
   pending_clarification?: string | null;
+  options?: Array<{ id?: string; name?: string; title?: string; action?: string }>;
 };
 
 type ActionReceipt = {
@@ -141,6 +142,7 @@ export default function JarvisPage() {
   const [activeReadout, setActiveReadout] = useState<ReadoutKind | null>(null);
   const [activeAudioId, setActiveAudioId] = useState<string | null>(null);
   const [isPaused, setIsPaused] = useState(false);
+  const [selectedContextOption, setSelectedContextOption] = useState(0);
   const [speechSupported, setSpeechSupported] = useState(() => Boolean(getSpeechRecognitionConstructor()));
   const [isListening, setIsListening] = useState(false);
   const [voiceTranscript, setVoiceTranscript] = useState("");
@@ -209,6 +211,12 @@ export default function JarvisPage() {
   }, []);
 
   const visibleMessages = useMemo(() => messages, [messages]);
+  const activeContextOptions = useMemo(() => {
+    const latest = messages[messages.length - 1];
+    return latest?.role === "assistant" ? latest.contextResolution?.options || [] : [];
+  }, [messages]);
+
+  useEffect(() => setSelectedContextOption(0), [activeContextOptions.length, messages.length]);
   const modelOptions = useMemo(() => {
     const models = assistantStatus.ollama?.models || [];
     return Array.from(new Set([selectedModel, assistantStatus.ollama?.model || "qwen3:8b", HAUHAU_MODEL, ...models].filter(Boolean)));
@@ -602,7 +610,13 @@ export default function JarvisPage() {
                   </div>
                 )}
                 {!!message.toolActions?.length && <div className="tool-actions">Backend tool: {message.toolActions.join(", ")}</div>}
-                {message.contextResolution && <ContextResolutionCard context={message.contextResolution} />}
+                {message.contextResolution && (
+                  <ContextResolutionCard
+                    context={message.contextResolution}
+                    selectedIndex={message === visibleMessages[visibleMessages.length - 1] ? selectedContextOption : -1}
+                    onSelect={(option) => void sendMessage(contextOptionCommand(option))}
+                  />
+                )}
                 {!!message.actionReceipts?.length && (
                   <div className="action-receipts" aria-label="Action receipts">
                     {message.actionReceipts.map((receipt) => <ActionReceiptCard key={receipt.action_id} receipt={receipt} />)}
@@ -630,6 +644,21 @@ export default function JarvisPage() {
             value={input}
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={(event) => {
+              if (activeContextOptions.length && event.key === "ArrowDown") {
+                event.preventDefault();
+                setSelectedContextOption((current) => (current + 1) % activeContextOptions.length);
+                return;
+              }
+              if (activeContextOptions.length && event.key === "ArrowUp") {
+                event.preventDefault();
+                setSelectedContextOption((current) => (current - 1 + activeContextOptions.length) % activeContextOptions.length);
+                return;
+              }
+              if (activeContextOptions.length && event.key === "Enter" && !event.shiftKey && !input.trim()) {
+                event.preventDefault();
+                void sendMessage(contextOptionCommand(activeContextOptions[selectedContextOption]));
+                return;
+              }
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
                 sendMessage();
@@ -712,7 +741,7 @@ function ActionReceiptCard({ receipt }: { receipt: ActionReceipt }) {
   );
 }
 
-function ContextResolutionCard({ context }: { context: ContextResolutionMeta }) {
+function ContextResolutionCard({ context, selectedIndex, onSelect }: { context: ContextResolutionMeta; selectedIndex: number; onSelect: (option: NonNullable<ContextResolutionMeta["options"]>[number]) => void }) {
   const inherited = Object.entries(context.inherited || {});
   const changed = Object.entries(context.changed || {});
   if (!context.follow_up && !inherited.length && !changed.length && !context.pending_clarification) return null;
@@ -723,8 +752,21 @@ function ContextResolutionCard({ context }: { context: ContextResolutionMeta }) 
       {!!changed.length && <small>Changed: {changed.map(([key, value]) => `${key}: ${value}`).join(" · ")}</small>}
       {context.refreshed_live_results && <small>Live results refreshed</small>}
       {context.pending_clarification && <small>Pending: {context.pending_clarification}</small>}
+      {!!context.options?.length && (
+        <div className="context-options" role="listbox" aria-label="Choose an option">
+          {context.options.map((option, index) => (
+            <button key={option.id || `${option.action}-${index}`} type="button" className={selectedIndex === index ? "active" : ""} onClick={() => onSelect(option)}>
+              <span>{index + 1}.</span> {option.action === "create" ? "Add a new item" : option.name || option.title || "Use this option"}
+            </button>
+          ))}
+        </div>
+      )}
     </section>
   );
+}
+
+function contextOptionCommand(option: NonNullable<ContextResolutionMeta["options"]>[number]) {
+  return option.action === "create" ? "Create a new one" : option.name || option.title || "Use that one";
 }
 
 function friendlyActionName(value: string) {
@@ -876,6 +918,10 @@ function JarvisStyles() {
       .context-resolution { display: grid; gap: .2rem; margin-top: .65rem; border-left: 3px solid #38bdf8; border-radius: .25rem; background: rgba(3,105,161,.12); padding: .5rem .65rem; }
       .context-resolution strong { color: #7dd3fc; font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; }
       .context-resolution small { color: rgba(224,242,254,.76); font-size: .68rem; }
+      .context-options { display: grid; gap: .3rem; margin-top: .35rem; }
+      .context-options button { cursor: pointer; border: 1px solid rgba(56,189,248,.28); border-radius: .35rem; background: rgba(2,35,54,.7); color: #dff7ff; padding: .42rem .55rem; text-align: left; }
+      .context-options button.active, .context-options button:hover { border-color: #7dd3fc; background: rgba(3,105,161,.3); box-shadow: 0 0 12px rgba(56,189,248,.18); }
+      .context-options button span { color: #7dd3fc; font-weight: 900; }
       .action-receipts { display: grid; gap: .45rem; margin-top: .7rem; }
       .action-receipt { display: grid; gap: .2rem; border-left: 3px solid #fbbf24; border-radius: .25rem; background: rgba(0,0,0,.3); padding: .55rem .65rem; }
       .action-receipt.verified { border-left-color: #4ade80; background: rgba(20,83,45,.18); }

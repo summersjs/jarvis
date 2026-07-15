@@ -139,6 +139,12 @@ def safe_read_followup_resolution(user_message: str, state: ConversationState) -
 
 
 def deterministic_sensitive_resolution(user_message: str, state: ConversationState) -> ContextResolution | None:
+    if re.search(r"(?i)^\s*i\s+(?:just\s+)?(?:ate|had|finished)\b", user_message):
+        return ContextResolution(
+            request_type="follow_up", intent="complete_meal", inherit_context=True, entity_updates={},
+            reference_resolution=[], required_entities=[], missing_entities=[], requires_tool=True,
+            operation_type="write", needs_clarification=False, clarification_question=None,
+        )
     if re.fullmatch(r"(?i)\s*(?:undo(?: that)?|remove the last one)\s*[.!]?\s*", user_message):
         return ContextResolution(
             request_type="follow_up", intent="undo_last_action", inherit_context=True,
@@ -156,7 +162,16 @@ def deterministic_sensitive_resolution(user_message: str, state: ConversationSta
         )
     if pending and "food vault" in pending.question.lower():
         lower = user_message.lower()
-        option = next((item for item in pending.options if str(item.get("name") or "").lower() in lower and item.get("id")), None)
+        selectable = [item for item in pending.options if item.get("id")]
+        number_words = {"one": 1, "first": 1, "two": 2, "second": 2, "three": 3, "third": 3, "four": 4, "fourth": 4, "five": 5, "fifth": 5}
+        number_match = re.fullmatch(r"\s*(\d+)\s*[.!]?\s*", lower)
+        word_match = next((index for word, index in number_words.items() if re.fullmatch(rf"\s*{word}\s*[.!]?\s*", lower)), None)
+        selected_index = int(number_match.group(1)) if number_match else word_match
+        option = selectable[selected_index - 1] if selected_index and 0 < selected_index <= len(selectable) else None
+        if not option:
+            option = next((item for item in selectable if str(item.get("name") or "").lower() in lower), None)
+        if not option and len(selectable) == 1 and re.search(r"\b(?:yes|yeah|yep|add that|that one|do it)\b", lower):
+            option = selectable[0]
         nutrition: dict[str, Any] = {}
         for key, pattern in {
             "calories": r"\b(\d+(?:\.\d+)?)\s*(?:calories|cal)\b",

@@ -66,7 +66,8 @@ def build_tool_plan(message: str, resolution: ContextResolution, state: Conversa
             return ready("add_item_to_shopping_list", "add_shopping_item", {"shopping_list_id": entities.shopping_list_id, "item_name": entities.product, "quantity": entities.quantity or 1})
 
     if state.pending_clarification and "food vault" in state.pending_clarification.question.lower():
-        selected = match_pending_option(message, state.pending_clarification.options)
+        selected = next((option for option in state.pending_clarification.options if entities.food_vault_item_id and option.get("id") == entities.food_vault_item_id), None)
+        selected = selected or match_pending_option(message, state.pending_clarification.options)
         if selected:
             return ready("add_existing_food_to_meal_plan", "add_meal_plan_item", {"meal_date": date.today().isoformat(), "meal_type": "snack", "custom_meal_name": selected.get("name") or selected.get("title")})
         if any(phrase in lower for phrase in ("create new", "new one", "make a new")) or nutrition_values(message):

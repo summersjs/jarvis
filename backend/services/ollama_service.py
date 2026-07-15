@@ -231,6 +231,11 @@ def chat_with_jarvis(messages: list[dict], model: str | None = None, context: As
                 question=str(needs_input.get("question") or "Which option should I use?"),
                 options=[{str(key): str(value) for key, value in option.items()} for option in (needs_input.get("options") or [])[:12] if isinstance(option, dict)],
             )
+            context = replace(context, resolution_meta={
+                **(context.resolution_meta or {}),
+                "pending_clarification": candidate_state.pending_clarification.question,
+                "options": candidate_state.pending_clarification.options,
+            })
             CONVERSATION_STATE_STORE.save(candidate_state)
         elif resolution.operation_type != "write" or verified_write:
             if verified_write:

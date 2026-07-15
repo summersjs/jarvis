@@ -78,6 +78,25 @@ class Phase3ContextUndoTests(unittest.TestCase):
         self.assertEqual(result.entity_updates.product, "Reece's big cup")
         self.assertEqual(result.operation_type, "write")
 
+    def test_yes_and_number_select_single_verified_food_option(self):
+        state = ConversationState(
+            conversation_id="phase3-choice", active_intent="resolve_food_vault_meal_item",
+            pending_clarification=PendingClarification(
+                question="Did you mean a Food Vault item?",
+                options=[{"id": "food_1", "name": "Reece's Big Cup"}, {"action": "create", "name": "Create a new item"}],
+            ),
+        )
+        for phrase in ("yes add that one please", "1", "one"):
+            with self.subTest(phrase=phrase):
+                result = deterministic_sensitive_resolution(phrase, state)
+                self.assertEqual(result.entity_updates.food_vault_item_id, "food_1")
+
+    def test_ate_food_routes_to_existing_meal_confirmation_flow(self):
+        state = ConversationState(conversation_id="phase3-ate", active_intent="resolve_food_vault_meal_item")
+        result = deterministic_sensitive_resolution("I ate the Reece's Big Cup", state)
+        self.assertEqual(result.intent, "complete_meal")
+        self.assertEqual(result.operation_type, "write")
+
     def test_one_recent_verified_action_can_be_undone(self):
         now = datetime.now(timezone.utc)
         state = ConversationState(

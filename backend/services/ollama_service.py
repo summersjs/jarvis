@@ -371,9 +371,22 @@ def build_live_price_reply(user_text: str, tool_results: list[dict]) -> str:
         evidence = offer.get("evidence") or {}
         title = offer.get("title") or result.get("query")
         size = f" {offer.get('size')}" if offer.get("size") else ""
-        lines.append(f"{offer.get('retailer')}: {title}{size} — ${float(offer['price']):.2f} [{evidence.get('provider')}]")
+        lines.append(f"{title}{size} — ${float(offer['price']):.2f}")
     location = f" near {result.get('location')}" if result.get("location") else ""
-    return f"Verified live results{location}: " + "; ".join(lines)
+    preference = result.get("preference") or {}
+    retailer = offers[0].get("retailer") or "the retailer"
+    provider = ((offers[0].get("evidence") or {}).get("provider") or "provider").replace("_", " ").title()
+    if preference:
+        keyword = str(preference.get("item_keyword") or "item")
+        if keyword == "red bull":
+            intro = f"Your regular Red Bull lineup at {retailer} is looking respectable—your saved preference did its job{location}: "
+        elif keyword == "toothpaste":
+            intro = f"Colgate it is—your saved toothpaste preference kept the off-brand chaos out{location}: "
+        else:
+            intro = f"I used your saved {keyword} preference—because apparently we have standards{location}: "
+    else:
+        intro = f"No brand loyalty oath on file, so cheapest verified match wins{location}: "
+    return intro + "; ".join(lines) + f". Verified via {provider}."
 
 
 def format_write_confirmation(tool_name: str | None, result: dict, request_id: str = "") -> str:

@@ -287,7 +287,7 @@ def get_system_status_tool(_context: AssistantToolContext, _input: dict[str, Any
 
 
 def search_live_prices_tool(_context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
-    return search_live_prices(str(input_data.get("query") or ""), str(input_data.get("location") or "") or None)
+    return search_live_prices(str(input_data.get("query") or ""), str(input_data.get("location") or "") or None, _context.user_id)
 
 
 def get_daily_debrief_tool(context: AssistantToolContext, _input: dict[str, Any]) -> dict[str, Any]:

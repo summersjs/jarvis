@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from backend.assistant.execution import capability_manifest
 from backend.assistant.tools.registry import extract_price_query, select_tools
-from backend.services.live_price_service import _nearest_kroger_location, search_live_prices
+from backend.services.live_price_service import _nearest_kroger_location, _preferred_search_query, _rank_preferred_offers, search_live_prices
 from backend.services.ollama_service import build_live_price_reply
 
 
@@ -46,7 +46,7 @@ class LivePriceGateTests(unittest.TestCase):
             }]},
         }])
         self.assertIn("$8.99", reply)
-        self.assertIn("[kroger]", reply)
+        self.assertIn("Verified via Kroger", reply)
 
     def test_capability_manifest_declares_live_evidence_requirement(self):
         manifest = capability_manifest()
@@ -58,6 +58,32 @@ class LivePriceGateTests(unittest.TestCase):
         request.return_value = {"data": [{"locationId": "02900513"}]}
         self.assertEqual(_nearest_kroger_location("https://api.kroger.test/v1", "token", "22980"), "02900513")
         self.assertIn("filter.zipCode.near=22980", request.call_args.args[0])
+
+    def test_red_bull_preference_keeps_original_and_cheapest_per_size(self):
+        preference = {"preferred_brand": "Red Bull", "preferred_product_name": "Original", "all_sizes": True, "notes": "Regular/original flavor only"}
+        offers = [
+            {"title": "Red Bull Original", "size": "8.4 fl oz", "price": 2.79, "evidence": {"provider": "kroger"}},
+            {"title": "Red Bull Original", "size": "8.4 fl oz", "price": 2.49, "evidence": {"provider": "kroger"}},
+            {"title": "Red Bull Original", "size": "12 fl oz", "price": 3.00, "evidence": {"provider": "kroger"}},
+            {"title": "Red Bull Watermelon", "size": "12 fl oz", "price": 2.00, "evidence": {"provider": "kroger"}},
+            {"title": "Red Bull Original Sugar Free", "size": "16 fl oz", "price": 1.00, "evidence": {"provider": "kroger"}},
+        ]
+        ranked = _rank_preferred_offers(offers, preference)
+        self.assertEqual([(item["size"], item["price"]) for item in ranked], [("8.4 fl oz", 2.49), ("12 fl oz", 3.00)])
+        self.assertEqual(_preferred_search_query("Red Bull", preference), "Red Bull Original")
+
+    def test_generic_butter_returns_only_cheapest_verified_offer(self):
+        offers = [
+            {"title": "Butter A", "price": 4.00, "evidence": {"provider": "kroger"}},
+            {"title": "Butter B", "price": 3.25, "evidence": {"provider": "kroger"}},
+        ]
+        offers.append({"title": "Blue Bonnet Vegetable Oil Sticks", "price": 1.00, "evidence": {"provider": "kroger"}})
+        self.assertEqual(_rank_preferred_offers(offers, None, "butter")[0]["title"], "Butter B")
+        self.assertEqual(len(_rank_preferred_offers(offers, None, "butter")), 1)
+
+    def test_colgate_preference_builds_specific_search(self):
+        preference = {"preferred_brand": "Colgate", "preferred_product_name": "Total Whitening", "preferred_size": "20", "preferred_unit": "oz", "all_sizes": False}
+        self.assertEqual(_preferred_search_query("toothpaste", preference), "Colgate Total Whitening 20 oz")
 
 
 if __name__ == "__main__":

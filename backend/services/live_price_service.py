@@ -8,6 +8,8 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import Any
 
+from backend.services.preferences_service import find_preference_for_keyword
+
 
 def _json_request(url: str, *, headers: dict[str, str] | None = None, data: dict | None = None, timeout: float = 12) -> dict:
     body = None if data is None else json.dumps(data).encode()
@@ -26,12 +28,14 @@ def _evidence(provider: str, classification: str, source_url: str, *, store: dic
     }
 
 
-def search_live_prices(query: str, location: str | None = None) -> dict[str, Any]:
+def search_live_prices(query: str, location: str | None = None, user_id: str = "john") -> dict[str, Any]:
     query = " ".join(str(query or "").split())[:160]
     location = " ".join(str(location or os.getenv("JARVIS_SHOPPING_LOCATION", "")).split())[:160] or None
     if not query:
         return {"verified": False, "query": query, "offers": [], "providers": [], "reason": "A product name is required."}
 
+    preference = _resolve_preference(user_id, query)
+    provider_query = _preferred_search_query(query, preference)
     providers = []
     stores = _google_places(location) if location else []
     if location:
@@ -40,23 +44,86 @@ def search_live_prices(query: str, location: str | None = None) -> dict[str, Any
     offers: list[dict] = []
     for search in (_kroger_prices, _searchapi_walmart, _serpapi_walmart, _instacart_prices):
         try:
-            result = search(query, location)
+            result = search(provider_query, location)
         except Exception as exc:
             result = {"provider": search.__name__.strip("_").replace("_prices", ""), "configured": True, "error": type(exc).__name__, "offers": []}
         providers.append({key: value for key, value in result.items() if key != "offers"})
         offers.extend(result.get("offers") or [])
 
-    offers = [offer for offer in offers if isinstance(offer.get("price"), (int, float)) and offer.get("evidence")]
-    offers.sort(key=lambda offer: offer["price"])
+    offers = _rank_preferred_offers(offers, preference, query)
     return {
         "verified": bool(offers),
         "query": query,
+        "provider_query": provider_query,
+        "preference": preference,
         "location": location,
         "offers": offers[:12],
         "validated_stores": stores[:10],
         "providers": providers,
         "reason": None if offers else "No configured provider returned a verifiable current price.",
     }
+
+
+def _resolve_preference(user_id: str, query: str) -> dict | None:
+    normalized = query.lower().replace("redbull", "red bull").replace("toliet", "toilet")
+    candidates = [normalized]
+    candidates.extend(part.strip() for part in ("red bull", "toothpaste", "toilet paper", "butter") if part in normalized)
+    for keyword in dict.fromkeys(candidates):
+        try:
+            matches = find_preference_for_keyword(user_id, keyword)
+        except Exception:
+            matches = []
+        if matches:
+            item = matches[0]
+            notes = str(item.get("notes") or "")
+            return {
+                "id": item.get("id"), "item_keyword": item.get("item_keyword"),
+                "preferred_brand": item.get("preferred_brand"),
+                "preferred_product_name": item.get("preferred_product_name"),
+                "preferred_size": item.get("preferred_size"), "preferred_unit": item.get("preferred_unit"),
+                "all_sizes": "all sizes" in notes.lower(), "notes": notes,
+            }
+    return None
+
+
+def _preferred_search_query(query: str, preference: dict | None) -> str:
+    if not preference:
+        return query
+    terms = [preference.get("preferred_brand") or query, preference.get("preferred_product_name")]
+    if preference.get("preferred_size") and not preference.get("all_sizes"):
+        terms.extend([preference.get("preferred_size"), preference.get("preferred_unit")])
+    return " ".join(str(term).strip() for term in terms if term).strip()
+
+
+def _rank_preferred_offers(offers: list[dict], preference: dict | None, query: str = "") -> list[dict]:
+    verified = [offer for offer in offers if isinstance(offer.get("price"), (int, float)) and offer.get("evidence")]
+    if preference:
+        brand = str(preference.get("preferred_brand") or "").lower()
+        product = str(preference.get("preferred_product_name") or "").lower()
+        if brand:
+            verified = [offer for offer in verified if brand in str(offer.get("title") or "").lower()]
+        if product:
+            verified = [offer for offer in verified if product in str(offer.get("title") or "").lower()]
+        notes = str(preference.get("notes") or "").lower()
+        if "regular" in notes or "original flavor" in notes:
+            verified = [offer for offer in verified if not any(term in str(offer.get("title") or "").lower() for term in ("sugar free", "sugar-free", "zero"))]
+    elif query:
+        required = [token for token in re_words(query) if len(token) > 2]
+        if required:
+            verified = [offer for offer in verified if all(token in str(offer.get("title") or "").lower() for token in required)]
+    verified.sort(key=lambda offer: offer["price"])
+    if preference and preference.get("all_sizes"):
+        cheapest_by_size = {}
+        for offer in verified:
+            size = str(offer.get("size") or "size not listed").strip().lower()
+            cheapest_by_size.setdefault(size, offer)
+        return list(cheapest_by_size.values())[:12]
+    return verified[:12] if preference else verified[:1]
+
+
+def re_words(text: str) -> list[str]:
+    import re
+    return re.findall(r"[a-z0-9]+", text.lower())
 
 
 def _google_places(location: str | None) -> list[dict]:
@@ -91,7 +158,7 @@ def _kroger_prices(query: str, _location: str | None) -> dict:
     location_id = os.getenv("KROGER_LOCATION_ID") or _nearest_kroger_location(base_url, token, os.getenv("KROGER_DEFAULT_ZIP"))
     if not location_id:
         return {"provider": "kroger", "configured": True, "error": "location_required", "offers": []}
-    params = urllib.parse.urlencode({"filter.term": query, "filter.locationId": location_id, "filter.limit": 10})
+    params = urllib.parse.urlencode({"filter.term": query, "filter.locationId": location_id, "filter.limit": 50})
     url = f"{base_url}/products?{params}"
     data = _json_request(url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
     offers = []

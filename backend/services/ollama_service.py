@@ -5,6 +5,7 @@ import re
 import urllib.error
 import urllib.request
 from dataclasses import replace
+from datetime import date, datetime
 
 from backend.assistant.execution import (
     capability_manifest,
@@ -43,6 +44,7 @@ from backend.assistant.email_planning import (
     reject_current_draft,
 )
 from backend.assistant.tools.registry import AssistantToolContext, select_tools
+from backend.core.config import LOCAL_TZ
 from backend.services.contact_service import resolve_contact_email
 from backend.prompts.jarvis import JARVIS_SYSTEM_PROMPT
 from backend.prompts.user_profile import JOHN_USER_PROFILE
@@ -941,9 +943,21 @@ def format_write_confirmation(tool_name: str | None, result: dict, request_id: s
         notes = log.get("notes")
         progress = goal.get("progress") or {}
         percent = progress.get("percent")
-        progress_text = f" It is now at {percent:g}%." if isinstance(percent, (int, float)) else ""
+        logged_for = str(log.get("planned_for") or "")[:10]
+        today = datetime.now(LOCAL_TZ).date()
+        historical_text = ""
+        try:
+            logged_date = date.fromisoformat(logged_for)
+            current_week_start = today.fromordinal(today.toordinal() - today.weekday())
+            if logged_date < current_week_start and str(goal.get("frequency") or "").lower() == "weekly":
+                historical_text = f" I logged it for {logged_date.strftime('%A, %B')} {logged_date.day}, so it counts toward the previous weekly period."
+            elif logged_date != today:
+                historical_text = f" I logged it for {logged_date.strftime('%A, %B')} {logged_date.day}."
+        except ValueError:
+            pass
+        progress_text = "" if historical_text else (f" It is now at {percent:g}%." if isinstance(percent, (int, float)) else "")
         note_text = f" Note: {notes}" if notes else ""
-        return f"Done. I logged that against {title}.{progress_text}{note_text}"
+        return f"Done. I logged that against {title}.{historical_text}{progress_text}{note_text}"
 
     if tool_name == "add_shopping_item":
         item = result.get("item") or {}

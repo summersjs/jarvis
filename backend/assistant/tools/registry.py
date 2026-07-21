@@ -224,7 +224,7 @@ def select_write_tools(user_text: str) -> list[dict[str, Any]]:
         person_match = re.search(r"\bdate\s+with\s+([a-z][a-z'-]*)", lower)
         person = clean_title_case(person_match.group(1) if person_match else "")
         notes = clean_sentence(text) or f"Went on a date{f' with {person}' if person else ''}."
-        calls.append({"name": "log_goal_progress", "input": {"goal_query": "date", "value": 1, "log_type": "completed", "notes": notes}})
+        calls.append({"name": "log_goal_progress", "input": {"goal_query": "date", "value": 1, "log_type": "completed", "notes": notes, "planned_for": resolve_activity_date(text)}})
 
     checkin_fields = parse_checkin_fields(lower)
     if "complete my daily check" in lower or "daily check in" in lower or "daily check-in" in lower or checkin_fields:
@@ -1198,6 +1198,63 @@ def clean_sentence(value: str) -> str:
     return re.sub(r"\s+", " ", value.strip(" .!?;:\"'")).strip()
 
 
+def resolve_activity_date(text: str, today: date | None = None) -> str:
+    """Resolve past-tense activity dates without delegating calendar math to the model."""
+    anchor = today or datetime.now(LOCAL_TZ).date()
+    lower = text.lower()
+    if re.search(r"\byesterday\b", lower):
+        return (anchor - timedelta(days=1)).isoformat()
+    if re.search(r"\btoday\b", lower):
+        return anchor.isoformat()
+
+    iso_match = re.search(r"\b(20\d{2})-(\d{1,2})-(\d{1,2})\b", lower)
+    if iso_match:
+        try:
+            return date(*(int(part) for part in iso_match.groups())).isoformat()
+        except ValueError:
+            pass
+
+    numeric_match = re.search(r"\b(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?\b", lower)
+    if numeric_match:
+        month, day, year_text = numeric_match.groups()
+        year = int(year_text) if year_text else anchor.year
+        if year < 100:
+            year += 2000
+        try:
+            candidate = date(year, int(month), int(day))
+            if not year_text and candidate > anchor:
+                candidate = candidate.replace(year=year - 1)
+            return candidate.isoformat()
+        except ValueError:
+            pass
+
+    month_match = re.search(
+        r"\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(20\d{2}))?\b",
+        lower,
+    )
+    if month_match:
+        month_text, day_text, year_text = month_match.groups()
+        month_number = datetime.strptime(month_text[:3], "%b").month
+        year = int(year_text) if year_text else anchor.year
+        try:
+            candidate = date(year, month_number, int(day_text))
+            if not year_text and candidate > anchor:
+                candidate = candidate.replace(year=year - 1)
+            return candidate.isoformat()
+        except ValueError:
+            pass
+
+    weekdays = {name: index for index, name in enumerate(("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"))}
+    weekday_match = re.search(r"\b(?:(last|this)\s+)?(" + "|".join(weekdays) + r")\b", lower)
+    if weekday_match:
+        qualifier, weekday_name = weekday_match.groups()
+        delta = (anchor.weekday() - weekdays[weekday_name]) % 7
+        if qualifier == "last" and delta == 0:
+            delta = 7
+        return (anchor - timedelta(days=delta)).isoformat()
+    return anchor.isoformat()
+
+
 def clean_title_case(value: str) -> str:
     cleaned = clean_sentence(value)
     return " ".join(part.capitalize() for part in cleaned.split())
@@ -1217,6 +1274,7 @@ def summarize_goal(goal: dict | None) -> dict | None:
         "status": goal.get("status"),
         "current_value": goal.get("current_value"),
         "target_value": goal.get("target_value"),
+        "frequency": goal.get("frequency"),
         "progress": goal.get("progress"),
         "standard": goal.get("standard"),
     }

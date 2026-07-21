@@ -6,6 +6,8 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const API_KEY = process.env.NEXT_PUBLIC_JARVIS_API_KEY || "";
+const PAGE_SIZE = 25;
+let initialProjectsRequest: Promise<Response> | null = null;
 
 type ForgeProject = {
   id: string;
@@ -34,21 +36,41 @@ function ForgeProjectListInner() {
   const category = params.get("category") || "";
   const [projects, setProjects] = useState<ForgeProject[]>([]);
   const [error, setError] = useState("");
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
   const [nowMs] = useState(() => Date.now());
 
   useEffect(() => {
     async function load() {
       try {
-        const res = await fetch(`${API_BASE}/forge?user_id=john`, { headers: { "x-api-key": API_KEY } });
+        const url = `${API_BASE}/forge/projects?user_id=john&page=1&page_size=${PAGE_SIZE}`;
+        if (process.env.NODE_ENV === "development") console.info(`[forge-query] GET ${url}`);
+        initialProjectsRequest ||= fetch(url, { headers: { "x-api-key": API_KEY } });
+        const res = (await initialProjectsRequest).clone();
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || "Failed to load projects.");
         setProjects(data.projects || []);
+        setHasMore(Boolean(data.pagination?.has_more));
+        if (process.env.NODE_ENV === "development") console.info(`[forge-query] projects list returned ${(data.projects || []).length} records`);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load projects.");
       }
     }
     load();
   }, []);
+
+  async function loadMore() {
+    const nextPage = page + 1;
+    const url = `${API_BASE}/forge/projects?user_id=john&page=${nextPage}&page_size=${PAGE_SIZE}`;
+    if (process.env.NODE_ENV === "development") console.info(`[forge-query] GET ${url}`);
+    const res = await fetch(url, { headers: { "x-api-key": API_KEY } });
+    const data = await res.json();
+    if (!res.ok) return setError(data.detail || "Failed to load more projects.");
+    setProjects((current) => [...current, ...(data.projects || [])]);
+    setPage(nextPage);
+    setHasMore(Boolean(data.pagination?.has_more));
+    if (process.env.NODE_ENV === "development") console.info(`[forge-query] projects page ${nextPage} returned ${(data.projects || []).length} records`);
+  }
 
   const filtered = useMemo(() => {
     const buildingCutoff = nowMs - 14 * 24 * 60 * 60 * 1000;
@@ -94,6 +116,7 @@ function ForgeProjectListInner() {
         ))}
         {!filtered.length && <div className="forge-list-empty">No projects match this filter.</div>}
       </section>
+      {hasMore && <button type="button" className="forge-list-more" onClick={loadMore}>Load 25 more</button>}
       <style jsx global>{`
         .forge-project-list-page {
           min-height: 100vh;
@@ -112,7 +135,8 @@ function ForgeProjectListInner() {
         .forge-project-list-page header,
         .forge-list-card,
         .forge-list-empty,
-        .forge-list-alert {
+        .forge-list-alert,
+        .forge-list-more {
           position: relative;
           z-index: 1;
           border: 1px solid rgba(212,173,101,.2);
@@ -179,6 +203,7 @@ function ForgeProjectListInner() {
         .forge-list-alert {
           padding: 18px;
         }
+        .forge-list-more { color: #caffbf; cursor: pointer; display: block; margin: 18px auto; padding: 12px 18px; }
       `}</style>
     </main>
   );

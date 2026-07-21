@@ -4,6 +4,7 @@ const path = require("node:path");
 const {
   app,
   BrowserWindow,
+  dialog,
   globalShortcut,
   ipcMain,
   Menu,
@@ -14,6 +15,7 @@ const {
   Tray,
 } = require("electron");
 const { closeAction, forgeProjectUrl, navigationAction } = require("./behavior.cjs");
+const { createCustomApp, launchBuiltIn, launchCustomApp, normalizeCustomApps } = require("./app-launcher.cjs");
 const { checkReachable, ConnectionMonitor } = require("./connection.cjs");
 const { resolveDesktopConfig } = require("./config.cjs");
 const { GpuCollector } = require("./gpu.cjs");
@@ -425,17 +427,25 @@ function registerIpcHandlers() {
   });
   ipcMain.handle("desktop:launch-app", async (_event, appId) => {
     if (typeof appId !== "string") throw new TypeError("Application id must be a string.");
-    const targets = {
-      chrome: "https://www.google.com",
-      vscode: "vscode://",
-      discord: "discord://",
-      terminal: "wt:",
-    };
-    if (appId === "youtube-music") return mediaService.execute("open");
-    const target = targets[appId];
-    if (!target) return false;
-    await shell.openExternal(target);
-    return true;
+    let result;
+    if (appId === "youtube-music") result = await mediaService.execute("open");
+    else if (appId.startsWith("custom_")) result = await launchCustomApp(appId, stateStore.get("customApps", []), shell);
+    else result = await launchBuiltIn(appId, { shell });
+    logger("app-launch", `id=${appId} available=${Boolean(result?.available)} reason=${result?.reason || "none"}`);
+    return result;
+  });
+  ipcMain.handle("desktop:get-custom-apps", () => normalizeCustomApps(stateStore.get("customApps", [])));
+  ipcMain.handle("desktop:add-custom-app", async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: "Add an app to Jarvis",
+      properties: ["openFile"],
+      filters: [{ name: "Windows applications", extensions: ["exe", "lnk"] }],
+    });
+    if (result.canceled || !result.filePaths[0]) return { added: false, apps: normalizeCustomApps(stateStore.get("customApps", [])) };
+    const created = createCustomApp(result.filePaths[0], stateStore.get("customApps", []));
+    stateStore.set("customApps", created.apps);
+    logger("custom-app-added", `id=${created.app.id} label=${created.app.label}`);
+    return { added: true, app: { id: created.app.id, label: created.app.label }, apps: created.apps.map(({ id, label }) => ({ id, label })) };
   });
   ipcMain.handle("desktop:open-forge-project", async (_event, projectId) => {
     const target = forgeProjectUrl(projectId, config.targetOrigin);

@@ -154,7 +154,9 @@ declare global {
       executeMediaAction?: (action: "playPause" | "play" | "pause" | "next" | "previous" | "volumeUp" | "volumeDown" | "mute") => Promise<{ available: boolean }>;
       openYouTubeMusic?: () => Promise<{ available: boolean }>;
       getNativeHealth?: () => Promise<NativeHealth>;
-      launchApp?: (appId: string) => Promise<void>;
+      launchApp?: (appId: string) => Promise<{ available: boolean; reason?: string }>;
+      getCustomApps?: () => Promise<Array<{ id: string; label: string }>>;
+      addCustomApp?: () => Promise<{ added: boolean; app?: { id: string; label: string }; apps: Array<{ id: string; label: string }> }>;
       openForgeProject?: (projectId: string) => Promise<boolean>;
       openJarvisAssistant?: () => Promise<boolean>;
       hideJarvisAssistant?: () => Promise<boolean>;
@@ -174,15 +176,15 @@ const fallbackProjects: ForgeProject[] = [
   { id: "lucien", title: "Lucien", status: "Concept", category: "Writing", progress_percent: 10, summary: "Character and story fragments." },
 ];
 
-const quickLaunch = [
+type QuickLaunchItem = { id: string; label: string; Icon: LucideIcon; href?: string; appId?: string };
+
+const quickLaunch: QuickLaunchItem[] = [
   { id: "jarvis", label: "Jarvis", Icon: Bot, href: "/jarvis", appId: "jarvis" },
-  { id: "vscode", label: "VS Code", Icon: Box, href: "vscode://file/C:/Development/jarvis" },
+  { id: "vscode", label: "VS Code", Icon: Box, appId: "vscode" },
   { id: "chrome", label: "Browser", Icon: Globe2, href: "https://www.google.com", appId: "chrome" },
   { id: "unreal", label: "Unreal Engine", Icon: AppWindow },
   { id: "terminal", label: "Terminal", Icon: TerminalSquare },
   { id: "youtube-music", label: "Music", Icon: Music2, href: "https://music.youtube.com", appId: "youtube-music" },
-  { id: "discord", label: "Discord", Icon: Radio, appId: "discord" },
-  { id: "add", label: "Add App", Icon: Plus },
 ];
 
 export default function DesktopMissionControl() {
@@ -573,21 +575,40 @@ async function openForgeProject(projectId: string) {
 }
 
 function QuickLaunchDock() {
+  const [customApps, setCustomApps] = useState<Array<{ id: string; label: string }>>([]);
+  const [launchMessage, setLaunchMessage] = useState("");
+
+  useEffect(() => {
+    void window.jarvisDesktop?.getCustomApps?.().then(setCustomApps);
+  }, []);
+
   async function launch(appId: string, href?: string) {
     if (appId === "jarvis") {
       if (window.jarvisDesktop?.openJarvisAssistant) await window.jarvisDesktop.openJarvisAssistant();
       else window.location.assign("/jarvis");
       return;
     }
-    const launched = await window.jarvisDesktop?.launchApp?.(appId);
-    if (!launched && href) {
+    const result = await window.jarvisDesktop?.launchApp?.(appId);
+    if (!result?.available && href) {
       window.open(href, "_blank", "noopener,noreferrer");
+      return;
     }
+    setLaunchMessage(result?.available ? "" : appId === "unreal" ? "Unreal Engine was not found in the Epic Games install folder." : "Jarvis could not open that app.");
+  }
+
+  async function addApp() {
+    if (!window.jarvisDesktop?.addCustomApp) {
+      setLaunchMessage("Add App is available in the Jarvis desktop application.");
+      return;
+    }
+    const result = await window.jarvisDesktop.addCustomApp();
+    setCustomApps(result.apps || []);
+    setLaunchMessage(result.added && result.app ? `${result.app.label} added.` : "");
   }
 
   return (
-    <nav className={styles.dock} aria-label="Quick launch">
-      {quickLaunch.map(({ id, label, Icon, href, appId }) => {
+    <nav className={styles.dock} aria-label="Quick launch" title={launchMessage || undefined}>
+      {([...quickLaunch, ...customApps.map((app): QuickLaunchItem => ({ ...app, Icon: AppWindow, appId: app.id }))]).map(({ id, label, Icon, href, appId }) => {
         const content = (
           <>
             <Icon size={32} />
@@ -609,6 +630,10 @@ function QuickLaunchDock() {
           </button>
         );
       })}
+      <button type="button" title="Add App" onClick={() => void addApp()}>
+        <Plus size={32} />
+        <span>Add App</span>
+      </button>
     </nav>
   );
 }

@@ -60,3 +60,15 @@ class AssistantSpeechRequest(BaseModel):
     text: str = Field(min_length=1, max_length=5000)
     voice: Literal["af_bella", "af_nicole"] = "af_bella"
     speed: float = Field(default=1.0, ge=0.5, le=1.5)
+
+
+class AssistantMediaResponseRequest(BaseModel):
+    intent: Literal["start_music", "pause_music", "next_track", "previous_track", "now_playing"]
+    initial_playback_status: str | None = Field(default=None, max_length=40)
+    command_available: bool
+    verified_playing: bool
+    playback_status: str | None = Field(default=None, max_length=40)
+    title: str | None = Field(default=None, max_length=300)
+    artist: str | None = Field(default=None, max_length=300)
+    track_changed: bool | None = None
+    command_verified: bool | None = None

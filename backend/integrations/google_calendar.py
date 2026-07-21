@@ -3,6 +3,9 @@ from __future__ import annotations
 import os
 import secrets
 import time
+import json
+import urllib.parse
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -13,7 +16,12 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.errors import HttpError
 from googleapiclient.discovery import build
 
-SCOPES = ["https://www.googleapis.com/auth/calendar"]
+CALENDAR_SCOPES = ["https://www.googleapis.com/auth/calendar"]
+GMAIL_SCOPES = [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.compose",
+]
+SCOPES = [*CALENDAR_SCOPES, *GMAIL_SCOPES]
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 TOKEN_PATH = BASE_DIR / "token.json"
@@ -102,11 +110,16 @@ def complete_calendar_oauth(state: str, code: str) -> dict:
 
 
 def get_calendar_service():
+    creds = get_google_credentials(CALENDAR_SCOPES)
+    return build("calendar", "v3", credentials=creds)
+
+
+def get_google_credentials(required_scopes: list[str]):
     creds = None
 
     if TOKEN_PATH.exists():
-        creds = Credentials.from_authorized_user_file(str(TOKEN_PATH), SCOPES)
-        if not creds.has_scopes(SCOPES):
+        creds = Credentials.from_authorized_user_file(str(TOKEN_PATH), required_scopes)
+        if not creds.has_scopes(required_scopes):
             creds = None
 
     if not creds or not creds.valid:
@@ -128,8 +141,24 @@ def get_calendar_service():
             creds = flow.run_local_server(port=0)
 
         TOKEN_PATH.write_text(creds.to_json())
+        TOKEN_PATH.chmod(0o600)
 
-    return build("calendar", "v3", credentials=creds)
+    actual_scopes = _granted_token_scopes(creds.token)
+    if actual_scopes is not None and not set(required_scopes).issubset(actual_scopes):
+        raise CalendarAuthRequired("Your Google connection has not granted the required Gmail permissions yet. Reconnect Google from Jarvis and approve Gmail access.")
+    return creds
+
+
+def _granted_token_scopes(access_token: str | None) -> set[str] | None:
+    if not access_token:
+        return None
+    try:
+        url = "https://oauth2.googleapis.com/tokeninfo?access_token=" + urllib.parse.quote(access_token)
+        with urllib.request.urlopen(url, timeout=8) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        return {scope for scope in str(payload.get("scope") or "").split() if scope}
+    except Exception:
+        return None
 
 
 def refresh_calendar_auth() -> dict:
@@ -140,7 +169,7 @@ def refresh_calendar_auth() -> dict:
 
     creds = Credentials.from_authorized_user_file(str(TOKEN_PATH), SCOPES)
     if not creds.has_scopes(SCOPES):
-        raise CalendarAuthRequired("Google Calendar token does not include calendar scope. Reconnect Calendar from a local shell.")
+        raise CalendarAuthRequired("Your Google connection needs the new Gmail read and draft permissions. Reconnect Google from Jarvis.")
 
     refreshed = False
     if creds.expired and creds.refresh_token:
@@ -153,6 +182,10 @@ def refresh_calendar_auth() -> dict:
 
     if not creds.valid:
         raise CalendarAuthRequired("Google Calendar authorization is no longer valid. Reauthenticate to reconnect it.")
+
+    actual_scopes = _granted_token_scopes(creds.token)
+    if actual_scopes is not None and not set(SCOPES).issubset(actual_scopes):
+        raise CalendarAuthRequired("Your Google connection is still calendar-only. Reconnect Google from Jarvis and approve Gmail read and draft access.")
 
     try:
         service = build("calendar", "v3", credentials=creds)

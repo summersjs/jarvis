@@ -27,7 +27,23 @@ from backend.assistant.meal_confirmation import (
 from backend.assistant.context_resolver import ResolverFailure, deterministic_sensitive_resolution, direct_resolution, needs_model_resolution, resolve_context, safe_read_followup_resolution
 from backend.assistant.conversation_state import CONVERSATION_STATE_STORE, merge_conversation_state, record_reversible_actions, record_verified_tool_results
 from backend.assistant.planner import build_tool_plan, validate_tool_plan
+from backend.assistant.email_planning import (
+    EMAIL_PLAN_STORE,
+    PendingEmailPlan,
+    apply_revision_metadata,
+    classify_brief_locally,
+    contains_private_style_language,
+    draft_hash,
+    is_email_plan_request,
+    is_plan_approval,
+    is_plan_cancel,
+    is_plan_rejection,
+    next_draft_identity,
+    parse_email_plan_request,
+    reject_current_draft,
+)
 from backend.assistant.tools.registry import AssistantToolContext, select_tools
+from backend.services.contact_service import resolve_contact_email
 from backend.prompts.jarvis import JARVIS_SYSTEM_PROMPT
 from backend.prompts.user_profile import JOHN_USER_PROFILE
 from backend.schemas.assistant import ActionVerification, AssistantActionExecution
@@ -37,6 +53,7 @@ OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip(
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:8b")
 OLLAMA_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "90"))
 logger = logging.getLogger("jarvis.planner")
+MUSIC_RESPONSE_TIMEOUT_SECONDS = float(os.getenv("JARVIS_MUSIC_RESPONSE_TIMEOUT_SECONDS", "2.5"))
 
 
 class OllamaServiceError(Exception):
@@ -101,12 +118,35 @@ def chat_with_jarvis(messages: list[dict], model: str | None = None, context: As
     prior_state = None
     resolution = None
     tool_plan = None
+    music_intent = detect_music_intent(latest_user_text)
+    if music_intent == "like_track":
+        logger.info("music_intent_detected conversation_id=%s execution_id=%s intent=like_track supported=false", context.conversation_id, context.request_id)
+        return build_service_result(
+            "I can control Windows playback, but YouTube Music does not expose its thumbs-up button through those controls. I can't honestly like this track for you yet.",
+            selected_model, [], [], capability_manifest(), context,
+            [{"event": "client_media_action", "status": "unsupported", "action": "like_track"}],
+            "unsupported_media_action",
+        )
+    if music_intent:
+        logger.info("music_intent_detected conversation_id=%s execution_id=%s intent=%s", context.conversation_id, context.request_id, music_intent)
+        result = build_service_result(
+            "Checking the desktop music session.",
+            selected_model, [], [], capability_manifest(), context,
+            [{"event": "client_media_action", "status": "requested", "action": music_intent}],
+            "client_media_action",
+        )
+        result["clientActions"] = [{"type": music_intent}]
+        return result
     if latest_user_text.strip().lower() in {"/new", "/reset-context", "reset context"}:
         CONVERSATION_STATE_STORE.clear(context.conversation_id)
+        EMAIL_PLAN_STORE.clear(context.conversation_id)
         return build_service_result(
             "Context reset. Your chat history is still here, but I won't carry entities or references into the next request.",
             selected_model, [], [], capability_manifest(), context, [{"event": "context_reset", "status": "succeeded"}], "context_reset",
         )
+    email_plan_result = handle_email_plan(latest_user_text, selected_model, context)
+    if email_plan_result:
+        return email_plan_result
     if context.conversation_id != "local-jarvis":
         prior_state = CONVERSATION_STATE_STORE.get(context.conversation_id)
         try:
@@ -269,6 +309,12 @@ def chat_with_jarvis(messages: list[dict], model: str | None = None, context: As
     status_reply = build_system_status_reply(tool_results)
     if status_reply:
         return build_service_result(status_reply, selected_model, tool_results, executions, manifest, context, execution_trace, "system_status")
+    calendar_reply = build_calendar_reply(tool_results)
+    if calendar_reply:
+        return build_service_result(calendar_reply, selected_model, tool_results, executions, manifest, context, execution_trace, "verified_calendar_read")
+    gmail_reply = build_gmail_reply(tool_results)
+    if gmail_reply:
+        return build_service_result(gmail_reply, selected_model, tool_results, executions, manifest, context, execution_trace, "verified_gmail_read")
     commerce_reply = build_live_price_reply(latest_user_text, tool_results)
     if commerce_reply:
         return build_service_result(commerce_reply, selected_model, tool_results, executions, manifest, context, execution_trace, "verified_live_price")
@@ -344,6 +390,282 @@ def identity_response_for(text: str) -> str:
     if re.search(r"\b(are you|is your name) chloe\b", normalized):
         return "No—I'm Jarvis. Chloe is an outdated legacy name, not my identity."
     return ""
+
+
+def handle_email_plan(text: str, selected_model: str, context: AssistantToolContext) -> dict | None:
+    pending = EMAIL_PLAN_STORE.get(context.conversation_id)
+    starts_plan = is_email_plan_request(text)
+    if pending and starts_plan:
+        EMAIL_PLAN_STORE.clear(context.conversation_id)
+        pending = None
+    if not pending and not starts_plan:
+        return None
+    manifest = capability_manifest()
+    if not pending:
+        recipient_name, brief = parse_email_plan_request(text)
+        if not recipient_name:
+            return build_service_result(
+                "Who should the email be for? Try `/plan draft an email to Tierra`.", selected_model, [], [], manifest, context,
+                [{"event": "email_plan", "status": "clarification_required"}], "email_plan_clarification",
+            )
+        contact = resolve_contact_email(context.user_id, recipient_name)
+        if not contact:
+            return build_service_result(
+                f"I don't have a permanently saved email address for {recipient_name}. Tell me the address before we plan the draft.",
+                selected_model, [], [], manifest, context, [{"event": "email_plan", "status": "contact_missing"}], "email_plan_clarification",
+            )
+        pending = PendingEmailPlan(
+            conversation_id=context.conversation_id, recipient_name=str(contact.get("name") or recipient_name),
+            recipient_email=str(contact["email"]), awaiting_brief=not bool(brief),
+        )
+        if not brief:
+            EMAIL_PLAN_STORE.save(pending)
+            return build_service_result(
+                f"What do you want to say to {pending.recipient_name}? Give me the rough idea and I'll turn it into a draft for you to review.",
+                selected_model, [], [], manifest, context, [{"event": "email_plan", "status": "awaiting_brief"}], "email_plan_clarification",
+            )
+        compose_email_plan(selected_model, pending, brief)
+        EMAIL_PLAN_STORE.save(pending)
+        return email_plan_preview(pending, selected_model, manifest, context)
+
+    if is_plan_cancel(text):
+        pending.status = "cancelled"
+        EMAIL_PLAN_STORE.clear(context.conversation_id)
+        return build_service_result(
+            "Email plan cancelled. No Gmail draft was created.", selected_model, [], [], manifest, context,
+            [{"event": "email_plan", "status": "cancelled"}], "email_plan_cancelled",
+        )
+    if pending.body and is_plan_approval(text):
+        if pending.status != "proposed" or draft_hash(pending.body) in pending.rejected_draft_hashes:
+            return build_service_result(
+                "That draft version is no longer eligible for approval. I'll show you the current revision first.",
+                selected_model, [], [], manifest, context,
+                [{"event": "email_plan", "status": "stale_approval_rejected"}], "email_plan_revision",
+            )
+        tool_results, executions, trace = execute_governed_tool_calls([{"name": "create_gmail_draft", "input": {
+            "to": pending.recipient_email, "subject": pending.subject, "body": pending.body,
+        }}], context)
+        verified = any(item.execution_status == "succeeded" and item.verification and item.verification.status == "verified" for item in executions)
+        if verified:
+            pending.status = "approved"
+            EMAIL_PLAN_STORE.clear(context.conversation_id)
+        return build_service_result(
+            build_action_reply(tool_results, executions, context.request_id) or "The Gmail draft was not created.",
+            selected_model, tool_results, executions, manifest, context, trace, "email_plan_approved",
+        )
+    if pending.awaiting_brief or not pending.body:
+        compose_email_plan(selected_model, pending, text)
+    else:
+        reject_current_draft(pending)
+        normalized_feedback = text.strip().lower().rstrip(".!?")
+        if normalized_feedback == "everything":
+            feedback = "Rewrite the entire email from scratch using only the retained content goals and private tone metadata."
+        elif is_plan_rejection(text):
+            feedback = f"The user rejected the entire current draft ({text.strip()}). Rewrite it now with genuinely different wording while retaining the structured goals and tone."
+        else:
+            feedback = text
+        apply_revision_metadata(pending, feedback)
+        revise_email_plan(selected_model, pending, feedback)
+    EMAIL_PLAN_STORE.save(pending)
+    return email_plan_preview(pending, selected_model, manifest, context)
+
+
+def compose_email_plan(model: str, plan: PendingEmailPlan, brief: str) -> None:
+    local_content, local_tone, local_constraints = classify_brief_locally(brief)
+    prompt = (
+        "Separate communication content from private drafting metadata, then create a concise personal email from John. "
+        "Return strict JSON with subject, body, content_goals, tone, and constraints. content_goals are facts/messages the recipient should read. "
+        "tone contains private style, persuasion, emotional-effect, or intent instructions. Never quote, mention, or explain tone metadata in the email. "
+        "For example, 'give it dom vibes' is private tone—not email content. Preserve meaning without inventing facts, promises, or events. "
+        f"Recipient: {plan.recipient_name}\nUser instructions: {brief[:4000]}"
+    )
+    result = request_email_json(model, prompt, "A note from John", "", local_content, local_tone, local_constraints)
+    result["content_goals"] = local_content
+    result["tone"] = list(dict.fromkeys([*local_tone, *clean_string_list(result.get("tone"), [], 20)]))[:20]
+    result["constraints"] = list(dict.fromkeys([*local_constraints, *clean_string_list(result.get("constraints"), [], 20)]))[:20]
+    apply_generated_draft(plan, result, prompt, model)
+
+
+def revise_email_plan(model: str, plan: PendingEmailPlan, instruction: str) -> None:
+    prompt = (
+        "Rewrite the email using the structured state and feedback. Return strict JSON with subject, body, content_goals, tone, and constraints. "
+        "Tone, style, persuasion goals, desired emotional effect, and private explanations are metadata and must never appear literally in the email. "
+        "Never return the rejected wording unchanged. If asked to start over, everything, or try again, write a genuinely different version while retaining core goals. "
+        "Do not invent facts.\n"
+        f"Recipient: {plan.recipient_name}\nContent goals: {json.dumps(plan.content_goals)}\nPrivate tone: {json.dumps(plan.tone)}\n"
+        f"Constraints: {json.dumps(plan.constraints)}\nRejected draft hashes: {json.dumps(plan.rejected_draft_hashes)}\n"
+        f"Previous subject: {plan.subject}\nPrevious body: {plan.body}\nFeedback: {instruction[:4000]}"
+    )
+    result = request_email_json(model, prompt, plan.subject, "", plan.content_goals, plan.tone, plan.constraints)
+    # The backend owns metadata merging; a revision model may rewrite prose but may not silently alter goals or private instructions.
+    result["content_goals"] = list(plan.content_goals)
+    result["tone"] = list(plan.tone)
+    result["constraints"] = list(plan.constraints)
+    apply_generated_draft(plan, result, prompt, model)
+
+
+def request_email_json(model: str, prompt: str, fallback_subject: str, fallback_body: str, fallback_content: list[str], fallback_tone: list[str], fallback_constraints: list[str]) -> dict:
+    for attempt in range(2):
+        retry = "\nYour previous output exposed private style metadata or repeated rejected wording. Regenerate with different wording." if attempt else ""
+        try:
+            data = _request_json("/api/chat", {"model": model, "messages": [{"role": "system", "content": prompt + retry}], "stream": False, "think": False, "format": "json", "keep_alive": "30m", "options": {"temperature": 0.72, "num_predict": 550}}, timeout=OLLAMA_TIMEOUT_SECONDS)
+            parsed = json.loads(extract_message_content(data))
+            result = {
+                "subject": str(parsed.get("subject") or fallback_subject).strip()[:300],
+                "body": str(parsed.get("body") or fallback_body).strip()[:12000],
+                "content_goals": clean_string_list(parsed.get("content_goals"), fallback_content, 30),
+                "tone": clean_string_list(parsed.get("tone"), fallback_tone, 20),
+                "constraints": clean_string_list(parsed.get("constraints"), fallback_constraints, 20),
+            }
+            if result["subject"] and result["body"] and not contains_private_style_language(result["body"], result["tone"]):
+                return result
+        except Exception:
+            continue
+    return {"subject": fallback_subject, "body": fallback_body.strip()[:12000], "content_goals": fallback_content, "tone": fallback_tone, "constraints": fallback_constraints}
+
+
+def clean_string_list(value, fallback: list[str], limit: int) -> list[str]:
+    if not isinstance(value, list):
+        return list(fallback)
+    return [str(item).strip()[:500] for item in value if str(item).strip()][:limit]
+
+
+def apply_generated_draft(plan: PendingEmailPlan, result: dict, prompt: str, model: str) -> None:
+    subject = str(result.get("subject") or plan.subject).strip()[:300]
+    body = str(result.get("body") or "").strip()[:12000]
+    content = clean_string_list(result.get("content_goals"), plan.content_goals, 30)
+    tone = clean_string_list(result.get("tone"), plan.tone, 20)
+    constraints = clean_string_list(result.get("constraints"), plan.constraints, 20)
+    invalid = not body or contains_private_style_language(body, tone) or draft_hash(body) in plan.rejected_draft_hashes
+    if invalid:
+        fallback = deterministic_email_rewrite(plan.recipient_name, content, tone, plan.revision_number + 1)
+        subject, body = fallback
+    if draft_hash(body) in plan.rejected_draft_hashes:
+        body = f"{body.rstrip()}\n\nLove,\nJohn" if not body.rstrip().endswith("John") else body.replace("\n", "\n\n", 1)
+    plan.subject = subject
+    plan.body = body
+    plan.content_goals = content
+    plan.tone = tone
+    plan.constraints = constraints
+    next_draft_identity(plan)
+
+
+def deterministic_email_rewrite(recipient: str, goals: list[str], tone: list[str], revision: int) -> tuple[str, str]:
+    meaningful = [goal.strip().rstrip(".") for goal in goals if goal.strip()]
+    subject = "A note for you" if revision % 2 else "Thinking of you"
+    opening = f"{recipient}," if revision % 2 else f"Hey {recipient},"
+    sentences = ". ".join(meaningful) if meaningful else "I wanted you to know how much you mean to me"
+    body = f"{opening}\n\n{sentences}.\n\nLove,\nJohn"
+    return subject, body
+
+
+def email_plan_preview(plan: PendingEmailPlan, selected_model: str, manifest, context: AssistantToolContext) -> dict:
+    message = (
+        f"Draft plan for {plan.recipient_name} · revision {plan.revision_number}:\n\nSubject: {plan.subject}\n\n{plan.body}\n\n"
+        "Say `yes, I love it` to create the unsent Gmail draft, `no` to cancel, or tell me what to change."
+    )
+    return build_service_result(message, selected_model, [], [], manifest, context, [{"event": "email_plan", "status": "awaiting_approval"}], "email_plan_preview")
+
+
+def is_start_music_request(text: str) -> bool:
+    """Match deliberate, generic music-start commands without guessing song searches."""
+    normalized = re.sub(r"[^a-z0-9 ]", " ", text.lower())
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    patterns = (
+        r"^(?:please )?play (?:some |my )?(?:music|tunes)(?: please)?$",
+        r"^(?:please )?(?:let s )?(?:get|put|throw) (?:some |my )?(?:music|tunes) (?:going|on)(?: please)?$",
+        r"^(?:please )?(?:start|turn on|fire up|open|launch) (?:some |my )?(?:music|tunes|youtube music)(?: please)?$",
+        r"^(?:please )?(?:open|launch) youtube music(?: please)?$",
+    )
+    return any(re.fullmatch(pattern, normalized) for pattern in patterns)
+
+
+def detect_music_intent(text: str) -> str | None:
+    normalized = re.sub(r"[^a-z0-9 ]", " ", text.lower())
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    if is_start_music_request(text):
+        return "start_youtube_music"
+    if re.fullmatch(r"(?:please )?(?:skip|skip this|next|next song|next track|skip this song|skip this track)(?: please)?", normalized):
+        return "next_track"
+    if re.fullmatch(r"(?:please )?(?:go back|previous|previous song|previous track|last song|play the last song|play that again)(?: please)?", normalized):
+        return "previous_track"
+    if re.fullmatch(r"(?:(?:please|can you|could you|would you) )?(?:pause|pause this|pause it|pause (?:this |the )?(?:song|track|music)|stop (?:this |the )?(?:song|track|music))(?: please)?", normalized):
+        return "pause_music"
+    if re.fullmatch(r"(?:who s|who is) (?:playing|this|this artist)|who (?:sings|sang) (?:this|this song|this track)|what (?:song|track) is (?:this|playing)|what(?: s| is) playing|what am i listening to", normalized):
+        return "now_playing"
+    if re.fullmatch(r"(?:i like|like|thumbs up|give a thumbs up to) (?:this|this song|this track|it)", normalized):
+        return "like_track"
+    return None
+
+
+def generate_music_playback_response(receipt: dict) -> str:
+    """Phrase a desktop-verified playback receipt; never upgrade failure into success."""
+    intent = str(receipt.get("intent") or "start_music")
+    if not receipt.get("command_available"):
+        return "The desktop music controls are unavailable."
+    if intent == "now_playing" and not receipt.get("playback_status"):
+        return "There is no active media session."
+    if intent == "pause_music":
+        if not receipt.get("command_verified") or receipt.get("verified_playing"):
+            return "I found the player, but playback did not pause."
+        return "Paused."
+    if intent in {"next_track", "previous_track"} and not receipt.get("track_changed"):
+        return "I found the player and sent the command, but the track did not change."
+    if intent == "start_music" and not receipt.get("verified_playing"):
+        status = str(receipt.get("playback_status") or "").lower()
+        if status in {"paused", "stopped", "closed", "changing"}:
+            return "I found the player, but playback did not start."
+        return "There is no active media session."
+
+    title = str(receipt.get("title") or "").strip()[:300]
+    artist = str(receipt.get("artist") or "").strip()[:300]
+    if not title and not artist:
+        if intent == "now_playing" and not receipt.get("verified_playing"):
+            return "The media session is paused, and its track details are unavailable."
+        return "You got it. Music is playing."
+    metadata = {"title": title or None, "artist": artist or None}
+    prompt = (
+        f"Write one brief, natural Jarvis-style sentence responding to the verified media intent {intent}. "
+        "Vary the wording freely and sound conversational and lightly witty, not canned. "
+        "For start_music confirm playback; for next_track or previous_track confirm the track change; for now_playing identify the track. "
+        "Use only the supplied title and artist. Never invent a song, artist, playlist, or playback fact. "
+        "If both fields are missing, say only that music is playing. No quotes, markdown, emoji, or preamble.\n"
+        f"Verified playback metadata: {json.dumps(metadata)}"
+    )
+    try:
+        data = _request_json(
+            "/api/chat",
+            {"model": OLLAMA_MODEL, "messages": [{"role": "system", "content": prompt}], "stream": False, "think": False, "keep_alive": "30m", "options": {"temperature": 0.85, "num_predict": 36}},
+            timeout=MUSIC_RESPONSE_TIMEOUT_SECONDS,
+        )
+        response = extract_message_content(data).strip()
+        if response:
+            grounded_values = [value for value in (title, artist) if value]
+            if any(value.lower() in response.lower() for value in grounded_values):
+                return enforce_jarvis_identity(response[:500])
+    except Exception:
+        pass
+    if intent == "now_playing":
+        if title and artist:
+            return f"That's {title} by {artist}."
+        if title:
+            return f"You're listening to {title}."
+        return f"That's {artist}."
+    if intent == "next_track":
+        if title and artist:
+            return f"Skipped ahead. {title} by {artist} is up now."
+        return f"Skipped ahead to {title or artist}."
+    if intent == "previous_track":
+        if title and artist:
+            return f"Going back. {title} by {artist} is on now."
+        return f"Going back to {title or artist}."
+    if title and artist:
+        return f"You got it. {title} by {artist} is playing."
+    if title:
+        return f"Music's up. You're listening to {title}."
+    if artist:
+        return f"You got it. {artist} is playing."
+    return "You got it. Music is playing."
 
 
 def enforce_jarvis_identity(content: str) -> str:
@@ -571,6 +893,46 @@ def build_food_vault_followup_reply(tool_results: list[dict]) -> str:
     return str(result.get("question") or "Did you mean an existing Food Vault item, or should I create a new one?")
 
 
+def build_calendar_reply(tool_results: list[dict]) -> str:
+    item = next((row for row in tool_results if row.get("tool") in {"get_today_schedule", "get_schedule_for_date", "get_week_schedule"}), None)
+    if not item:
+        return ""
+    if not item.get("success"):
+        return "I couldn't read Google Calendar right now, so I won't guess about your schedule."
+    result = item.get("result") or {}
+    if item.get("tool") == "get_week_schedule":
+        populated = [(day.get("label"), day.get("events") or []) for day in result.get("days") or [] if day.get("events")]
+        if not populated:
+            return "Your Google Calendar is clear for the next seven days."
+        parts = [f"{label}: " + ", ".join(str(event.get("title") or "Untitled event") for event in events) for label, events in populated]
+        return "For the week ahead, " + "; ".join(parts) + "."
+    events = result.get("events") or []
+    label = str(result.get("label") or ("today" if item.get("tool") == "get_today_schedule" else "that day"))
+    if not events:
+        return f"You have nothing scheduled on Google Calendar for {label}."
+    names = ", ".join(str(event.get("title") or "Untitled event") for event in events)
+    return f"You have {len(events)} event{'s' if len(events) != 1 else ''} {label}: {names}."
+
+
+def build_gmail_reply(tool_results: list[dict]) -> str:
+    item = next((row for row in tool_results if row.get("tool") == "search_gmail"), None)
+    if not item:
+        return ""
+    result = item.get("result") or {}
+    if result.get("auth_required") or result.get("setup_required"):
+        return str(result.get("question"))
+    if not item.get("success") or not result.get("verified"):
+        return "I couldn't verify Gmail right now, so I won't guess about your inbox."
+    messages = result.get("messages") or []
+    if not messages:
+        return "I found no verified Gmail messages matching that search."
+    selected = result.get("selected_message")
+    if selected:
+        return f"The selected email is from {selected.get('from') or 'an unknown sender'} with the subject {selected.get('subject') or '(no subject)'}. {selected.get('body') or selected.get('snippet') or 'No readable message body was available.'}"
+    lines = [f"{row.get('from') or 'Unknown sender'} — {row.get('subject') or '(no subject)'}" for row in messages[:5]]
+    return f"I found {len(messages)} matching email{'s' if len(messages) != 1 else ''}: " + "; ".join(lines) + "."
+
+
 def format_write_confirmation(tool_name: str | None, result: dict, request_id: str = "") -> str:
     if tool_name == "log_goal_progress":
         goal = result.get("goal") or {}
@@ -629,6 +991,10 @@ def format_write_confirmation(tool_name: str | None, result: dict, request_id: s
     if tool_name == "create_goal":
         goal = result.get("goal") or {}
         return f"Done. I created the goal {goal.get('title') or 'you requested'}."
+
+    if tool_name == "create_gmail_draft":
+        draft = result.get("draft") or {}
+        return f"Done. I created and verified an unsent Gmail draft to {draft.get('to') or 'the requested recipient'} with the subject {draft.get('subject') or 'you requested'}."
 
     if tool_name == "create_shopping_list":
         shopping_list = result.get("shopping_list") or {}

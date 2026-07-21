@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { uploadForgeMedia } from "@/lib/forgeMedia";
 import {
   Archive,
   Bot,
@@ -34,6 +35,18 @@ import {
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const API_KEY = process.env.NEXT_PUBLIC_JARVIS_API_KEY || "";
 const USER_ID = "john";
+const FORGE_PAGE_SIZE = 25;
+const forgeRequestCache = new globalThis.Map<string, { at: number; promise: Promise<Response> }>();
+
+function forgeFetch(url: string, init?: RequestInit) {
+  if (init?.method && init.method !== "GET") return fetch(url, init);
+  const cached = forgeRequestCache.get(url);
+  if (cached && Date.now() - cached.at < 2_000) return cached.promise.then((response) => response.clone());
+  if (process.env.NODE_ENV === "development") console.info(`[forge-query] GET ${url}`);
+  const promise = fetch(url, init);
+  forgeRequestCache.set(url, { at: Date.now(), promise });
+  return promise.then((response) => response.clone());
+}
 
 type ForgeCategory = "Games" | "Jarvis" | "Business" | "Hardware" | "Writing" | "Life";
 type ForgeStatus = "Active" | "Building" | "Experiment" | "Incubating" | "Archived" | "Completed";
@@ -91,6 +104,7 @@ type ForgeFile = {
   tags?: string[] | null;
   created_at?: string | null;
   updated_at?: string | null;
+  metadata?: { thumbnail_url?: string | null } | null;
 };
 
 type GoalMilestone = {
@@ -280,6 +294,7 @@ export default function ForgePage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [setupNotice, setSetupNotice] = useState("");
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
 
   const spark = useMemo(() => {
     const day = Math.floor(new Date().setHours(0, 0, 0, 0) / 86_400_000);
@@ -294,31 +309,23 @@ export default function ForgePage() {
   const folderOptions = useMemo(() => buildForgeFolderOptions(dashboard.notes, dashboard.sparks), [dashboard.notes, dashboard.sparks]);
 
   useEffect(() => {
-    loadForge();
-    // Forge intentionally does a one-time fast summary load, then hydrates details in the background.
+    void loadForge();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  function syncSelectedProject(projects: ForgeProject[]) {
-    const requestedProjectId = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("project") : null;
-    setSelectedProject((current) => {
-      if (requestedProjectId) return projects.find((project) => project.id === requestedProjectId) || current;
-      return current ? projects.find((project) => project.id === current.id) || current : current;
-    });
-  }
 
   async function loadForge() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(`${API_BASE}/forge/desktop?user_id=${USER_ID}&include_goals=false`, { headers: { "x-api-key": API_KEY } });
+      const res = await forgeFetch(`${API_BASE}/forge/desktop?user_id=${USER_ID}&include_goals=false&page_size=${FORGE_PAGE_SIZE}`, { headers: { "x-api-key": API_KEY } });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Forge tables are not online yet.");
       setDashboard({ ...emptyDashboard, ...data });
-      syncSelectedProject(data.projects || []);
+      if (process.env.NODE_ENV === "development") console.info(`[forge-query] desktop returned ${(data.projects || []).length} projects`);
+      const requestedProjectId = new URLSearchParams(window.location.search).get("project");
+      if (requestedProjectId) void openProject(data.projects?.find((item: ForgeProject) => item.id === requestedProjectId) || { id: requestedProjectId } as ForgeProject);
       setSetupNotice("");
       setLoading(false);
-      void loadForgeDetails();
     } catch (err) {
       setDashboard(emptyDashboard);
       setSetupNotice("Forge data tables are not online yet. Run backend/data/20260701_forge.sql in Supabase to enable persistence.");
@@ -327,23 +334,26 @@ export default function ForgePage() {
     }
   }
 
-  async function loadForgeDetails() {
+  async function openProject(project: ForgeProject) {
+    setSelectedProject(project);
     try {
-      const res = await fetch(`${API_BASE}/forge?user_id=${USER_ID}`, { headers: { "x-api-key": API_KEY } });
+      const res = await forgeFetch(`${API_BASE}/forge/projects/${project.id}/detail?user_id=${USER_ID}&page_size=${FORGE_PAGE_SIZE}`, { headers: { "x-api-key": API_KEY } });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Forge details are still loading.");
-      setDashboard({ ...emptyDashboard, ...data });
-      syncSelectedProject(data.projects || []);
+      if (!res.ok) throw new Error(data.detail || "Forge project details are still loading.");
+      if (process.env.NODE_ENV === "development") {
+        console.info(`[forge-query] project detail returned sparks=${data.sparks?.length || 0} notes=${data.notes?.length || 0} files=${data.files?.length || 0} tasks=${data.tasks?.length || 0}`);
+      }
+      setSelectedProject(data.project || project);
+      setDashboard((current) => ({ ...current, sparks: data.sparks || [], notes: data.notes || [], files: data.files || [] }));
     } catch {
-      // The summary view is already usable; details can retry after the next mutation or refresh.
-    } finally {
-      setLoading(false);
+      // The bounded summary card remains usable if detail hydration fails.
     }
   }
 
   function openModal(nextModal: ModalType, project: ForgeProject | null = selectedProject, category?: ForgeCategory) {
     setMessage("");
     setError("");
+    setPendingFile(null);
     setForm({
       ...emptyForm,
       project_id: nextModal && ["spark", "note", "file"].includes(nextModal) && project ? project.id : "",
@@ -363,7 +373,16 @@ export default function ForgePage() {
     setMessage("");
     try {
       const endpoint = modal === "project" ? "projects" : modal === "spark" ? "sparks" : modal === "note" ? "notes" : "files";
-      const payload = buildPayload(modal, form);
+      let effectiveForm = form;
+      let mediaMetadata: Record<string, string> | undefined;
+      if (modal === "file" && pendingFile) {
+        if (!form.project_id) throw new Error("Choose a project before uploading local media.");
+        const media = await uploadForgeMedia(pendingFile, form.project_id);
+        effectiveForm = { ...form, file_url: media.originalUrl };
+        mediaMetadata = media.thumbnailUrl ? { thumbnail_url: media.thumbnailUrl, storage: "local_linux" } : { storage: "local_linux" };
+      }
+      const payload = buildPayload(modal, effectiveForm);
+      if (mediaMetadata) payload.metadata = { upload_status: "local_linux", ...mediaMetadata };
       const res = await fetch(`${API_BASE}/forge/${endpoint}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
@@ -371,11 +390,11 @@ export default function ForgePage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Forge save failed.");
-      if (modal === "file" && form.use_as_cover === "true" && form.project_id && form.file_url) {
+      if (modal === "file" && effectiveForm.use_as_cover === "true" && effectiveForm.project_id && effectiveForm.file_url) {
         await fetch(`${API_BASE}/forge/projects/${form.project_id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-          body: JSON.stringify({ cover_image_url: form.file_url }),
+          body: JSON.stringify({ cover_image_url: effectiveForm.file_url }),
         });
       }
       const projectTitle = dashboard.projects.find((project) => project.id === form.project_id)?.title;
@@ -479,8 +498,8 @@ export default function ForgePage() {
         )}
 
         <section className="forge-work-grid">
-          <RecentlyUpdated projects={dashboard.recently_updated} onSelect={setSelectedProject} />
-          <IncubationShelf projects={dashboard.incubating} onSelect={setSelectedProject} />
+          <RecentlyUpdated projects={dashboard.recently_updated} onSelect={openProject} />
+          <IncubationShelf projects={dashboard.incubating} onSelect={openProject} />
           <SparkOfDay spark={spark} />
         </section>
 
@@ -504,6 +523,10 @@ export default function ForgePage() {
         goals={dashboard.goals}
         folderOptions={folderOptions}
         saving={saving}
+        onFileSelect={(file) => {
+          setPendingFile(file);
+          setForm((current) => ({ ...current, file_name: file.name, file_type: file.type, file_size: String(file.size), file_url: "" }));
+        }}
         onClose={() => setModal(null)}
         onSave={saveModal}
         onChange={(key, value) => setForm((prev) => ({ ...prev, [key]: value }))}
@@ -569,7 +592,7 @@ function ForgeHero({ stats }: { stats: ForgeDashboard["stats"] }) {
         <strong>A workshop for projects, inventions, stories, systems, and sparks of inspiration.</strong>
       </div>
       <div className="forge-plaque" aria-hidden="true">
-        <Image src="/images/Forge/new_forge_plaque.png" alt="" fill sizes="280px" className="forge-plaque-image" />
+        <Image src="/images/Forge/new_forge_plaque.png" alt="" fill sizes="280px" loading="lazy" className="forge-plaque-image" />
       </div>
       <div className="forge-stat-strip">
         <Stat label="Active" value={stats.active_projects} Icon={FolderKanban} href="/forge/projects?filter=active" />
@@ -626,7 +649,7 @@ function CategoryFolder({
       style={{ "--category-accent": category.accent } as CSSProperties}
       onClick={onClick}
     >
-      <Image src={shellSrc} alt="" fill sizes="(max-width: 820px) 100vw, (max-width: 1280px) 33vw, 16vw" className="forge-folder-shell" />
+      <Image src={shellSrc} alt="" fill sizes="(max-width: 820px) 100vw, (max-width: 1280px) 33vw, 16vw" loading="lazy" className="forge-folder-shell" />
       <span className="forge-folder-shade" aria-hidden="true" />
       <span className="forge-folder-tab" aria-hidden="true" />
       <span className="forge-folder-heading">
@@ -797,6 +820,7 @@ function ForgeModal({
   goals,
   folderOptions,
   saving,
+  onFileSelect,
   onClose,
   onSave,
   onChange,
@@ -809,6 +833,7 @@ function ForgeModal({
   goals: ForgeGoalOption[];
   folderOptions: FolderOptions;
   saving: boolean;
+  onFileSelect: (file: File) => void;
   onClose: () => void;
   onSave: () => void;
   onChange: (key: keyof FormState, value: string) => void;
@@ -891,12 +916,7 @@ function ForgeModal({
                 onChange={(event) => {
                   const file = event.target.files?.[0];
                   if (!file) return;
-                  onChange("file_name", file.name);
-                  onChange("file_type", file.type);
-                  onChange("file_size", String(file.size));
-                  const reader = new FileReader();
-                  reader.onload = () => onChange("file_url", String(reader.result || ""));
-                  reader.readAsDataURL(file);
+                  onFileSelect(file);
                 }}
               />
             </label>
@@ -1084,6 +1104,7 @@ function ProjectDesk({
   const projectNotes = notes.filter((note) => note.project_id === project.id);
   const projectFiles = files.filter((file) => file.project_id === project.id);
   const projectImages = projectFiles.filter(isForgeImage);
+  const coverThumbnail = projectFiles.find((file) => file.file_url === project.cover_image_url)?.metadata?.thumbnail_url;
   const latestSpark = projectSparks[0];
   const latestNote = projectNotes[0];
   const latestFile = projectFiles[0];
@@ -1110,7 +1131,7 @@ function ProjectDesk({
       </div>
       {project.cover_image_url && (
         <figure className="forge-desk-cover">
-          <Image src={project.cover_image_url} alt={`${project.title} cover`} width={420} height={210} unoptimized />
+          <Image src={coverThumbnail || forgeThumbnailUrl(project.cover_image_url, 840, 420)} alt={`${project.title} cover`} width={420} height={210} loading="lazy" unoptimized />
         </figure>
       )}
       <ProgressLine value={progress} large />
@@ -1300,7 +1321,7 @@ function ImageStrip({ files }: { files: ForgeFile[] }) {
     <div className="forge-image-strip">
       {files.map((file) => (
         <figure key={file.id}>
-          {file.file_url ? <Image src={file.file_url} alt={file.caption || file.file_name} width={180} height={120} unoptimized /> : <span>{file.file_name}</span>}
+          {file.file_url ? <Image src={file.metadata?.thumbnail_url || forgeThumbnailUrl(file.file_url, 360, 240)} alt={file.caption || file.file_name} width={180} height={120} loading="lazy" unoptimized /> : <span>{file.file_name}</span>}
           <figcaption>{file.caption || file.file_name}</figcaption>
         </figure>
       ))}
@@ -1332,7 +1353,14 @@ function UnassignedInbox({
 }
 
 function isForgeImage(file: ForgeFile) {
-  return Boolean((file.file_type || "").startsWith("image/") || (file.file_url || "").startsWith("data:image/"));
+  return Boolean((file.file_type || "").startsWith("image/") || /\.(avif|gif|jpe?g|png|webp)(?:\?|$)/i.test(file.file_url || ""));
+}
+
+function forgeThumbnailUrl(url: string, width: number, height: number) {
+  if (!url.includes("/storage/v1/object/public/")) return url;
+  const rendered = url.replace("/storage/v1/object/public/", "/storage/v1/render/image/public/");
+  const separator = rendered.includes("?") ? "&" : "?";
+  return `${rendered}${separator}width=${width}&height=${height}&resize=cover&quality=72`;
 }
 
 function isForgeMilestoneComplete(milestone: GoalMilestone) {
@@ -1375,7 +1403,7 @@ function ForgeAssetImage({
 }) {
   const [failed, setFailed] = useState(false);
   if (failed) return <>{fallback}</>;
-  return <Image src={src} alt={alt} width={width} height={height} className={className} onError={() => setFailed(true)} />;
+  return <Image src={src} alt={alt} width={width} height={height} className={className} loading="lazy" onError={() => setFailed(true)} />;
 }
 
 function StatusBadge({ status }: { status: ForgeStatus }) {

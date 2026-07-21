@@ -41,6 +41,8 @@ from backend.services.shopping_service import (
 )
 from backend.services.workout_service import get_next_workout_logic, get_todays_workout_summary
 from backend.services.live_price_service import search_live_prices
+from backend.integrations.google_gmail import create_gmail_draft, gmail_error_guidance, read_gmail_message, search_gmail
+from backend.services.contact_service import resolve_contact_email
 
 
 READ_TOOLS_ENABLED = os.getenv("JARVIS_TOOLS_ENABLED", "true").lower() == "true"
@@ -122,7 +124,8 @@ def select_read_tools(user_text: str) -> list[str]:
         selected.append("get_morning_brief")
     if "daily debrief" in text or "evening debrief" in text or ("debrief" in text and "daily" in text):
         selected.append("get_daily_debrief")
-    if "calendar" in text or "schedule" in text or "today's events" in text or "today events" in text:
+    calendar_language = any(phrase in text for phrase in ["calendar", "schedule", "today's events", "today events", "anything planned", "what's happening", "whats happening", "what is happening", "anything going on", "what do i have today"])
+    if calendar_language:
         selected.append("get_today_schedule")
     if "goal" in text or "goals" in text:
         selected.append("list_active_goals")
@@ -134,16 +137,33 @@ def select_read_tools(user_text: str) -> list[str]:
         selected.append("get_today_workout")
     if "health" in text or "symptom" in text or "water" in text or "caffeine" in text:
         selected.append("get_recent_health_summary")
+    is_draft_request = bool(re.search(r"\b(?:draft|create|write)\s+(?:an?\s+)?email\b", text))
+    if any(word in text for word in ["email", "emails", "gmail", "inbox"]) and not is_draft_request:
+        selected.append("search_gmail")
     return list(dict.fromkeys(selected))[:MAX_TOOL_CALLS]
 
 
 def select_tools(user_text: str) -> list[dict[str, Any]]:
-    calls = [{"name": name, "input": {"query": extract_price_query(user_text), "retailer": extract_retailer(user_text)}} if name == "search_live_prices" else {"name": name, "input": {}} for name in select_read_tools(user_text)]
+    calls = []
+    for name in select_read_tools(user_text):
+        if name == "search_live_prices":
+            calls.append({"name": name, "input": {"query": extract_price_query(user_text), "retailer": extract_retailer(user_text)}})
+        elif name == "search_gmail":
+            calls.append({"name": name, "input": {"query": extract_gmail_query(user_text), "include_first_body": "summar" in user_text.lower()}})
+        else:
+            calls.append({"name": name, "input": {}})
     lower = user_text.lower()
-    wants_tomorrow_schedule = any(phrase in lower for phrase in ["tomorrow", "tomorrow's"]) and any(word in lower for word in ["calendar", "schedule", "going on", "have going", "events"])
+    wants_tomorrow_schedule = any(phrase in lower for phrase in ["tomorrow", "tomorrow's"]) and (
+        any(word in lower for word in ["calendar", "schedule", "going on", "have going", "events", "happening", "planned"])
+        or bool(re.search(r"\b(?:do i have )?anything(?: planned| scheduled)? for tomorrow\b", lower))
+    )
     if wants_tomorrow_schedule:
         calls = [call for call in calls if call["name"] != "get_today_schedule"]
         calls.append({"name": "get_schedule_for_date", "input": {"date_offset": 1, "label": "tomorrow"}})
+    wants_week_schedule = any(phrase in lower for phrase in ["this week", "for the week", "week ahead", "next seven days"])
+    if wants_week_schedule:
+        calls = [call for call in calls if call["name"] not in {"get_today_schedule", "get_schedule_for_date"}]
+        calls.append({"name": "get_week_schedule", "input": {}})
     if WRITE_TOOLS_ENABLED:
         calls.extend(select_write_tools(user_text))
     deduped: list[dict[str, Any]] = []
@@ -155,6 +175,16 @@ def select_tools(user_text: str) -> list[dict[str, Any]]:
         seen.add(key)
         deduped.append(call)
     return deduped[:MAX_TOOL_CALLS]
+
+
+def extract_gmail_query(text: str) -> str:
+    sender = re.search(r"\bfrom\s+([^?.]+)", text, re.I)
+    if sender:
+        return f"from:({sender.group(1).strip()})"
+    subject = re.search(r"\b(?:about|subject)\s+([^?.]+)", text, re.I)
+    if subject:
+        return subject.group(1).strip()
+    return "newer_than:30d"
 
 
 def is_live_commerce_request(text: str) -> bool:
@@ -183,6 +213,11 @@ def select_write_tools(user_text: str) -> list[dict[str, Any]]:
     text = user_text.strip()
     lower = text.lower()
     calls: list[dict[str, Any]] = []
+
+    draft_match = re.search(r"\b(?:create|write|draft)\s+(?:an?\s+)?email\s+to\s+(.+?)(?:\s+about\s+(.+?))?(?:\s+saying\s+(.+))$", text, re.I)
+    if draft_match:
+        recipient = draft_match.group(1).strip()
+        calls.append({"name": "create_gmail_draft", "input": {"to": recipient if "@" in recipient else None, "recipient_query": None if "@" in recipient else recipient, "subject": clean_sentence(draft_match.group(2) or "A note from John"), "body": clean_sentence(draft_match.group(3) or "")}})
 
     date_match = re.search(r"\b(?:went on|had|completed)\s+(?:a\s+)?date\b", lower)
     if date_match:
@@ -356,6 +391,59 @@ def get_schedule_for_date_tool(context: AssistantToolContext, input_data: dict[s
             for event in events[:10]
         ],
     }
+
+
+def search_gmail_tool(_context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
+    query = str(input_data.get("query") or "newer_than:30d")[:500]
+    try:
+        messages = search_gmail(query, 8)
+    except Exception as exc:
+        guidance = gmail_error_guidance(exc)
+        if guidance:
+            return {"query": query, "messages": [], "verified": False, "setup_required": True, "question": guidance}
+        raise
+    selected = read_gmail_message(str(messages[0]["id"])) if input_data.get("include_first_body") and messages else None
+    return {"query": query, "messages": messages, "selected_message": selected, "verified": True}
+
+
+def create_gmail_draft_tool(_context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
+    to = str(input_data.get("to") or "").strip()
+    recipient_query = str(input_data.get("recipient_query") or "").strip()
+    subject = str(input_data.get("subject") or "").strip()
+    body = str(input_data.get("body") or "").strip()
+    if not to and recipient_query:
+        saved_contact = resolve_contact_email(_context.user_id, recipient_query)
+        if saved_contact:
+            to = str(saved_contact.get("email") or "")
+    if not to and recipient_query:
+        from email.utils import parseaddr
+        try:
+            matches = search_gmail(f"{{from:({recipient_query}) to:({recipient_query})}}", 10)
+        except Exception as exc:
+            guidance = gmail_error_guidance(exc)
+            if guidance:
+                return {"needs_input": True, "question": guidance}
+            raise
+        addresses = sorted({address for row in matches for address in [parseaddr(str(row.get("from") or ""))[1], parseaddr(str(row.get("to") or ""))[1]] if address})
+        if len(addresses) == 1:
+            to = addresses[0]
+        elif not addresses:
+            return {"needs_input": True, "question": f"I couldn't verify an email address for {recipient_query}. What address should I use?"}
+        else:
+            return {"needs_input": True, "question": f"I found multiple possible addresses for {recipient_query}. Which should I use?", "options": [{"id": address, "name": address} for address in addresses[:8]]}
+    if not to or not subject or not body:
+        return {"needs_input": True, "question": "What email address, subject, and message should I use for the draft?"}
+    return {"draft": create_gmail_draft(to, subject, body), "sent": False}
+
+
+def get_week_schedule_tool(context: AssistantToolContext, _input: dict[str, Any]) -> dict[str, Any]:
+    today = datetime.now(LOCAL_TZ).date()
+    days = []
+    for offset in range(7):
+        target = today + timedelta(days=offset)
+        events = get_calendar_events_for_date(target)
+        days.append({"date": target.isoformat(), "label": "today" if offset == 0 else target.strftime("%A"), "events": [{"title": event.get("summary"), "start": event.get("start"), "end": event.get("end"), "location": event.get("location")} for event in events[:10]]})
+    return {"start_date": today.isoformat(), "end_date": (today + timedelta(days=6)).isoformat(), "days": days}
 
 
 def list_active_goals_tool(context: AssistantToolContext, _input: dict[str, Any]) -> dict[str, Any]:
@@ -1179,6 +1267,8 @@ TOOL_REGISTRY: dict[str, AssistantToolDefinition] = {
     "get_daily_debrief": AssistantToolDefinition("get_daily_debrief", "Get today's sanitized daily debrief summary.", 1, "read", False, get_daily_debrief_tool),
     "get_today_schedule": AssistantToolDefinition("get_today_schedule", "Get today's calendar schedule.", 1, "read", False, get_today_schedule_tool),
     "get_schedule_for_date": AssistantToolDefinition("get_schedule_for_date", "Get calendar schedule for a requested date offset.", 1, "read", False, get_schedule_for_date_tool),
+    "get_week_schedule": AssistantToolDefinition("get_week_schedule", "Get verified calendar events for today through the next six days.", 1, "read", False, get_week_schedule_tool),
+    "search_gmail": AssistantToolDefinition("search_gmail", "Search and read bounded Gmail metadata and snippets; never modifies messages.", 1, "read", False, search_gmail_tool, "verified_provider_result"),
     "list_active_goals": AssistantToolDefinition("list_active_goals", "List active Jarvis goals.", 1, "read", False, list_active_goals_tool),
     "get_goal": AssistantToolDefinition("get_goal", "Get one goal by server-approved ID.", 1, "read", False, get_goal_tool),
     "list_shopping_items": AssistantToolDefinition("list_shopping_items", "List current shopping list items.", 1, "read", False, list_shopping_items_tool),
@@ -1201,6 +1291,7 @@ TOOL_REGISTRY: dict[str, AssistantToolDefinition] = {
     "upsert_health_checkin": AssistantToolDefinition("upsert_health_checkin", "Update today's health check-in values.", 2, "write", False, upsert_health_checkin_tool),
     "complete_daily_checkin": AssistantToolDefinition("complete_daily_checkin", "Complete or update today's daily health check-in.", 2, "write", False, complete_daily_checkin_tool),
     "create_goal": AssistantToolDefinition("create_goal", "Create a new Jarvis goal from supplied fields.", 2, "write", False, create_goal_tool),
+    "create_gmail_draft": AssistantToolDefinition("create_gmail_draft", "Create and reread a Gmail draft. This tool cannot send, delete, or archive email.", 2, "write", False, create_gmail_draft_tool, "verified_provider_result"),
     "complete_meal": AssistantToolDefinition("complete_meal", "Mark a server-confirmed planned meal eaten.", 2, "write", True, complete_meal_tool),
     "log_caffeine_drink": AssistantToolDefinition("log_caffeine_drink", "Log a caffeine drink with nutrition context.", 2, "write", False, log_caffeine_drink_tool),
     "complete_forge_project": AssistantToolDefinition("complete_forge_project", "Archive/complete a matching Forge project.", 3, "write", False, complete_forge_project_tool),

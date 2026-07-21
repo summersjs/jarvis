@@ -1,7 +1,9 @@
 import os
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 load_dotenv()  # Load environment variables from .env file
 
@@ -25,11 +27,15 @@ from backend.routes.archive import router as archive_router
 from backend.routes.forge import router as forge_router
 from backend.routes.assistant import router as assistant_router
 from backend.routes.weather import router as weather_router
+from backend.routes.gmail import router as gmail_router
 
 
 
 
 app = FastAPI()
+FORGE_MEDIA_ROOT = Path(os.getenv("FORGE_MEDIA_ROOT", Path(__file__).resolve().parents[1] / ".local" / "forge-media"))
+FORGE_MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
+app.mount("/forge-media", StaticFiles(directory=FORGE_MEDIA_ROOT), name="forge-media")
 
 app.add_middleware(
     CORSMiddleware,
@@ -65,3 +71,4 @@ app.include_router(archive_router)
 app.include_router(forge_router)
 app.include_router(assistant_router)
 app.include_router(weather_router)
+app.include_router(gmail_router)

@@ -5,10 +5,22 @@ import Image from "next/image";
 import { useParams } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
+import { uploadForgeMedia } from "@/lib/forgeMedia";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const API_KEY = process.env.NEXT_PUBLIC_JARVIS_API_KEY || "";
 const USER_ID = "john";
+const PAGE_SIZE = 25;
+const workspaceRequests = new Map<string, { at: number; promise: Promise<Response> }>();
+
+function fetchForgeWorkspace(url: string) {
+  const cached = workspaceRequests.get(url);
+  if (cached && Date.now() - cached.at < 2_000) return cached.promise.then((response) => response.clone());
+  if (process.env.NODE_ENV === "development") console.info(`[forge-query] GET ${url}`);
+  const promise = fetch(url, { headers: { "x-api-key": API_KEY } });
+  workspaceRequests.set(url, { at: Date.now(), promise });
+  return promise.then((response) => response.clone());
+}
 
 type ForgeProject = {
   id: string;
@@ -85,7 +97,7 @@ type ForgeNote = {
   created_at?: string | null;
   updated_at?: string | null;
 };
-type ForgeFile = { id: string; file_name: string; file_type?: string | null; file_url?: string | null; caption?: string | null; project_id?: string | null; category?: string | null; tags?: string[] | null; created_at?: string | null };
+type ForgeFile = { id: string; file_name: string; file_type?: string | null; file_url?: string | null; caption?: string | null; project_id?: string | null; category?: string | null; tags?: string[] | null; metadata?: { thumbnail_url?: string | null } | null; created_at?: string | null };
 type ForgeTask = {
   id: string;
   title: string;
@@ -185,6 +197,7 @@ export default function ForgeProjectWorkspace() {
   const [editingItem, setEditingItem] = useState<EditingForgeItem | null>(null);
   const [uploadForm, setUploadForm] = useState({ fileName: "", fileType: "", fileSize: "", fileUrl: "", caption: "", tags: "", useAsCover: false });
   const [previewFile, setPreviewFile] = useState<ForgeFile | null>(null);
+  const [pendingUploadFile, setPendingUploadFile] = useState<File | null>(null);
   const [writingDraft, setWritingDraft] = useState({ title: "", body: "", noteType: "draft", folderPrimary: "", folderChild: "", tags: "" });
   const [captureModal, setCaptureModal] = useState<"spark" | "note" | null>(null);
   const [captureForm, setCaptureForm] = useState({
@@ -219,6 +232,7 @@ export default function ForgeProjectWorkspace() {
   const visibleNotes = notes.filter((item) => inbox ? !item.project_id : item.project_id === projectId);
   const visibleFiles = files.filter((item) => inbox ? !item.project_id : item.project_id === projectId);
   const visibleImages = visibleFiles.filter(isImage);
+  const coverThumbnail = visibleFiles.find((file) => file.file_url === project?.cover_image_url)?.metadata?.thumbnail_url;
   const visibleTasks = tasks.filter((item) => !inbox && item.project_id === projectId);
   const visibleSessions = sessions.filter((item) => !inbox && item.project_id === projectId);
   const importedGoalTasks = useMemo(() => project ? buildLinkedGoalTasks(project) : [], [project]);
@@ -242,21 +256,25 @@ export default function ForgeProjectWorkspace() {
   const folderOptions = useMemo(() => buildFolderOptions(visibleNotes, visibleSparks), [visibleNotes, visibleSparks]);
 
   useEffect(() => {
-    loadForge();
+    void loadForge();
+    // projectId is stable for this mounted route; mutations explicitly refresh after completion.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function loadForge() {
     try {
-      const res = await fetch(`${API_BASE}/forge?user_id=${USER_ID}`, { headers: { "x-api-key": API_KEY } });
+      const endpoint = inbox ? "inbox" : `projects/${projectId}/detail`;
+      const res = await fetchForgeWorkspace(`${API_BASE}/forge/${endpoint}?user_id=${USER_ID}&page_size=${PAGE_SIZE}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Failed to load Forge workspace.");
-      setProjects(data.projects || []);
+      setProjects(data.project ? [data.project, ...(data.projects || []).filter((item: ForgeProject) => item.id !== data.project.id)] : data.projects || []);
       setSparks(data.sparks || []);
       setNotes(data.notes || []);
       setFiles(data.files || []);
       setTasks(data.tasks || []);
       setSessions(data.sessions || []);
       setLedgerEntries(data.ledger_entries || []);
+      if (process.env.NODE_ENV === "development") console.info(`[forge-query] workspace returned projects=${data.projects?.length || 0} sparks=${data.sparks?.length || 0} notes=${data.notes?.length || 0} files=${data.files?.length || 0} tasks=${data.tasks?.length || 0}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load Forge workspace.");
     }
@@ -623,6 +641,14 @@ export default function ForgeProjectWorkspace() {
   async function uploadWorkspaceFile() {
     if (!project || !uploadForm.fileName.trim()) return;
     setError("");
+    let fileUrl = uploadForm.fileUrl;
+    let thumbnailUrl: string | null = null;
+    if (pendingUploadFile) {
+      const media = await uploadForgeMedia(pendingUploadFile, project.id);
+      fileUrl = media.originalUrl;
+      thumbnailUrl = media.thumbnailUrl;
+    }
+    if (!fileUrl || /^(data:|blob:)/i.test(fileUrl)) return setError("Choose a local file or provide a regular URL.");
     const tags = uploadForm.tags.split(",").map((tag) => tag.trim()).filter(Boolean);
     const res = await fetch(`${API_BASE}/forge/files`, {
       method: "POST",
@@ -634,10 +660,10 @@ export default function ForgeProjectWorkspace() {
         file_name: uploadForm.fileName.trim(),
         file_type: uploadForm.fileType || null,
         file_size: uploadForm.fileSize ? Number(uploadForm.fileSize) : null,
-        file_url: uploadForm.fileUrl || null,
+        file_url: fileUrl,
         caption: uploadForm.caption || null,
         tags,
-        metadata: { upload_status: "workspace_upload" },
+        metadata: { upload_status: "workspace_upload", storage: pendingUploadFile ? "local_linux" : "external_url", ...(thumbnailUrl ? { thumbnail_url: thumbnailUrl } : {}) },
       }),
     });
     const data = await res.json();
@@ -645,14 +671,15 @@ export default function ForgeProjectWorkspace() {
       setError(data.detail || "File upload metadata failed.");
       return;
     }
-    if (uploadForm.useAsCover && uploadForm.fileUrl) {
+    if (uploadForm.useAsCover && fileUrl) {
       await fetch(`${API_BASE}/forge/projects/${project.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-        body: JSON.stringify({ cover_image_url: uploadForm.fileUrl }),
+        body: JSON.stringify({ cover_image_url: fileUrl }),
       });
     }
     setUploadForm({ fileName: "", fileType: "", fileSize: "", fileUrl: "", caption: "", tags: "", useAsCover: false });
+    setPendingUploadFile(null);
     setMessage(`File attached: ${data.file?.file_name || uploadForm.fileName}`);
     await loadForge();
   }
@@ -808,7 +835,7 @@ export default function ForgeProjectWorkspace() {
         <h1>{inbox ? "Unassigned Forge Inbox" : project?.title}</h1>
         {!inbox && project?.cover_image_url && (
           <figure className="workspace-cover">
-            <Image src={project.cover_image_url} alt={`${project.title} cover`} width={420} height={220} unoptimized />
+            <Image src={coverThumbnail || thumbnailUrl(project.cover_image_url, 840, 440)} alt={`${project.title} cover`} width={420} height={220} loading="lazy" unoptimized />
           </figure>
         )}
         <span>{inbox ? "Sparks, notes, and files that need a project." : project?.summary || "No summary recorded yet."}</span>
@@ -914,13 +941,13 @@ export default function ForgeProjectWorkspace() {
         )}
         {tab === "Files" && (
           <>
-            {!inbox && project && <WorkspaceUploadForm form={uploadForm} onChange={setUploadForm} onUpload={uploadWorkspaceFile} />}
+            {!inbox && project && <WorkspaceUploadForm form={uploadForm} onChange={setUploadForm} onFileSelect={setPendingUploadFile} onUpload={uploadWorkspaceFile} />}
             <FileList files={visibleFiles} projects={projects} onMove={(id, next) => moveItem("files", id, next)} onDelete={(id, label) => deleteItem("files", id, label)} onPreview={setPreviewFile} />
           </>
         )}
         {tab === "Images" && (
           <>
-            {!inbox && project && <WorkspaceUploadForm form={uploadForm} onChange={setUploadForm} onUpload={uploadWorkspaceFile} imageMode />}
+            {!inbox && project && <WorkspaceUploadForm form={uploadForm} onChange={setUploadForm} onFileSelect={setPendingUploadFile} onUpload={uploadWorkspaceFile} imageMode />}
             <ImageGrid files={visibleImages} projects={projects} onMove={(id, next) => moveItem("files", id, next)} onDelete={(id, label) => deleteItem("files", id, label)} onPreview={setPreviewImage} onSetCover={setProjectCover} />
           </>
         )}
@@ -1707,7 +1734,7 @@ function FolderBoard<T extends { id: string; folder_path?: string[] | null }>({ 
               setOpenChild("");
             }}
           >
-            <Image src="/images/Forge/cleaned/forge-incubation-folder-small.png" alt="" width={72} height={52} unoptimized />
+            <Image src="/images/Forge/cleaned/forge-incubation-folder-small.png" alt="" width={72} height={52} loading="lazy" />
             <span>{folder.label}</span>
             <small>{folder.count}</small>
           </button>
@@ -1719,7 +1746,7 @@ function FolderBoard<T extends { id: string; folder_path?: string[] | null }>({ 
             <div className="folder-level child-folders">
               {directItems.length > 0 && (
                 <button type="button" className={`forge-folder-label ${!openChild ? "active" : ""}`} onClick={() => setOpenChild("")}>
-                  <Image src="/images/Forge/cleaned/forge-incubation-folder-small.png" alt="" width={62} height={45} unoptimized />
+                  <Image src="/images/Forge/cleaned/forge-incubation-folder-small.png" alt="" width={62} height={45} loading="lazy" />
                   <span>{activePrimary.label}</span>
                   <small>{directItems.length}</small>
                 </button>
@@ -1731,7 +1758,7 @@ function FolderBoard<T extends { id: string; folder_path?: string[] | null }>({ 
                   className={`forge-folder-label ${openChild === folder.key ? "active" : ""}`}
                   onClick={() => setOpenChild(openChild === folder.key ? "" : folder.key)}
                 >
-                  <Image src="/images/Forge/cleaned/forge-incubation-folder-small.png" alt="" width={62} height={45} unoptimized />
+                  <Image src="/images/Forge/cleaned/forge-incubation-folder-small.png" alt="" width={62} height={45} loading="lazy" />
                   <span>{folder.label}</span>
                   <small>{folder.items.length}</small>
                 </button>
@@ -1804,11 +1831,13 @@ function WorkspaceUploadForm({
   form,
   imageMode = false,
   onChange,
+  onFileSelect,
   onUpload,
 }: {
   form: { fileName: string; fileType: string; fileSize: string; fileUrl: string; caption: string; tags: string; useAsCover: boolean };
   imageMode?: boolean;
   onChange: (next: { fileName: string; fileType: string; fileSize: string; fileUrl: string; caption: string; tags: string; useAsCover: boolean }) => void;
+  onFileSelect: (file: File) => void;
   onUpload: () => void;
 }) {
   return (
@@ -1817,23 +1846,13 @@ function WorkspaceUploadForm({
         <p>{imageMode ? "Image Upload" : "File Upload"}</p>
         <strong>{imageMode ? "Attach concept art, screenshots, or references." : "Attach docs, PDFs, screenshots, sketches, or references."}</strong>
       </div>
-      <input
-        type="file"
-        accept={imageMode ? "image/*" : undefined}
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          if (!file) return;
-          const reader = new FileReader();
-          reader.onload = () => onChange({
-            ...form,
-            fileName: file.name,
-            fileType: file.type,
-            fileSize: String(file.size),
-            fileUrl: String(reader.result || ""),
-          });
-          reader.readAsDataURL(file);
-        }}
-      />
+      <input type="file" accept={imageMode ? "image/*" : undefined} onChange={(event) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        onFileSelect(file);
+        onChange({ ...form, fileName: file.name, fileType: file.type, fileSize: String(file.size), fileUrl: "" });
+      }} />
+      <input value={form.fileUrl} onChange={(event) => onChange({ ...form, fileUrl: event.target.value })} placeholder="Or paste an existing URL" />
       <input value={form.caption} onChange={(event) => onChange({ ...form, caption: event.target.value })} placeholder="Caption or note" />
       <input value={form.tags} onChange={(event) => onChange({ ...form, tags: event.target.value })} placeholder="tags, comma separated" />
       <label>
@@ -2046,7 +2065,7 @@ function ImageGrid({ files, projects, onMove, onDelete, onPreview, onSetCover }:
       {files.map((file) => (
         <figure key={file.id}>
           <button type="button" className="image-preview-button" onClick={() => onPreview?.(file)}>
-            {file.file_url ? <Image src={file.file_url} alt={file.caption || file.file_name} width={260} height={170} unoptimized /> : <span>{file.file_name}</span>}
+            {file.file_url ? <Image src={file.metadata?.thumbnail_url || thumbnailUrl(file.file_url, 520, 340)} alt={file.caption || file.file_name} width={260} height={170} loading="lazy" unoptimized /> : <span>{file.file_name}</span>}
           </button>
           <figcaption>{file.caption || file.file_name}</figcaption>
           {projects && onMove && <MoveSelect value={file.project_id || ""} projects={projects} onChange={(value) => onMove(file.id, value)} />}
@@ -2156,7 +2175,13 @@ function isMilestoneComplete(status?: string | null) {
 }
 
 function isImage(file: ForgeFile) {
-  return Boolean((file.file_type || "").startsWith("image/") || (file.file_url || "").startsWith("data:image/"));
+  return Boolean((file.file_type || "").startsWith("image/") || /\.(avif|gif|jpe?g|png|webp)(?:\?|$)/i.test(file.file_url || ""));
+}
+
+function thumbnailUrl(url: string, width: number, height: number) {
+  if (!url.includes("/storage/v1/object/public/")) return url;
+  const rendered = url.replace("/storage/v1/object/public/", "/storage/v1/render/image/public/");
+  return `${rendered}${rendered.includes("?") ? "&" : "?"}width=${width}&height=${height}&resize=cover&quality=72`;
 }
 
 function isTaskComplete(task: ForgeTask) {

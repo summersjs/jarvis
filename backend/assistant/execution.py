@@ -5,7 +5,9 @@ import json
 import os
 import re
 import threading
+import time
 import uuid
+import logging
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -22,6 +24,7 @@ from backend.utils.local_store import read_json, write_json
 
 AUDIT_FILE = "assistant_action_log.json"
 UNAVAILABLE_CAPABILITIES = ["github_write", "vercel_admin", "email_send", "arbitrary_shell"]
+logger = logging.getLogger("jarvis.tool_timing")
 FINAL_STATUSES = {"succeeded", "failed", "verification_failed", "unavailable", "cancelled"}
 COMPLETION_PATTERN = re.compile(
     r"(?i)\b(done|completed|deployed|enabled|updated|saved|sent|created|added|logged|deleted|removed|installed|restarted|fixed|configured|took care of|set (?:it|everything) up)\b"
@@ -103,7 +106,7 @@ def detect_nonexecuted_action(text: str, context: AssistantToolContext) -> Assis
     elif "github" in lower and re.search(r"\b(webhook|push|write|create|configure|enable|change|update)\b", lower):
         target = "configure_github"
         intent = "configure_source_control"
-    elif re.search(r"\b(send|email)\b", lower) and "email" in lower:
+    elif re.search(r"\bsend\b", lower) and "email" in lower and not re.search(r"\b(draft|create a draft|write a draft)\b", lower):
         target = "send_email"
         intent = "external_communication"
     elif re.search(r"\b(run|execute)\b", lower) and re.search(r"\b(shell|powershell|command)\b", lower):
@@ -216,6 +219,7 @@ def execute_governed_tool_calls(
             trace.append({"tool": tool_name, "event": "duplicate_blocked", "status": "cancelled"})
             continue
         action_id = new_action_id()
+        tool_started = time.perf_counter()
         started_at = utc_now()
         audit = {
             "action_id": action_id, "source_message_id": context.source_message_id, "conversation_id": context.conversation_id,
@@ -225,6 +229,7 @@ def execute_governed_tool_calls(
         }
         store.upsert(audit)
         trace.append({"tool": tool_name, "event": "tool_start", "status": "executing"})
+        logger.info("tool_execution_started conversation_id=%s execution_id=%s tool=%s", context.conversation_id, context.request_id, tool_name)
         result = execute_tool_calls([call], context)[0]
         tool_result = result.get("result") if isinstance(result.get("result"), dict) else {}
         if tool_result.get("needs_input"):
@@ -249,6 +254,7 @@ def execute_governed_tool_calls(
             requires_confirmation=definition.requires_confirmation, result=safe_result_summary(tool_result),
             verification=verification, user_message=user_message,
         )
+        logger.info("tool_execution_completed conversation_id=%s execution_id=%s tool=%s duration_ms=%d status=%s verification=%s", context.conversation_id, context.request_id, tool_name, int((time.perf_counter() - tool_started) * 1000), status, verification.status)
         audit.update({
             "execution_status": status, "end_time": utc_now(), "result_summary": summarize_for_audit(result, tool_result),
             "verification_status": verification.status,
@@ -302,6 +308,10 @@ def verify_tool_result(tool_name: str, result: dict[str, Any], context: Assistan
             current = get_recipe(str(expected.get("id") or ""))
             if current and current.get("id") == expected.get("id") and current.get("title") == expected.get("title"):
                 return verified("Recipe was reread by ID and matched.")
+        elif tool_name == "create_gmail_draft":
+            expected = result.get("draft") or {}
+            if expected.get("id") and expected.get("verified") is True and result.get("sent") is False:
+                return verified("Gmail draft was reread by ID and remains unsent.")
         elif tool_name.startswith("remove_"):
             record_id = str(result.get("deleted_record_id") or "")
             record_type = result.get("record_type")

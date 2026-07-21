@@ -12,8 +12,8 @@ from backend.assistant.execution import capability_manifest
 from backend.assistant.tools.registry import AssistantToolContext, tool_status
 from backend.core.security import verify_api_key
 from backend.prompts.jarvis import JARVIS_PROMPT_FILE, JARVIS_PROMPT_VERSION
-from backend.schemas.assistant import AssistantChatRequest, AssistantSpeechRequest
-from backend.services.ollama_service import OllamaServiceError, chat_with_jarvis, get_ollama_status
+from backend.schemas.assistant import AssistantChatRequest, AssistantMediaResponseRequest, AssistantSpeechRequest
+from backend.services.ollama_service import OllamaServiceError, chat_with_jarvis, generate_music_playback_response, get_ollama_status
 from backend.assistant.conversation_state import CONVERSATION_STATE_STORE
 from backend.services.tts_service import get_tts_status, synthesize_speech
 
@@ -131,6 +131,18 @@ def assistant_chat(payload: AssistantChatRequest):
 
 
 def _cached_response(result: dict) -> dict:
+    if result.pop("clientActions", None):
+        result["message"] = {
+            "role": "assistant",
+            "content": "I detected a duplicate request and did not start the music command twice.",
+        }
+        if result.get("executionTrace"):
+            result["executionTrace"] = {
+                **result["executionTrace"],
+                "finalResponseValidation": "cached_client_action_suppressed",
+                "responseSource": "cache_replay",
+            }
+        return result
     actions = result.get("actions") or []
     if not actions:
         return result
@@ -169,3 +181,20 @@ def assistant_speech(payload: AssistantSpeechRequest):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ConnectionError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.post("/assistant/media-response")
+def assistant_media_response(payload: AssistantMediaResponseRequest):
+    logger.info(
+        "music_playback_receipt intent=%s current_player_state=%s command_available=%s verified_playing=%s playback_status=%s title=%s artist=%s",
+        payload.intent,
+        payload.initial_playback_status or "unknown",
+        payload.command_available,
+        payload.verified_playing,
+        payload.playback_status or "unknown",
+        (payload.title or "unavailable")[:120],
+        (payload.artist or "unavailable")[:120],
+    )
+    response = generate_music_playback_response(payload.model_dump())
+    logger.info("music_final_response verified_playing=%s response=%s", payload.verified_playing, response[:240])
+    return {"message": {"role": "assistant", "content": response}}

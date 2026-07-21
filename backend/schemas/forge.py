@@ -1,6 +1,12 @@
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+def _storage_reference(value: Optional[str]) -> Optional[str]:
+    if value and value.strip().lower().startswith(("data:", "blob:")):
+        raise ValueError("Forge media must use a Storage path or URL; inline base64/blob data is not accepted.")
+    return value
 
 
 class ForgeProjectCreate(BaseModel):
@@ -16,6 +22,8 @@ class ForgeProjectCreate(BaseModel):
     project_type: Optional[str] = None
     cover_image_url: Optional[str] = None
 
+    _validate_cover = field_validator("cover_image_url")(_storage_reference)
+
 
 class ForgeProjectUpdate(BaseModel):
     goal_id: Optional[str] = None
@@ -29,6 +37,8 @@ class ForgeProjectUpdate(BaseModel):
     progress_percent: Optional[float] = None
     project_type: Optional[str] = None
     cover_image_url: Optional[str] = None
+
+    _validate_cover = field_validator("cover_image_url")(_storage_reference)
 
 
 class ForgeSparkCreate(BaseModel):
@@ -91,6 +101,8 @@ class ForgeFileCreate(BaseModel):
     tags: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+    _validate_file_url = field_validator("file_url")(_storage_reference)
+
 
 class ForgeFileUpdate(BaseModel):
     file_name: Optional[str] = None
@@ -102,6 +114,8 @@ class ForgeFileUpdate(BaseModel):
     project_id: Optional[str] = None
     tags: Optional[list[str]] = None
     metadata: Optional[dict[str, Any]] = None
+
+    _validate_file_url = field_validator("file_url")(_storage_reference)
 
 
 class ForgeTaskCreate(BaseModel):

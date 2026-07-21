@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld("jarvisDesktop", Object.freeze({
   openYouTubeMusic: () => invoke("jarvis:media:openYouTubeMusic"),
   getNativeHealth: () => invoke("jarvis:native:getHealth"),
   launchApp: (appId) => invoke("desktop:launch-app", appId),
+  getCustomApps: () => invoke("desktop:get-custom-apps"),
+  addCustomApp: () => invoke("desktop:add-custom-app"),
   openForgeProject: (projectId) => invoke("desktop:open-forge-project", projectId),
   openJarvisAssistant: () => invoke("desktop:open-jarvis-assistant"),
   hideJarvisAssistant: () => invoke("desktop:hide-jarvis-assistant"),

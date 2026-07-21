@@ -25,6 +25,8 @@ from backend.services.goal_service import get_goal, list_goals
 
 FORGE_CATEGORIES = ["Games", "Jarvis", "Business", "Hardware", "Writing", "Life"]
 FORGE_STATUSES = ["Active", "Building", "Experiment", "Incubating", "Archived", "Completed"]
+FORGE_PROJECT_COLUMNS = "id,user_id,goal_id,title,category,status,summary,tags,next_milestone,progress_percent,project_type,archived_at,created_at,updated_at"
+FORGE_TASK_COLUMNS = "id,user_id,project_id,title,description,status,priority,due_date,milestone_group,sort_order,completed_at,task_type,linked_goal_id,counts_toward_goal,goal_event_id,metadata,created_at,updated_at"
 WORKSTATION_TITLE = "Build the Jarvis Workstation"
 WORKSTATION_SUMMARY = "Investing consistently turns Jarvis from an idea into a permanent tool. One component at a time builds the command center."
 WORKSTATION_TAGS = ["jarvis", "hardware", "workstation", "command-center", "build"]
@@ -159,7 +161,7 @@ def get_project_activity_at(project: dict) -> datetime:
 def list_forge_projects(user_id: str = "john") -> list[dict]:
     response = (
         supabase.table("forge_projects")
-        .select("*")
+        .select(FORGE_PROJECT_COLUMNS)
         .eq("user_id", user_id)
         .order("updated_at", desc=True)
         .execute()
@@ -276,7 +278,7 @@ def attach_shared_goals(projects: list[dict], goals: list[dict], user_id: str = 
     try:
         response = (
             supabase.table("forge_project_goal_links")
-            .select("*")
+            .select("id,user_id,project_id,goal_id,relationship_type,notes,created_at,updated_at")
             .eq("user_id", user_id)
             .execute()
         )
@@ -417,7 +419,7 @@ def ensure_workstation_project_link(user_id: str = "john") -> None:
 
         existing = (
             supabase.table("forge_projects")
-            .select("*")
+            .select(FORGE_PROJECT_COLUMNS)
             .eq("user_id", user_id)
             .eq("goal_id", goal["id"])
             .limit(1)
@@ -436,7 +438,7 @@ def ensure_workstation_project_link(user_id: str = "john") -> None:
 
         title_match = (
             supabase.table("forge_projects")
-            .select("*")
+            .select(FORGE_PROJECT_COLUMNS)
             .eq("user_id", user_id)
             .eq("title", WORKSTATION_TITLE)
             .limit(1)
@@ -492,7 +494,7 @@ def ensure_shared_goal_links(user_id: str = "john") -> None:
 def list_forge_sparks(user_id: str = "john") -> list[dict]:
     response = (
         supabase.table("forge_sparks")
-        .select("*, forge_projects(id, title)")
+        .select("id,user_id,spark_text,category,project_id,tags,folder_path,created_at,updated_at,forge_projects(id,title)")
         .eq("user_id", user_id)
         .order("created_at", desc=True)
         .execute()
@@ -525,7 +527,7 @@ def delete_forge_spark(spark_id: str) -> list[dict]:
 def list_forge_notes(user_id: str = "john") -> list[dict]:
     response = (
         supabase.table("forge_notes")
-        .select("*, forge_projects(id, title)")
+        .select("id,user_id,title,body,category,project_id,tags,folder_path,note_type,status,is_pinned,linked_milestone,linked_tasks,sort_order,created_at,updated_at,forge_projects(id,title)")
         .eq("user_id", user_id)
         .order("updated_at", desc=True)
         .execute()
@@ -559,7 +561,7 @@ def list_forge_ledger_entries(user_id: str = "john") -> list[dict]:
     try:
         response = (
             supabase.table("forge_note_ledger_entries")
-            .select("*, forge_notes(id, title)")
+            .select("id,user_id,project_id,note_id,entry_type,title,body,tags,folder,subfolder,linked_task_id,linked_milestone,is_pinned,status,resolved,resolution_text,resolved_into_entry_id,resolved_at,created_at,updated_at,forge_notes(id,title)")
             .eq("user_id", user_id)
             .order("updated_at", desc=True)
             .execute()
@@ -668,10 +670,13 @@ def infer_ledger_subfolder(tags: list[str]) -> str | None:
 
 
 def list_forge_files(user_id: str = "john") -> list[dict]:
+    # Legacy inline media rows remain in place for migration, but must never ride in JSON responses.
     response = (
         supabase.table("forge_files")
-        .select("*, forge_projects(id, title)")
+        .select("id,user_id,file_name,file_type,file_size,file_url,caption,category,project_id,tags,metadata,created_at,updated_at,forge_projects(id,title)")
         .eq("user_id", user_id)
+        .not_.like("file_url", "data:%")
+        .not_.like("file_url", "blob:%")
         .order("created_at", desc=True)
         .execute()
     )
@@ -704,7 +709,7 @@ def list_forge_sessions(user_id: str = "john") -> list[dict]:
     try:
         response = (
             supabase.table("forge_sessions")
-            .select("*, forge_projects(id, title), forge_tasks(id, title)")
+            .select("id,user_id,project_id,task_id,linked_goal_id,session_type,title,scratchpad,decisions,follow_up_task,convert_scratchpad_to_note,mark_task_complete,count_toward_goal,status,started_at,completed_at,metadata,created_at,updated_at,forge_projects(id,title),forge_tasks(id,title)")
             .eq("user_id", user_id)
             .order("completed_at", desc=True)
             .order("created_at", desc=True)
@@ -846,7 +851,7 @@ def list_forge_tasks(user_id: str = "john") -> list[dict]:
     try:
         response = (
             supabase.table("forge_tasks")
-            .select("*")
+            .select(FORGE_TASK_COLUMNS)
             .eq("user_id", user_id)
             .order("sort_order", desc=False)
             .order("created_at", desc=False)
@@ -1008,7 +1013,7 @@ def create_goal_progress_event(payload: dict) -> dict | None:
     try:
         existing = (
             supabase.table("goal_progress_events")
-            .select("*")
+            .select("id,goal_id,amount,unit,note,source_type,source_id,source_project_id,counts_toward_goal,event_source,created_by,created_at,metadata")
             .eq("goal_id", payload.get("goal_id"))
             .eq("source_type", payload.get("source_type"))
             .eq("source_id", payload.get("source_id"))

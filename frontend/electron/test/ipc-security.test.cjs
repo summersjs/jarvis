@@ -12,6 +12,7 @@ test("native preload exposes only named telemetry, speed, and media operations",
     "jarvis:network:getSpeedResult", "jarvis:network:runSpeedTest",
     "jarvis:media:getSession", "jarvis:media:executeAction", "jarvis:media:openYouTubeMusic",
     "desktop:open-forge-project", "desktop:collapse-jarvis",
+    "desktop:get-custom-apps", "desktop:add-custom-app",
   ]) assert.match(preload, new RegExp(channel.replaceAll(":", "\\:")));
   assert.doesNotMatch(preload, /executeCommand|runPowerShell|child_process|shell:/i);
 });

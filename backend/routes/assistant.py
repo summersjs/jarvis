@@ -4,6 +4,7 @@ import logging
 import threading
 import time
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
@@ -11,10 +12,12 @@ from fastapi.responses import Response
 from backend.assistant.execution import capability_manifest
 from backend.assistant.tools.registry import AssistantToolContext, tool_status
 from backend.core.security import verify_api_key
+from backend.core.config import LOCAL_TZ
 from backend.prompts.jarvis import JARVIS_PROMPT_FILE, JARVIS_PROMPT_VERSION
-from backend.schemas.assistant import AssistantChatRequest, AssistantMediaResponseRequest, AssistantSpeechRequest
+from backend.schemas.assistant import AssistantChatRequest, AssistantFeedbackRequest, AssistantMediaResponseRequest, AssistantReadoutStatusRequest, AssistantSpeechRequest
 from backend.services.ollama_service import OllamaServiceError, chat_with_jarvis, generate_music_playback_response, get_ollama_status
 from backend.assistant.conversation_state import CONVERSATION_STATE_STORE
+from backend.assistant.memory import MEMORY_STORE, record_feedback
 from backend.services.tts_service import get_tts_status, synthesize_speech
 
 router = APIRouter(dependencies=[Depends(verify_api_key)])
@@ -52,6 +55,34 @@ def assistant_status():
 @router.get("/assistant/tools/status")
 def assistant_tools_status():
     return tool_status()
+
+
+@router.get("/assistant/memories")
+def assistant_memories(user_id: str = "john", include_expired: bool = False):
+    rows = MEMORY_STORE.list(user_id, include_expired=include_expired)
+    return {"memories": [row.model_dump(mode="json") for row in rows], "planning_preferences": MEMORY_STORE.preferences(user_id)}
+
+
+@router.delete("/assistant/memories/{memory_id}")
+def delete_assistant_memory(memory_id: str, user_id: str = "john"):
+    return {"deleted": MEMORY_STORE.delete(user_id, memory_id), "memory_id": memory_id}
+
+
+@router.post("/assistant/feedback")
+def assistant_feedback(payload: AssistantFeedbackRequest):
+    return record_feedback(payload.user_id, payload.model_dump())
+
+
+@router.post("/assistant/readout-status")
+def assistant_readout_status(payload: AssistantReadoutStatusRequest):
+    now = datetime.now(LOCAL_TZ)
+    expires = now.replace(hour=23, minute=59, second=59, microsecond=999999).astimezone(timezone.utc)
+    memory, _ = MEMORY_STORE.remember(
+        payload.user_id, memory_type="temporary_state", content=f"{payload.kind} completed on {now.date().isoformat()}",
+        scope="daily_status", importance=0.7, confidence=1.0, source="verified_ui_readout", expires_at=expires,
+        metadata={"kind": payload.kind, "date": now.date().isoformat()},
+    )
+    return {"status": "ok", "memory_id": memory.id, "kind": payload.kind, "date": now.date().isoformat()}
 
 
 @router.post("/assistant/context/{conversation_id}/reset")

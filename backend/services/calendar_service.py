@@ -170,6 +170,23 @@ def get_calendar_events_for_date(date_obj: date) -> list[dict]:
     ]
 
 
+def get_calendar_events_for_range(start_date: date, end_date: date) -> list[dict]:
+    """Return compact primary-calendar events for [start_date, end_date)."""
+    service = get_calendar_service()
+    time_min, _ = _day_bounds_utc(start_date)
+    time_max, _ = _day_bounds_utc(end_date)
+    items = (service.events().list(
+        calendarId="primary", timeMin=time_min, timeMax=time_max, singleEvents=True, orderBy="startTime"
+    ).execute().get("items", []))
+    return [
+        {
+            "summary": event.get("summary") or "Unnamed event", "start": event.get("start", {}),
+            "end": event.get("end", {}), "location": event.get("location"), "event_type": event.get("eventType"),
+        }
+        for event in items
+    ]
+
+
 def get_today_calendar_summary() -> str:
     now = datetime.now(LOCAL_TZ)
     return get_calendar_summary_for_date(now.date(), "today")

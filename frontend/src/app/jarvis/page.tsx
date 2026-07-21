@@ -16,6 +16,8 @@ import {
   Sparkles,
   Square,
   Trash2,
+  ThumbsDown,
+  ThumbsUp,
   Volume2,
   VolumeX,
   Wifi,
@@ -57,6 +59,19 @@ type ChatMessage = {
   toolActions?: string[];
   actionReceipts?: ActionReceipt[];
   contextResolution?: ContextResolutionMeta;
+  planningTransparency?: PlanningTransparency;
+};
+
+type PlanningTransparency = {
+  calendarEvents?: Array<{ title: string; date: string; all_day?: boolean; start?: string | null }>;
+  workoutStatus?: { days_since_last?: number | null; completed_this_week?: number; target_per_week?: number; most_recent?: { date?: string; lift?: string } | null };
+  urgentTasks?: Array<{ title?: string; due_date?: string; project_title?: string | null }>;
+  memoriesUsed?: Array<{ id: string; type: string; content: string }>;
+  preferencesUsed?: Record<string, unknown>;
+  missingData?: string[];
+  signals?: Array<{ type: string; severity: string; evidence: string }>;
+  provider?: string;
+  model?: string;
 };
 
 type ContextResolutionMeta = {
@@ -263,6 +278,7 @@ export default function JarvisPage() {
       tools: (data.tools || []).map((tool: { tool?: string }) => tool.tool).filter(Boolean) as string[],
       actions: (data.actions || []) as ActionReceipt[],
       contextResolution: (data.contextResolution || undefined) as ContextResolutionMeta | undefined,
+      planningTransparency: (data.planningTransparency || undefined) as PlanningTransparency | undefined,
       clientActions: (data.clientActions || []) as ClientAction[],
     };
   }
@@ -360,6 +376,7 @@ export default function JarvisPage() {
         toolActions: reply.tools,
         actionReceipts: reply.actions,
         contextResolution: reply.contextResolution,
+        planningTransparency: reply.planningTransparency,
         collapsed: mode === "voice",
       };
       setMessages((current) => [...current, assistantMessage]);
@@ -386,6 +403,11 @@ export default function JarvisPage() {
       const response = await fetch(`${API_BASE}${endpoint}`, { headers: { "x-api-key": API_KEY } });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "Jarvis readout failed.");
+      void fetch(`${API_BASE}/assistant/readout-status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        body: JSON.stringify({ kind: kind === "morning" ? "morning_brief" : "evening_debrief", user_id: "john" }),
+      });
 
       const sourceText = sanitizeReadoutSource(typeof data.spoken_response === "string" ? data.spoken_response : JSON.stringify(data));
       const prompt = buildReadoutPrompt(kind, sourceText, data);
@@ -691,8 +713,10 @@ export default function JarvisPage() {
                     <button type="button" onClick={() => speakMessage(message)}>
                       <RotateCcw size={15} /> Replay
                     </button>
+                    <FeedbackControls message={message} />
                   </div>
                 )}
+                {message.planningTransparency && <PlanningTransparencyPanel data={message.planningTransparency} />}
                 {!!message.toolActions?.length && <div className="tool-actions">Backend tool: {message.toolActions.join(", ")}</div>}
                 {message.contextResolution && (
                   <ContextResolutionCard
@@ -703,7 +727,9 @@ export default function JarvisPage() {
                 )}
                 {!!message.actionReceipts?.length && (
                   <div className="action-receipts" aria-label="Action receipts">
-                    {message.actionReceipts.map((receipt) => <ActionReceiptCard key={receipt.action_id} receipt={receipt} />)}
+                    {message.actionReceipts.map((receipt) => (
+                      <ActionReceiptCard key={receipt.action_id} receipt={receipt} onConfirm={() => void sendMessage("yes")} />
+                    ))}
                   </div>
                 )}
               </div>
@@ -803,7 +829,7 @@ function MessageText({ text }: { text: string }) {
   return <p>{text}</p>;
 }
 
-function ActionReceiptCard({ receipt }: { receipt: ActionReceipt }) {
+function ActionReceiptCard({ receipt, onConfirm }: { receipt: ActionReceipt; onConfirm: () => void }) {
   const verified = receipt.execution_status === "succeeded" && receipt.verification?.status === "verified";
   const status = verified ? "Verified" : ({
     proposed: "Proposed",
@@ -820,9 +846,71 @@ function ActionReceiptCard({ receipt }: { receipt: ActionReceipt }) {
       <strong>Action: {friendlyActionName(receipt.requested_action)}</strong>
       <span>Status: {status}</span>
       {receipt.verification?.summary && <small>{receipt.verification.summary}</small>}
+      {receipt.requested_action === "complete_meal" && receipt.execution_status === "awaiting_confirmation" && (
+        <button type="button" onClick={onConfirm}>I ate it</button>
+      )}
       {verified && receipt.verification?.verified_at && <time dateTime={receipt.verification.verified_at}>Verified at: {new Date(receipt.verification.verified_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time>}
     </section>
   );
+}
+
+const NEGATIVE_FEEDBACK = ["Missed context", "Wrong priority", "Too generic", "Incorrect fact", "Bad tone", "Too long", "Other"];
+const POSITIVE_FEEDBACK = ["Used my context", "Good priority", "Actionable", "Good tone", "Remember this style"];
+
+function FeedbackControls({ message }: { message: ChatMessage }) {
+  const [rating, setRating] = useState<"up" | "down" | null>(null);
+  const [reason, setReason] = useState("");
+  const [written, setWritten] = useState("");
+  const [saved, setSaved] = useState(false);
+  const options = rating === "up" ? POSITIVE_FEEDBACK : NEGATIVE_FEEDBACK;
+
+  async function submit() {
+    if (!rating || !reason) return;
+    const response = await fetch(`${API_BASE}/assistant/feedback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+      body: JSON.stringify({ message_id: message.id, rating, reason, written_feedback: written || null, response_excerpt: message.content.slice(0, 1000), user_id: "john" }),
+    });
+    if (response.ok) setSaved(true);
+  }
+
+  if (saved) return <span className="feedback-saved">Feedback saved</span>;
+  return (
+    <div className="feedback-controls">
+      <button type="button" aria-label="Thumbs up" className={rating === "up" ? "active" : ""} onClick={() => { setRating("up"); setReason(""); }}><ThumbsUp size={15} /></button>
+      <button type="button" aria-label="Thumbs down" className={rating === "down" ? "active" : ""} onClick={() => { setRating("down"); setReason(""); }}><ThumbsDown size={15} /></button>
+      {rating && (
+        <div className="feedback-detail">
+          <select value={reason} onChange={(event) => setReason(event.target.value)}>
+            <option value="">Choose a reason</option>
+            {options.map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
+          <input value={written} onChange={(event) => setWritten(event.target.value)} placeholder="Optional details" />
+          <button type="button" disabled={!reason} onClick={submit}>Save</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PlanningTransparencyPanel({ data }: { data: PlanningTransparency }) {
+  return (
+    <details className="planning-transparency">
+      <summary>Why Jarvis suggested this</summary>
+      <div>
+        <EvidenceList title="Calendar events considered" items={(data.calendarEvents || []).map((event) => `${event.title} — ${event.all_day ? "all day" : event.start || event.date}`)} />
+        <EvidenceList title="Workout status considered" items={[data.workoutStatus?.most_recent?.date ? `Last logged: ${data.workoutStatus.most_recent.date}${data.workoutStatus.most_recent.lift ? ` (${data.workoutStatus.most_recent.lift})` : ""}` : "No recent workout found", `${data.workoutStatus?.completed_this_week ?? 0} of ${data.workoutStatus?.target_per_week ?? "?"} target workouts this week`]} />
+        <EvidenceList title="Urgent tasks considered" items={(data.urgentTasks || []).map((task) => `${task.title || "Unnamed task"}${task.due_date ? ` — due ${task.due_date}` : ""}`)} />
+        <EvidenceList title="Memories and preferences used" items={[...(data.memoriesUsed || []).map((memory) => `${memory.type}: ${memory.content}`), ...Object.entries(data.preferencesUsed || {}).map(([key, value]) => `${key}: ${String(value)}`)]} />
+        <EvidenceList title="Missing data" items={data.missingData || []} />
+        <p><strong>Provider:</strong> {data.provider || "Unknown"} · <strong>Model:</strong> {data.model || "Unknown"}</p>
+      </div>
+    </details>
+  );
+}
+
+function EvidenceList({ title, items }: { title: string; items: string[] }) {
+  return <section><strong>{title}</strong>{items.length ? <ul>{items.map((item) => <li key={item}>{item}</li>)}</ul> : <small>None</small>}</section>;
 }
 
 function ContextResolutionCard({ context, selectedIndex, onSelect }: { context: ContextResolutionMeta; selectedIndex: number; onSelect: (option: NonNullable<ContextResolutionMeta["options"]>[number]) => void }) {
@@ -1072,6 +1160,16 @@ function JarvisStyles() {
       .message-bubble p { white-space: pre-wrap; line-height: 1.55; margin: .42rem 0 0; }
       .message-actions { display: flex; gap: .35rem; margin-top: .52rem; opacity: .72; }
       .message-actions button { display: inline-flex; align-items: center; gap: .35rem; border: 1px solid rgba(98,201,255,.18); border-radius: 999px; background: rgba(0,0,0,.26); color: #dff8ff; padding: .38rem .55rem; }
+      .feedback-controls { display: contents; }
+      .feedback-controls > button.active { border-color: #86efac; background: rgba(34,197,94,.2); }
+      .feedback-detail { flex-basis: 100%; display: flex; gap: .35rem; flex-wrap: wrap; }
+      .feedback-detail select, .feedback-detail input { border: 1px solid rgba(74,222,128,.24); border-radius: .3rem; background: #020806; color: #ecfdf5; padding: .38rem .5rem; }
+      .feedback-detail input { min-width: 16rem; flex: 1; }
+      .feedback-saved { color: #86efac; font-size: .7rem; font-weight: 800; }
+      .planning-transparency { margin-top: .65rem; border: 1px solid rgba(56,189,248,.24); border-radius: .35rem; background: rgba(2,35,54,.35); padding: .5rem .65rem; }
+      .planning-transparency > div { display: grid; gap: .55rem; margin-top: .55rem; color: rgba(224,242,254,.8); font-size: .74rem; }
+      .planning-transparency section { border-left: 2px solid rgba(56,189,248,.5); padding-left: .55rem; }
+      .planning-transparency ul { margin: .3rem 0 0; padding-left: 1.1rem; }
       .tool-actions { margin-top: .6rem; color: #fbbf24; font-size: .72rem; font-weight: 800; text-transform: uppercase; }
       .context-resolution { display: grid; gap: .2rem; margin-top: .65rem; border-left: 3px solid #38bdf8; border-radius: .25rem; background: rgba(3,105,161,.12); padding: .5rem .65rem; }
       .context-resolution strong { color: #7dd3fc; font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; }

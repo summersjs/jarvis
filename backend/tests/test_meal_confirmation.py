@@ -9,6 +9,7 @@ from backend.assistant.meal_confirmation import (
     PendingMealConfirmation,
     PendingMealStore,
     form_of_address,
+    parse_ad_hoc_meal,
     resolve_meal_claim,
     response_kind,
 )
@@ -28,6 +29,14 @@ YOGURT = {
 
 
 class MealConfirmationTests(unittest.TestCase):
+    def test_ad_hoc_breakfast_food_is_parsed_for_creation_and_confirmation(self):
+        parsed = parse_ad_hoc_meal("I ate Chobani S'mores yogurt for breakfast")
+        self.assertEqual(parsed, ("Chobani S'mores yogurt", "breakfast", True))
+
+    def test_add_only_breakfast_does_not_claim_it_was_eaten(self):
+        parsed = parse_ad_hoc_meal("Can you add Chobani S'mores yogurt to my breakfast")
+        self.assertEqual(parsed, ("Chobani S'mores yogurt", "breakfast", False))
+
     def test_morning_yogurt_resolves_exact_planned_breakfast(self):
         pending = resolve_meal_claim(
             "I ate my morning yogurt",

@@ -8,7 +8,7 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import Any
 
-from backend.services.preferences_service import find_preference_for_keyword
+from backend.services.preferences_service import find_preference_for_keyword, list_preferences
 
 
 def _json_request(url: str, *, headers: dict[str, str] | None = None, data: dict | None = None, timeout: float = 12) -> dict:
@@ -70,6 +70,30 @@ def search_live_prices(query: str, location: str | None = None, user_id: str = "
         "validated_stores": stores[:10],
         "providers": providers,
         "reason": None if offers else "No configured provider returned a verifiable current price.",
+    }
+
+
+def search_obsession_deals(user_id: str = "john", location: str | None = None, retailer: str | None = None) -> dict[str, Any]:
+    """Search only active saved obsessions and retain provider evidence per offer."""
+    obsessions = [
+        row for row in list_preferences(user_id, "obsession")
+        if row.get("is_active", True) and row.get("item_keyword")
+    ]
+    if not obsessions:
+        return {"verified": False, "query": "saved obsessions", "offers": [], "providers": [], "obsessions": [], "reason": "No active obsessions are saved."}
+    offers, providers = [], []
+    for obsession in obsessions[:5]:
+        result = search_live_prices(str(obsession["item_keyword"]), location, user_id, retailer)
+        providers.extend(result.get("providers") or [])
+        for offer in result.get("offers") or []:
+            offers.append({**offer, "matched_obsession": obsession["item_keyword"]})
+    offers.sort(key=lambda offer: float(offer.get("price") or float("inf")))
+    deal_offers = [offer for offer in offers if offer.get("is_deal")]
+    return {
+        "verified": bool(offers), "query": "saved obsessions", "offers": offers[:12],
+        "deal_offers": deal_offers[:12], "has_verified_deals": bool(deal_offers),
+        "providers": providers, "obsessions": [row["item_keyword"] for row in obsessions[:5]],
+        "reason": None if offers else "No configured provider returned a verifiable current offer for the saved obsessions.",
     }
 
 
@@ -179,9 +203,17 @@ def _kroger_prices(query: str, _location: str | None) -> dict:
     offers = []
     for product in data.get("data") or []:
         for item in product.get("items") or []:
-            price = (item.get("price") or {}).get("promo") or (item.get("price") or {}).get("regular")
+            price_data = item.get("price") or {}
+            regular, promo = price_data.get("regular"), price_data.get("promo")
+            price = promo or regular
             if isinstance(price, (int, float)):
-                offers.append({"retailer": "Kroger", "title": product.get("description"), "size": item.get("size"), "price": float(price), "availability": "listed", "evidence": _evidence("kroger", "official_retailer_api", url, store={"location_id": location_id})})
+                is_deal = isinstance(promo, (int, float)) and isinstance(regular, (int, float)) and promo < regular
+                offers.append({
+                    "retailer": "Kroger", "title": product.get("description"), "size": item.get("size"),
+                    "price": float(price), "regular_price": float(regular) if isinstance(regular, (int, float)) else None,
+                    "promo_price": float(promo) if isinstance(promo, (int, float)) else None, "is_deal": is_deal,
+                    "availability": "listed", "evidence": _evidence("kroger", "official_retailer_api", url, store={"location_id": location_id}),
+                })
     return {"provider": "kroger", "configured": True, "offers": offers}
 
 

@@ -24,6 +24,8 @@ MEAL_CLAIM_PATTERN = re.compile(
 )
 MEAL_HINT_PATTERN = re.compile(r"\b(?:meal|yogurt|breakfast|lunch|dinner|snack|morning)\b", re.IGNORECASE)
 ATE_PATTERN = re.compile(r"\b(?:i\s+)?(?:just\s+)?ate\b", re.IGNORECASE)
+ADD_MEAL_PATTERN = re.compile(r"\b(?:add|put)\s+(.+?)\s+(?:to|for)\s+(?:my\s+)?(breakfast|lunch|dinner|snack)\b", re.IGNORECASE)
+ATE_MEAL_PATTERN = re.compile(r"\b(?:i\s+)?(?:just\s+)?(?:ate|had)\s+(.+?)\s+(?:for|at)\s+(?:my\s+)?(breakfast|lunch|dinner|snack)\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -109,6 +111,32 @@ def is_meal_claim(text: str) -> bool:
     return bool(ATE_PATTERN.search(text) or (MEAL_CLAIM_PATTERN.search(text) and MEAL_HINT_PATTERN.search(text)))
 
 
+def parse_ad_hoc_meal(text: str) -> tuple[str, str, bool] | None:
+    """Return (food name, meal type, ate claim) for explicit ad-hoc meal requests."""
+    match = ATE_MEAL_PATTERN.search(text) or ADD_MEAL_PATTERN.search(text)
+    if not match:
+        return None
+    name = re.sub(r"\s+", " ", match.group(1)).strip(" ,.!?")
+    name = re.sub(r"(?i)^(?:that\s+)?", "", name)
+    name = re.sub(r"(?i)\s+and\s+(?:say|mark|log)\s+(?:that\s+)?i\s+ate\s+it.*$", "", name).strip()
+    if not name or len(name) > 160:
+        return None
+    return name, normalize_meal_type(match.group(2)), bool(ATE_MEAL_PATTERN.search(text) or is_meal_claim(text))
+
+
+def pending_for_meal(
+    meal: dict[str, Any], source_message_id: str, conversation_id: str, *, now: datetime | None = None
+) -> PendingMealConfirmation:
+    now = now or datetime.now(LOCAL_TZ)
+    return PendingMealConfirmation(
+        confirmation_id=f"meal_{uuid.uuid4().hex}", conversation_id=conversation_id,
+        source_message_id=source_message_id, meal_id=str(meal["id"]),
+        meal_type=normalize_meal_type(str(meal.get("meal_type") or "")), meal_name=meal_display_name(meal),
+        meal_date=str(meal.get("meal_date") or now.date().isoformat()), created_at=now.isoformat(),
+        expires_at=(now + timedelta(minutes=PENDING_TTL_MINUTES)).isoformat(),
+    )
+
+
 def resolve_meal_claim(
     text: str,
     user_id: str,
@@ -145,18 +173,7 @@ def resolve_meal_claim(
     meal_name = meal_display_name(meal)
     if not meal.get("id") or not meal_name:
         return None
-    created_at = now.isoformat()
-    return PendingMealConfirmation(
-        confirmation_id=f"meal_{uuid.uuid4().hex}",
-        conversation_id=conversation_id,
-        source_message_id=source_message_id,
-        meal_id=str(meal["id"]),
-        meal_type=normalize_meal_type(str(meal.get("meal_type") or "")) or meal_type,
-        meal_name=meal_name,
-        meal_date=str(meal.get("meal_date") or today),
-        created_at=created_at,
-        expires_at=(now + timedelta(minutes=PENDING_TTL_MINUTES)).isoformat(),
-    )
+    return pending_for_meal(meal, source_message_id, conversation_id, now=now)
 
 
 def meal_match_score(text: str, meal: dict[str, Any], meal_type: str) -> int:
@@ -170,7 +187,7 @@ def meal_match_score(text: str, meal: dict[str, Any], meal_type: str) -> int:
 
 
 def meal_display_name(meal: dict[str, Any]) -> str:
-    name = str(meal.get("custom_meal_name") or (meal.get("recipes") or {}).get("title") or "")
+    name = str(meal.get("custom_meal_name") or meal.get("name") or (meal.get("recipes") or {}).get("title") or "")
     return re.sub(r"\s+", " ", name).strip()[:160]
 
 

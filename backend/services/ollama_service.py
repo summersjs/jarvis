@@ -22,6 +22,8 @@ from backend.assistant.meal_confirmation import (
     confirmation_message,
     form_of_address,
     is_meal_claim,
+    parse_ad_hoc_meal,
+    pending_for_meal,
     resolve_meal_claim,
     response_kind,
 )
@@ -43,7 +45,9 @@ from backend.assistant.email_planning import (
     parse_email_plan_request,
     reject_current_draft,
 )
-from backend.assistant.tools.registry import AssistantToolContext, select_tools
+from backend.assistant.tools.registry import AssistantToolContext, is_live_commerce_request, select_tools
+from backend.assistant.daily_planning import build_grounded_daily_plan, is_daily_planning_request
+from backend.assistant.memory import capture_explicit_memory
 from backend.core.config import LOCAL_TZ
 from backend.services.contact_service import resolve_contact_email
 from backend.prompts.jarvis import JARVIS_SYSTEM_PROMPT
@@ -120,6 +124,7 @@ def chat_with_jarvis(messages: list[dict], model: str | None = None, context: As
     prior_state = None
     resolution = None
     tool_plan = None
+    capture_explicit_memory(context.user_id, latest_user_text)
     music_intent = detect_music_intent(latest_user_text)
     if music_intent == "like_track":
         logger.info("music_intent_detected conversation_id=%s execution_id=%s intent=like_track supported=false", context.conversation_id, context.request_id)
@@ -146,10 +151,26 @@ def chat_with_jarvis(messages: list[dict], model: str | None = None, context: As
             "Context reset. Your chat history is still here, but I won't carry entities or references into the next request.",
             selected_model, [], [], capability_manifest(), context, [{"event": "context_reset", "status": "succeeded"}], "context_reset",
         )
+    if is_daily_planning_request(latest_user_text):
+        grounded = build_grounded_daily_plan(context.user_id, selected_model)
+        result = build_service_result(
+            grounded["content"], selected_model, [], [], capability_manifest(), context,
+            [{"event": "daily_state_aggregated", "status": "succeeded"}, {"event": "daily_plan_validation", **grounded["validation"]}],
+            "grounded_daily_planner",
+        )
+        result["planningTransparency"] = grounded["transparency"]
+        result["dailyPlanValidation"] = grounded["validation"]
+        return result
     email_plan_result = handle_email_plan(latest_user_text, selected_model, context)
     if email_plan_result:
         return email_plan_result
-    if context.conversation_id != "local-jarvis":
+    meal_result = handle_meal_request(latest_user_text, selected_model, context)
+    if meal_result:
+        return meal_result
+    # Grounded live-commerce reads do not need entity carry-over. Running the
+    # model context resolver first can turn "my obsessions" into a false
+    # ambiguity and prevent the evidence tool from ever executing.
+    if context.conversation_id != "local-jarvis" and not is_live_commerce_request(latest_user_text):
         prior_state = CONVERSATION_STATE_STORE.get(context.conversation_id)
         try:
             deterministic = deterministic_sensitive_resolution(latest_user_text, prior_state)
@@ -179,61 +200,6 @@ def chat_with_jarvis(messages: list[dict], model: str | None = None, context: As
         if resolution.operation_type != "write" and candidate_state is not None:
             CONVERSATION_STATE_STORE.save(candidate_state)
     manifest = capability_manifest()
-    pending_meal = PENDING_MEAL_STORE.get(context.conversation_id)
-    pending_response = response_kind(latest_user_text) if pending_meal else None
-    if pending_meal and pending_response == "no":
-        PENDING_MEAL_STORE.clear(context.conversation_id, pending_meal.confirmation_id)
-        execution = meal_state_execution(context, pending_meal, "cancelled", cancelled_message(pending_meal, context.request_id))
-        record_nonexecuted_action(execution)
-        return build_service_result(
-            execution.user_message, selected_model, [], [execution], manifest, context,
-            [{"event": "meal_confirmation_cancelled", "status": "cancelled"}], "meal_confirmation_cancelled",
-        )
-    if pending_meal and pending_response == "yes":
-        confirmed_context = replace(context, confirmed_action_id=pending_meal.confirmation_id)
-        tool_calls = [{
-            "name": "complete_meal",
-            "input": {
-                "meal_id": pending_meal.meal_id,
-                "meal_type": pending_meal.meal_type,
-                "confirmation_id": pending_meal.confirmation_id,
-            },
-        }]
-        tool_results, executions, execution_trace = execute_governed_tool_calls(tool_calls, confirmed_context)
-        PENDING_MEAL_STORE.clear(context.conversation_id, pending_meal.confirmation_id)
-        action_reply = build_action_reply(tool_results, executions, context.request_id)
-        return build_service_result(
-            action_reply or executions[0].user_message, selected_model, tool_results, executions, manifest,
-            confirmed_context, execution_trace, "confirmed_meal_action",
-        )
-    if is_meal_claim(latest_user_text):
-        try:
-            proposed_meal = resolve_meal_claim(
-                latest_user_text, context.user_id, context.source_message_id, context.conversation_id
-            )
-        except Exception:
-            proposed_meal = None
-        if proposed_meal:
-            PENDING_MEAL_STORE.put(proposed_meal)
-            message = confirmation_message(proposed_meal, context.request_id)
-            execution = meal_state_execution(context, proposed_meal, "awaiting_confirmation", message)
-            record_nonexecuted_action(execution)
-            return build_service_result(
-                message, selected_model, [], [execution], manifest, context,
-                [{"event": "meal_confirmation_requested", "status": "awaiting_confirmation"}], "meal_confirmation",
-            )
-        execution = AssistantActionExecution(
-            action_id=f"act_{context.request_id}", source_message_id=context.source_message_id,
-            conversation_id=context.conversation_id, intent="complete_meal", requested_action="complete_meal",
-            execution_status="unavailable", tool_name="complete_meal", requires_confirmation=True,
-            result=None, verification=ActionVerification(status="unavailable", summary="Today's planned meal could not be resolved."),
-            user_message="I couldn't find a matching meal in today's plan, so I did not log anything. Tell me whether it was breakfast, lunch, dinner, or a snack.",
-        )
-        record_nonexecuted_action(execution)
-        return build_service_result(
-            execution.user_message, selected_model, [], [execution], manifest, context,
-            [{"event": "meal_resolution_failed", "status": "unavailable"}], "meal_resolution_failed",
-        )
     nonexecuted_action = detect_nonexecuted_action(latest_user_text, context)
     if not nonexecuted_action and resolution is not None and prior_state is not None:
         planning_state = candidate_state or prior_state
@@ -829,6 +795,26 @@ def build_live_price_reply(user_text: str, tool_results: list[dict]) -> str:
         optional = f" Other providers not configured: {', '.join(filter(None, missing))}." if missing else ""
         return "I don't have a verified live source for that price, so I won't guess." + checked + optional
 
+    if result.get("obsessions") and not result.get("has_verified_deals"):
+        prices = "; ".join(
+            f"{offer.get('size') or 'size not listed'} — ${float(offer['price']):.2f}"
+            for offer in offers[:5]
+        )
+        return (
+            f"I checked Kroger for your saved obsession ({', '.join(result['obsessions'])}). "
+            f"I found current verified listings—{prices}—but no verified promotional price, so I won't call them deals."
+        )
+    if result.get("obsessions") and result.get("has_verified_deals"):
+        deals = result.get("deal_offers") or [offer for offer in offers if offer.get("is_deal")]
+        lines = []
+        for offer in deals[:5]:
+            regular = f" (regularly ${float(offer['regular_price']):.2f})" if offer.get("regular_price") else ""
+            lines.append(f"{offer.get('title')} {offer.get('size') or ''} — ${float(offer['price']):.2f}{regular}")
+        return (
+            f"I checked Kroger for your saved obsession ({', '.join(result['obsessions'])}). "
+            f"Verified promotion: {'; '.join(lines)}. Prices and promotion status came from Kroger's official API."
+        )
+
     lines = []
     by_size: dict[str, list[dict]] = {}
     for offer in offers:
@@ -1058,6 +1044,79 @@ def format_write_confirmation(tool_name: str | None, result: dict, request_id: s
 
 def friendly_tool_name(tool_name: str | None) -> str:
     return str(tool_name or "that action").replace("_", " ")
+
+
+def handle_meal_request(text: str, selected_model: str, context: AssistantToolContext) -> dict | None:
+    """Handle meal creation/confirmation before generic conversation resolution."""
+    manifest = capability_manifest()
+    pending_meal = PENDING_MEAL_STORE.get(context.conversation_id)
+    pending_response = response_kind(text) if pending_meal else None
+    if pending_meal and pending_response == "no":
+        PENDING_MEAL_STORE.clear(context.conversation_id, pending_meal.confirmation_id)
+        execution = meal_state_execution(context, pending_meal, "cancelled", cancelled_message(pending_meal, context.request_id))
+        record_nonexecuted_action(execution)
+        return build_service_result(execution.user_message, selected_model, [], [execution], manifest, context,
+                                    [{"event": "meal_confirmation_cancelled", "status": "cancelled"}], "meal_confirmation_cancelled")
+    if pending_meal and pending_response == "yes":
+        confirmed_context = replace(context, confirmed_action_id=pending_meal.confirmation_id)
+        calls = [{"name": "complete_meal", "input": {
+            "meal_id": pending_meal.meal_id, "meal_type": pending_meal.meal_type,
+            "confirmation_id": pending_meal.confirmation_id,
+        }}]
+        tool_results, executions, trace = execute_governed_tool_calls(calls, confirmed_context)
+        PENDING_MEAL_STORE.clear(context.conversation_id, pending_meal.confirmation_id)
+        reply = build_action_reply(tool_results, executions, context.request_id)
+        return build_service_result(reply or executions[0].user_message, selected_model, tool_results, executions,
+                                    manifest, confirmed_context, trace, "confirmed_meal_action")
+
+    parsed = parse_ad_hoc_meal(text)
+    if parsed:
+        name, meal_type, ate_claim = parsed
+        calls = [{"name": "add_meal_plan_item", "input": {
+            "meal_date": datetime.now(LOCAL_TZ).date().isoformat(), "meal_type": meal_type,
+            "custom_meal_name": name, "notes": json.dumps({"source": "jarvis_ad_hoc"}),
+        }}]
+        tool_results, executions, trace = execute_governed_tool_calls(calls, context)
+        result = (tool_results[0].get("result") or {}) if tool_results else {}
+        meal = result.get("meal")
+        if not meal or not result.get("updated"):
+            reply = build_action_reply(tool_results, executions, context.request_id) or f"I couldn't add **{name}** to today's {meal_type}."
+            return build_service_result(reply, selected_model, tool_results, executions, manifest, context, trace, "meal_creation_failed")
+        if not ate_claim:
+            return build_service_result(f"Added **{name}** to today's {meal_type}.", selected_model, tool_results,
+                                        executions, manifest, context, trace, "meal_created")
+        proposed = pending_for_meal(meal, context.source_message_id, context.conversation_id)
+        PENDING_MEAL_STORE.put(proposed)
+        message = f"Added **{name}** to today's {meal_type}. Tap **I ate it** to mark it eaten."
+        confirmation = meal_state_execution(context, proposed, "awaiting_confirmation", message)
+        record_nonexecuted_action(confirmation)
+        return build_service_result(message, selected_model, tool_results, [*executions, confirmation], manifest,
+                                    context, [*trace, {"event": "meal_confirmation_requested", "status": "awaiting_confirmation"}], "meal_created_awaiting_confirmation")
+
+    if not is_meal_claim(text):
+        return None
+    try:
+        proposed = resolve_meal_claim(text, context.user_id, context.source_message_id, context.conversation_id)
+    except Exception:
+        proposed = None
+    if proposed:
+        PENDING_MEAL_STORE.put(proposed)
+        message = confirmation_message(proposed, context.request_id)
+        execution = meal_state_execution(context, proposed, "awaiting_confirmation", message)
+        record_nonexecuted_action(execution)
+        return build_service_result(message, selected_model, [], [execution], manifest, context,
+                                    [{"event": "meal_confirmation_requested", "status": "awaiting_confirmation"}], "meal_confirmation")
+    message = "I couldn't identify the food and meal slot. Tell me, for example, ‘I ate Chobani S’mores yogurt for breakfast.’"
+    execution = AssistantActionExecution(
+        action_id=f"act_{context.request_id}", source_message_id=context.source_message_id,
+        conversation_id=context.conversation_id, intent="complete_meal", requested_action="complete_meal",
+        execution_status="unavailable", tool_name="complete_meal", requires_confirmation=True, result=None,
+        verification=ActionVerification(status="unavailable", summary="The food or meal slot could not be resolved."),
+        user_message=message,
+    )
+    record_nonexecuted_action(execution)
+    return build_service_result(message, selected_model, [], [execution], manifest, context,
+                                [{"event": "meal_resolution_failed", "status": "unavailable"}], "meal_resolution_failed")
 
 
 def meal_state_execution(context, pending, status: str, message: str) -> AssistantActionExecution:

@@ -72,3 +72,17 @@ class AssistantMediaResponseRequest(BaseModel):
     artist: str | None = Field(default=None, max_length=300)
     track_changed: bool | None = None
     command_verified: bool | None = None
+
+
+class AssistantFeedbackRequest(BaseModel):
+    message_id: str = Field(min_length=8, max_length=100)
+    rating: Literal["up", "down"]
+    reason: Literal["Missed context", "Wrong priority", "Too generic", "Incorrect fact", "Bad tone", "Too long", "Other", "Used my context", "Good priority", "Actionable", "Good tone", "Remember this style"]
+    written_feedback: str | None = Field(default=None, max_length=2000)
+    response_excerpt: str | None = Field(default=None, max_length=1000)
+    user_id: str = Field(default="john", min_length=1, max_length=80)
+
+
+class AssistantReadoutStatusRequest(BaseModel):
+    kind: Literal["morning_brief", "evening_debrief"]
+    user_id: str = Field(default="john", min_length=1, max_length=80)

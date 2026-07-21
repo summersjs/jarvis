@@ -34,6 +34,8 @@ frontend/dist-electron/
 /backend/data/assistant_conversation_state.json
 /backend/data/assistant_email_plans.json
 /backend/data/assistant_contacts.json
+/backend/data/assistant_memories.json
+/backend/data/assistant_feedback.json
 
 # Supabase / secrets
 *.key

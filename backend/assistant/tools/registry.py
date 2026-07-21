@@ -40,7 +40,7 @@ from backend.services.shopping_service import (
     update_shopping_list_item,
 )
 from backend.services.workout_service import get_next_workout_logic, get_todays_workout_summary
-from backend.services.live_price_service import search_live_prices
+from backend.services.live_price_service import search_live_prices, search_obsession_deals
 from backend.integrations.google_gmail import create_gmail_draft, gmail_error_guidance, read_gmail_message, search_gmail
 from backend.services.contact_service import resolve_contact_email
 
@@ -147,7 +147,10 @@ def select_tools(user_text: str) -> list[dict[str, Any]]:
     calls = []
     for name in select_read_tools(user_text):
         if name == "search_live_prices":
-            calls.append({"name": name, "input": {"query": extract_price_query(user_text), "retailer": extract_retailer(user_text)}})
+            price_input = {"query": extract_price_query(user_text), "retailer": extract_retailer(user_text)}
+            if "obsession" in user_text.lower():
+                price_input["use_obsessions"] = True
+            calls.append({"name": name, "input": price_input})
         elif name == "search_gmail":
             calls.append({"name": name, "input": {"query": extract_gmail_query(user_text), "include_first_body": "summar" in user_text.lower()}})
         else:
@@ -189,7 +192,7 @@ def extract_gmail_query(text: str) -> str:
 
 def is_live_commerce_request(text: str) -> bool:
     lower = text.lower()
-    commerce = any(word in lower for word in ("price", "prices", "cost", "cheapest", "cheaper", "better deal", "compare", "how much", "availability", "in stock", "nearby store", "stores near"))
+    commerce = any(word in lower for word in ("price", "prices", "cost", "cheapest", "cheaper", "deal", "deals", "compare", "how much", "availability", "in stock", "nearby store", "stores near"))
     commerce = commerce or bool(re.search(r"\bwhat did\s+(?:kroger|walmart)\s+have\b", lower))
     return commerce and not any(phrase in lower for phrase in ("estimated price", "my food vault", "i paid", "did i pay"))
 
@@ -338,6 +341,11 @@ def get_system_status_tool(_context: AssistantToolContext, _input: dict[str, Any
 
 
 def search_live_prices_tool(_context: AssistantToolContext, input_data: dict[str, Any]) -> dict[str, Any]:
+    if input_data.get("use_obsessions"):
+        return search_obsession_deals(
+            _context.user_id, str(input_data.get("location") or "") or None,
+            str(input_data.get("retailer") or "") or None,
+        )
     return search_live_prices(
         str(input_data.get("query") or ""), str(input_data.get("location") or "") or None,
         _context.user_id, str(input_data.get("retailer") or "") or None,

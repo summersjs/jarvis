@@ -3,11 +3,45 @@ from unittest.mock import patch
 
 from backend.assistant.execution import capability_manifest
 from backend.assistant.tools.registry import extract_price_query, select_tools
-from backend.services.live_price_service import _extract_retail_size, _nearest_kroger_location, _preferred_search_query, _rank_preferred_offers, search_live_prices
-from backend.services.ollama_service import build_live_price_reply, resolve_live_price_followup
+from backend.services.live_price_service import _extract_retail_size, _nearest_kroger_location, _preferred_search_query, _rank_preferred_offers, search_live_prices, search_obsession_deals
+from backend.assistant.tools.registry import AssistantToolContext
+from backend.services.ollama_service import build_live_price_reply, chat_with_jarvis, resolve_live_price_followup
 
 
 class LivePriceGateTests(unittest.TestCase):
+    @patch("backend.services.ollama_service.resolve_context")
+    @patch("backend.services.ollama_service.execute_governed_tool_calls")
+    def test_exact_obsession_prompt_bypasses_context_resolver(self, execute, resolver):
+        execute.return_value = ([{
+            "tool": "search_live_prices", "access": "read", "success": True, "result": {
+                "verified": True, "obsessions": ["red bull"], "has_verified_deals": True,
+                "deal_offers": [{"retailer": "Kroger", "title": "Red Bull Original", "size": "12 fl oz", "price": 3.00, "regular_price": 3.19, "is_deal": True, "evidence": {"provider": "kroger"}}],
+                "offers": [{"retailer": "Kroger", "title": "Red Bull Original", "size": "12 fl oz", "price": 3.00, "regular_price": 3.19, "is_deal": True, "evidence": {"provider": "kroger"}}],
+            },
+        }], [], [])
+        result = chat_with_jarvis(
+            [{"role": "user", "content": "are there any good deals based on my obsessions at kroger right now?"}],
+            context=AssistantToolContext(conversation_id="browser-conversation", request_id="request-deals"),
+        )
+        resolver.assert_not_called()
+        self.assertIn("Verified promotion", result["message"]["content"])
+
+    def test_obsession_deal_request_selects_grounded_live_search(self):
+        calls = select_tools("Are there any good deals based on my obsessions at Kroger right now?")
+        self.assertEqual(calls[0]["name"], "search_live_prices")
+        self.assertTrue(calls[0]["input"]["use_obsessions"])
+        self.assertEqual(calls[0]["input"]["retailer"], "kroger")
+
+    @patch("backend.services.live_price_service.search_live_prices")
+    @patch("backend.services.live_price_service.list_preferences")
+    def test_obsession_deals_search_only_saved_active_obsessions(self, preferences, search):
+        preferences.return_value = [{"item_keyword": "red bull", "preference_type": "obsession", "is_active": True}]
+        search.return_value = {"verified": True, "offers": [{"retailer": "Kroger", "title": "Red Bull", "price": 2.50, "evidence": {"provider": "kroger"}}], "providers": [{"provider": "kroger", "configured": True}]}
+        result = search_obsession_deals("john", retailer="kroger")
+        search.assert_called_once_with("red bull", None, "john", "kroger")
+        self.assertEqual(result["obsessions"], ["red bull"])
+        self.assertEqual(result["offers"][0]["matched_obsession"], "red bull")
+
     def test_red_bull_price_request_selects_evidence_tool(self):
         calls = select_tools("What are Red Bull prices near me?")
         self.assertEqual(calls[0]["name"], "search_live_prices")
@@ -40,6 +74,17 @@ class LivePriceGateTests(unittest.TestCase):
         }])
         self.assertIn("won't guess", reply)
         self.assertNotIn("$", reply)
+
+    def test_obsession_listing_is_not_called_a_deal_without_promo_evidence(self):
+        reply = build_live_price_reply("Any deals based on my obsessions at Kroger?", [{
+            "tool": "search_live_prices", "success": True,
+            "result": {"verified": True, "obsessions": ["red bull"], "has_verified_deals": False, "offers": [{
+                "retailer": "Kroger", "title": "Red Bull Original", "size": "8.4 fl oz", "price": 2.50,
+                "evidence": {"provider": "kroger"},
+            }]},
+        }])
+        self.assertIn("no verified promotional price", reply)
+        self.assertIn("won't call them deals", reply)
 
     def test_verified_offer_is_labeled_with_provider(self):
         reply = build_live_price_reply("Red Bull price", [{
